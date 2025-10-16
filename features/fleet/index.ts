@@ -50,6 +50,11 @@ export const fleetUtils = {
       const aVal = a[sortBy]
       const bVal = b[sortBy]
       
+      // Handle undefined values
+      if (aVal === undefined && bVal === undefined) return 0
+      if (aVal === undefined) return order === 'asc' ? 1 : -1
+      if (bVal === undefined) return order === 'asc' ? -1 : 1
+      
       if (aVal < bVal) return order === 'asc' ? -1 : 1
       if (aVal > bVal) return order === 'asc' ? 1 : -1
       return 0

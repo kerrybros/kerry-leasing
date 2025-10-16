@@ -52,11 +52,7 @@ export default function RootLayout({
           colorNeutral: '#64748b',
           borderRadius: '0.75rem', // Rounded-xl to match your cards
           fontFamily: '"Inter", sans-serif',
-          fontSize: '0.875rem',
-          fontWeightNormal: '400',
-          fontWeightMedium: '500',
-          fontWeightSemibold: '600',
-          fontWeightBold: '700'
+          fontSize: '0.875rem'
         },
         elements: {
           // Modal and form container styling
@@ -149,10 +145,10 @@ export default function RootLayout({
           }
         }
       }}
-      fallbackRedirectUrl="/portal"
+      signInFallbackRedirectUrl="/portal"
+      signUpFallbackRedirectUrl="/portal"
       signInUrl="/"
       signUpUrl="/"
-      allowedRedirectOrigins={['http://localhost:3001', 'https://your-domain.com']}
         >
           <html lang="en">
             <body className={inter.className}>

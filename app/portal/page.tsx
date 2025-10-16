@@ -9,7 +9,7 @@ import { useFleetData, useFleetStats } from '@/lib/hooks/use-fleet-data'
 import { PortalHeader } from '@/components/layout/portal-header'
 import { LoadingState, DataLoadingState } from '@/components/layout/loading-state'
 import { ErrorState } from '@/components/layout/error-state'
-import { PortalAdvancedErrorBoundary } from '@/components/errors/advanced-error-boundary'
+// import { PortalAdvancedErrorBoundary } from '@/components/errors/advanced-error-boundary'
 import { FleetOverviewCard, MaintenanceCard, DashboardCard } from '@/components/dashboard/stats-card'
 import { MaintenanceActivity, NoDataState } from '@/components/dashboard/maintenance-activity'
 
@@ -52,7 +52,7 @@ export default function PortalPage() {
   // All statistics are now handled by the useFleetStats hook
 
   return (
-    <PortalAdvancedErrorBoundary>
+    <div>
       <div className="min-h-screen bg-gradient-to-br from-slate-100 via-blue-50 to-gray-100">
         <PortalHeader customerConfig={customerConfig} user={user} />
 
@@ -107,6 +107,6 @@ export default function PortalPage() {
             {!dataLoading && fleetStats.totalVehicles === 0 && <NoDataState />}
         </main>
       </div>
-    </PortalAdvancedErrorBoundary>
+    </div>
   )
 }

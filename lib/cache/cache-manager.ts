@@ -288,7 +288,7 @@ class CacheManager {
       config: this.config,
       stats: this.stats,
       entries: Array.from(this.cache.entries()).map(([key, entry]) => ({
-        key,
+        cacheKey: key,
         ...entry,
       })),
       timestamp: Date.now(),

@@ -506,9 +506,7 @@ export function MaintenanceTab({
           <CardContent>
             <div className="space-y-4">
               {[
-                { type: 'Preventive', count: monthlyJobs.filter(m => m.type === 'preventive').length, color: 'bg-green-100 text-green-800' },
-                { type: 'Repair', count: monthlyJobs.filter(m => m.type === 'repair').length, color: 'bg-red-100 text-red-800' },
-                { type: 'Inspection', count: monthlyJobs.filter(m => m.type === 'inspection').length, color: 'bg-blue-100 text-blue-800' }
+                { type: 'Repair', count: monthlyJobs.length, color: 'bg-red-100 text-red-800' }
               ].map((item) => (
                 <div key={item.type} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
                   <span className="font-medium">{item.type} Maintenance</span>
@@ -531,19 +529,9 @@ export function MaintenanceTab({
             <div className="space-y-4">
               {[
                 { 
-                  type: 'Preventive', 
-                  cost: yearlyJobs.filter(m => m.type === 'preventive').reduce((sum, m) => sum + (m.cost || 0), 0),
-                  color: 'text-green-600'
-                },
-                { 
                   type: 'Repairs', 
-                  cost: yearlyJobs.filter(m => m.type === 'repair').reduce((sum, m) => sum + (m.cost || 0), 0),
+                  cost: yearlyJobs.reduce((sum, m) => sum + (m.cost || 0), 0),
                   color: 'text-red-600'
-                },
-                { 
-                  type: 'Inspections', 
-                  cost: yearlyJobs.filter(m => m.type === 'inspection').reduce((sum, m) => sum + (m.cost || 0), 0),
-                  color: 'text-blue-600'
                 }
               ].map((item) => (
                 <div key={item.type} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">

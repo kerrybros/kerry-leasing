@@ -1,6 +1,6 @@
 'use client'
 
-import { use, useMemo, useCallback } from 'react'
+import { use, useMemo, useCallback, Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
@@ -40,7 +40,7 @@ interface MaintenanceRecord {
   date: Date
   status: 'completed' | 'in_progress' | 'scheduled'
   priority: 'low' | 'medium' | 'high'
-  laborHours: number
+  laborHours?: number
 }
 
 interface PerformanceData {
@@ -54,7 +54,7 @@ interface PerformanceData {
 
 type TabType = 'maintenance' | 'performance' | 'idle'
 
-export default function UnitDetailPage({ params }: { params: Promise<{ vehicleNumber: string }> }) {
+function UnitDetailPageContent({ params }: { params: Promise<{ vehicleNumber: string }> }) {
   const resolvedParams = use(params)
   const searchParams = useSearchParams()
   const router = useRouter()
@@ -381,5 +381,13 @@ export default function UnitDetailPage({ params }: { params: Promise<{ vehicleNu
         </main>
       )}
     </div>
+  )
+}
+
+export default function UnitDetailPage({ params }: { params: Promise<{ vehicleNumber: string }> }) {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <UnitDetailPageContent params={params} />
+    </Suspense>
   )
 }

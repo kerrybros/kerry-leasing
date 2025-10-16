@@ -2,7 +2,7 @@
 
 import { UserButton, useUser } from '@clerk/nextjs'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback, Suspense } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useCustomer } from '@/lib/use-customer'
@@ -50,7 +50,7 @@ interface UnitDetails {
 
 type TabType = 'overview' | 'maintenance' | 'fuel' | 'idle'
 
-export default function DashboardPage() {
+function DashboardPageContent() {
   const { user, isLoaded } = useUser()
   const { customerConfig, dataService, isLoading: customerLoading, error: customerError } = useCustomer()
   const router = useRouter()
@@ -400,5 +400,13 @@ export default function DashboardPage() {
         />
       )}
     </div>
+  )
+}
+
+export default function DashboardPage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <DashboardPageContent />
+    </Suspense>
   )
 }

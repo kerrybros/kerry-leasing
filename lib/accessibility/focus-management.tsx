@@ -337,7 +337,7 @@ export function AccessibleModal({
 
       {/* Modal */}
       <div
-        ref={modalRef}
+        ref={modalRef as React.RefObject<HTMLDivElement>}
         className={`
           relative bg-white rounded-lg shadow-xl max-w-md w-full mx-4 p-6
           focus:outline-none
