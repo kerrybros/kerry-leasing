@@ -1,0 +1,21 @@
+customer_name,id,unit_number,type,description,date,status,priority,labor_hours
+Wolverine Packing,M001,1,preventive,Oil change and DEF top-off,2024-10-01,completed,medium,2.5
+Wolverine Packing,M002,2,preventive,DOT inspection and tire rotation,2024-09-28,completed,low,3.0
+Wolverine Packing,M003,3,repair,EGR valve replacement,2024-10-05,completed,high,8.5
+Wolverine Packing,M004,4,preventive,50k mile service,2024-09-25,completed,medium,4.0
+Wolverine Packing,M005,5,inspection,Annual safety inspection,2024-09-30,completed,medium,1.5
+Wolverine Packing,M006,6,repair,Transmission rebuild,2024-09-20,completed,high,16.0
+Wolverine Packing,M007,7,preventive,Oil change and filter,2024-10-02,completed,low,2.0
+Wolverine Packing,M008,8,repair,Brake system overhaul,2024-09-18,completed,high,12.0
+Wolverine Packing,M009,9,repair,Cooling system leak repair,2024-10-03,completed,high,10.0
+Wolverine Packing,M010,10,preventive,Air filter and cabin filter replacement,2024-09-22,completed,low,1.0
+Wolverine Packing,M011,1,repair,AC compressor replacement,2024-09-10,completed,medium,6.0
+Wolverine Packing,M012,2,repair,Turbo actuator repair,2024-09-15,completed,high,5.5
+Wolverine Packing,M013,3,preventive,Oil change,2024-08-20,completed,low,2.0
+Wolverine Packing,M014,4,repair,Fuel injector cleaning,2024-08-25,completed,medium,4.0
+Wolverine Packing,M015,5,preventive,Tire replacement - all positions,2024-08-30,completed,high,8.0
+Wolverine Packing,M016,6,preventive,Brake inspection,2024-08-15,completed,low,2.5
+Wolverine Packing,M017,7,repair,Engine diagnostic and repair,2024-08-12,completed,high,14.0
+Wolverine Packing,M018,8,preventive,Transmission service,2024-08-05,completed,medium,4.5
+Wolverine Packing,M019,9,inspection,DOT compliance check,2024-08-18,completed,medium,1.5
+Wolverine Packing,M020,10,preventive,Coolant flush and refill,2024-08-08,completed,low,3.0

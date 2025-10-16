@@ -1,0 +1,13 @@
+customer_name,vehicle_id,make,model,year,status,mileage,location,last_service_date,next_service_date
+Kerry Brothers,KB001,Ford,F-350,2022,active,45230,Main Yard,2024-09-15,2024-12-15
+Kerry Brothers,KB002,Chevrolet,Silverado 2500,2021,active,52100,Route 12,2024-08-22,2024-11-22
+Kerry Brothers,KB003,RAM,3500,2023,maintenance,38900,Service Bay 1,2024-10-01,2024-10-15
+Kerry Brothers,KB004,Ford,F-250,2020,active,67800,Downtown,2024-09-30,2024-12-30
+Kerry Brothers,KB005,Chevrolet,Express 3500,2022,active,41200,Warehouse,2024-09-10,2024-12-10
+Kerry Brothers,KB006,Ford,Transit 350,2021,inactive,78900,Storage,2024-07-15,2024-10-15
+Kerry Brothers,KB007,RAM,ProMaster,2023,active,22100,Route 5,2024-10-05,2025-01-05
+Kerry Brothers,KB008,Ford,F-450,2022,active,35600,Main Yard,2024-09-20,2024-12-20
+Kerry Brothers,KB009,Chevrolet,Silverado 3500,2020,maintenance,89200,Service Bay 2,2024-10-02,2024-10-16
+Kerry Brothers,KB010,Ford,E-350,2019,active,95400,Route 8,2024-08-15,2024-11-15
+Kerry Brothers,KB011,RAM,2500,2023,active,18900,New Delivery,2024-10-01,2025-01-01
+Kerry Brothers,KB012,Ford,F-550,2021,active,56700,Highway Route,2024-09-25,2024-12-25

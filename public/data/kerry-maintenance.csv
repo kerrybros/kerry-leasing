@@ -1,0 +1,18 @@
+customer_name,id,vehicle_id,type,description,date,cost,status,priority
+Kerry Brothers,M001,KB001,preventive,Oil change and filter replacement,2024-09-15,145.50,completed,medium
+Kerry Brothers,M002,KB002,preventive,Tire rotation and brake inspection,2024-08-22,89.99,completed,low
+Kerry Brothers,M003,KB003,repair,Transmission fluid leak repair,2024-10-01,1250.00,in_progress,high
+Kerry Brothers,M004,KB004,preventive,30k mile service,2024-09-30,320.75,completed,medium
+Kerry Brothers,M005,KB005,inspection,DOT annual inspection,2024-09-10,125.00,completed,medium
+Kerry Brothers,M006,KB006,repair,Engine diagnostic and repair,2024-07-15,2100.00,completed,high
+Kerry Brothers,M007,KB007,preventive,Oil change,2024-10-05,135.00,completed,low
+Kerry Brothers,M008,KB008,preventive,Brake pad replacement,2024-09-20,285.50,completed,medium
+Kerry Brothers,M009,KB009,repair,Cooling system overhaul,2024-10-02,1850.00,in_progress,high
+Kerry Brothers,M010,KB010,preventive,Air filter replacement,2024-08-15,45.99,completed,low
+Kerry Brothers,M011,KB011,preventive,First service - 5k miles,2024-10-01,175.00,completed,medium
+Kerry Brothers,M012,KB012,preventive,Scheduled maintenance,2024-09-25,225.00,completed,medium
+Kerry Brothers,M013,KB001,preventive,Winter prep service,2024-12-15,195.00,scheduled,medium
+Kerry Brothers,M014,KB002,preventive,Brake inspection,2024-11-22,75.00,scheduled,low
+Kerry Brothers,M015,KB004,preventive,Oil change,2024-12-30,145.50,scheduled,low
+Kerry Brothers,M016,KB005,preventive,Transmission service,2024-12-10,385.00,scheduled,medium
+Kerry Brothers,M017,KB007,preventive,15k mile service,2025-01-05,275.00,scheduled,medium

@@ -1,0 +1,11 @@
+customer_name,unit_number,make,model,year,status,mileage,location,last_service_date,next_service_date
+Wolverine Packing,1,Freightliner,Cascadia,2020,active,145230,Loading Dock A,2024-09-15,2024-12-15
+Wolverine Packing,2,Kenworth,T680,2021,active,132100,Route 94,2024-08-22,2024-11-22
+Wolverine Packing,3,Peterbilt,579,2022,maintenance,98900,Service Bay 1,2024-10-01,2024-10-15
+Wolverine Packing,4,Volvo,VNL,2019,active,167800,I-75 North,2024-09-30,2024-12-30
+Wolverine Packing,5,Mack,Anthem,2021,active,121200,Distribution Center,2024-09-10,2024-12-10
+Wolverine Packing,6,International,LT,2020,inactive,178900,Yard Storage,2024-07-15,2024-10-15
+Wolverine Packing,7,Freightliner,Cascadia,2023,active,82100,Route 23,2024-10-05,2025-01-05
+Wolverine Packing,8,Kenworth,W900,2018,active,195600,Long Haul,2024-09-20,2024-12-20
+Wolverine Packing,9,Peterbilt,389,2019,maintenance,189200,Service Bay 2,2024-10-02,2024-10-16
+Wolverine Packing,10,Volvo,VNL780,2022,active,105400,Regional Route,2024-08-15,2024-11-15
