@@ -229,8 +229,8 @@ Comprehensive testing strategy:
 NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN=
 
 # Clerk Authentication (required)
-NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=
-CLERK_SECRET_KEY=
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_your_publishable_key_here
+CLERK_SECRET_KEY=sk_test_your_secret_key_here
 
 # Optional: Performance monitoring
 NEXT_PUBLIC_PERFORMANCE_MONITORING=true
@@ -246,9 +246,28 @@ Each customer can be configured with:
 ## 🚀 **Deployment**
 
 ### **Vercel (Recommended)**
-1. Connect your Git repository to Vercel
-2. Add environment variables in Vercel dashboard
-3. Deploy automatically on Git push
+
+**⚠️ IMPORTANT: Add Environment Variables First**
+
+Before deploying, you must add these environment variables in your Vercel project:
+
+1. **Go to Vercel Dashboard** → Your Project → **Settings** → **Environment Variables**
+
+2. **Add these required variables:**
+   ```
+   NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = pk_test_your_key_here
+   CLERK_SECRET_KEY = sk_test_your_secret_here
+   ```
+
+3. **Get your Clerk keys:**
+   - Visit [dashboard.clerk.com](https://dashboard.clerk.com/)
+   - Go to **API Keys** section
+   - Copy your publishable key and secret key
+
+4. **Deploy Steps:**
+   - Connect your Git repository to Vercel
+   - Add environment variables (above)
+   - Deploy automatically on Git push
 
 ### **Other Platforms**
 The application is compatible with:
