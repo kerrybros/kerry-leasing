@@ -19,8 +19,28 @@ export class CustomerDataService {
 
   // Filter CSV data for specific customer
   async getCustomerFleetData(): Promise<FleetVehicle[]> {
-    // Temporarily return mock data immediately to fix loading issues
-    console.log('CustomerDataService: Returning mock fleet data immediately')
+    // Use real Wolverine data with fallback to mock data
+    if (this.wolverineService) {
+      try {
+        // Set a reasonable timeout to prevent hanging
+        const timeoutMs = 10000 // 10 seconds
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error('Fleet data fetch timeout - using fallback')), timeoutMs)
+        })
+        
+        const dataPromise = this.wolverineService.getFleetVehicles()
+        const vehicles = await Promise.race([dataPromise, timeoutPromise])
+        
+        if (vehicles && Array.isArray(vehicles) && vehicles.length > 0) {
+          const validatedVehicles = await this.validateFleetData(vehicles)
+          return validatedVehicles
+        }
+      } catch (error) {
+        console.warn('Real fleet data failed, using mock data fallback')
+      }
+    }
+    
+    // Fallback to mock data if real data fails
     return this.getMockFleetData()
     
     // Fallback to CSV parsing for other customers
@@ -59,9 +79,31 @@ export class CustomerDataService {
   }
 
   async getCustomerMaintenanceData(): Promise<MaintenanceRecord[]> {
-    // Temporarily return mock data immediately to fix loading issues
-    console.log('CustomerDataService: Returning mock maintenance data immediately')
-    return this.getMockMaintenanceData()
+    // Use real Wolverine maintenance data - NO MORE MOCK DATA for repairs/maintenance
+    if (this.wolverineService) {
+      try {
+        // Set a reasonable timeout to prevent hanging
+        const timeoutMs = 10000 // 10 seconds
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error('Maintenance data fetch timeout')), timeoutMs)
+        })
+        
+        const dataPromise = this.wolverineService.getMaintenanceRecords()
+        const records = await Promise.race([dataPromise, timeoutPromise])
+        
+        if (records && Array.isArray(records)) {
+          const validatedRecords = await this.validateMaintenanceData(records)
+          return validatedRecords
+        }
+      } catch (error) {
+        console.error('Failed to load real maintenance data')
+        // Return empty array instead of mock data for maintenance
+        return []
+      }
+    }
+    
+    // Return empty array if no real data available - NO MOCK DATA for maintenance
+    return []
     
     // Fallback to CSV parsing for other customers
     try {
@@ -145,11 +187,9 @@ export class CustomerDataService {
 
   // Validation methods
   private async validateFleetData(vehicles: any[]): Promise<FleetVehicle[]> {
-    console.log('validateFleetData called with:', typeof vehicles, Array.isArray(vehicles), vehicles?.length)
-    
     // Handle undefined or null data gracefully
     if (!vehicles || !Array.isArray(vehicles)) {
-      console.warn('Fleet data is not an array or is undefined:', vehicles)
+      console.warn('Fleet data is not an array or is undefined')
       return []
     }
 
@@ -161,7 +201,6 @@ export class CustomerDataService {
       
       // Skip null/undefined vehicles
       if (!vehicle) {
-        console.warn(`Skipping null/undefined vehicle at index ${i}`)
         continue
       }
 
@@ -170,7 +209,7 @@ export class CustomerDataService {
         const transformedVehicle = {
           ...vehicle,
           // Add required fields that might be missing
-          customerId: this.config.id,
+          customerId: this.customerConfig.id,
           createdAt: now,
           updatedAt: now,
           // Ensure status is valid
@@ -198,25 +237,19 @@ export class CustomerDataService {
         if (result.success) {
           validatedVehicles.push(result.data)
         } else {
-          console.warn(`Invalid fleet vehicle data at index ${i}:`, result.error)
-          console.warn('Vehicle data:', JSON.stringify(transformedVehicle, null, 2))
           // Continue processing other vehicles instead of failing completely
         }
       } catch (error) {
-        console.error(`Error validating vehicle at index ${i}:`, error)
-        console.error('Vehicle data:', JSON.stringify(vehicle, null, 2))
         // Continue processing other vehicles
       }
     }
     
-    console.log(`Validated ${validatedVehicles.length} out of ${vehicles.length} vehicles`)
     return validatedVehicles
   }
 
   private async validateMaintenanceData(records: any[]): Promise<MaintenanceRecord[]> {
     // Handle undefined or null data gracefully
     if (!records || !Array.isArray(records)) {
-      console.warn('Maintenance data is not an array or is undefined:', records)
       return []
     }
 
@@ -226,7 +259,6 @@ export class CustomerDataService {
     for (const record of records) {
       // Skip null/undefined records
       if (!record) {
-        console.warn('Skipping null/undefined maintenance record')
         continue
       }
 
@@ -235,7 +267,7 @@ export class CustomerDataService {
         const transformedRecord = {
           ...record,
           // Add required fields that might be missing
-          customerId: this.config.id,
+          customerId: this.customerConfig.id,
           createdAt: now,
           updatedAt: now,
           // Ensure required fields are present
@@ -271,13 +303,9 @@ export class CustomerDataService {
         if (result.success) {
           validatedRecords.push(result.data)
         } else {
-          console.warn(`Invalid maintenance record data:`, result.error)
-          console.warn('Record data:', JSON.stringify(transformedRecord, null, 2))
           // Continue processing other records instead of failing completely
         }
       } catch (error) {
-        console.error(`Error validating maintenance record:`, error)
-        console.error('Record data:', JSON.stringify(record, null, 2))
         // Continue processing other records
       }
     }
@@ -300,7 +328,7 @@ export class CustomerDataService {
         lastService: new Date('2024-09-15'),
         nextService: new Date('2024-12-15'),
         location: 'Main Depot',
-        customerId: this.config.id,
+        customerId: this.customerConfig.id,
         createdAt: now,
         updatedAt: now
       },
@@ -315,7 +343,7 @@ export class CustomerDataService {
         lastService: new Date('2024-10-01'),
         nextService: new Date('2024-10-15'),
         location: 'Service Center',
-        customerId: this.config.id,
+        customerId: this.customerConfig.id,
         createdAt: now,
         updatedAt: now
       },
@@ -330,7 +358,7 @@ export class CustomerDataService {
         lastService: new Date('2024-09-20'),
         nextService: new Date('2024-12-20'),
         location: 'Route 95',
-        customerId: this.config.id,
+        customerId: this.customerConfig.id,
         createdAt: now,
         updatedAt: now
       }
@@ -352,7 +380,7 @@ export class CustomerDataService {
         status: 'completed',
         priority: 'medium',
         cost: 150,
-        customerId: this.config.id,
+        customerId: this.customerConfig.id,
         createdAt: now,
         updatedAt: now
       },
@@ -368,7 +396,7 @@ export class CustomerDataService {
         status: 'scheduled',
         priority: 'high',
         cost: 300,
-        customerId: this.config.id,
+        customerId: this.customerConfig.id,
         createdAt: now,
         updatedAt: now
       },
@@ -384,7 +412,7 @@ export class CustomerDataService {
         status: 'in_progress',
         priority: 'low',
         cost: 200,
-        customerId: this.config.id,
+        customerId: this.customerConfig.id,
         createdAt: now,
         updatedAt: now
       }

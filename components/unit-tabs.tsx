@@ -71,13 +71,7 @@ export function MaintenanceTab({
     r.date.getMonth() === currentMonth
   ).length // All completed orders are repairs
 
-  // Debug logging for repair count mismatch
-  console.log('=== REPAIR COUNT DEBUG ===')
-  console.log('Total maintenance records:', maintenanceRecords.length)
-  console.log('Completed records:', completedRecords.length)
-  console.log('YTD repairs (2025):', ytdRepairs)
-  console.log('This month repairs:', thisMonthRepairs)
-  console.log('All records should match YTD count:', maintenanceRecords.length === ytdRepairs)
+  // Calculate repair statistics
 
   const handleRecordClick = (record: MaintenanceRecord) => {
     setSelectedRecord(record)

@@ -64,7 +64,7 @@ export default function PortalPage() {
           </div>
           <h2 className="text-xl font-semibold text-slate-800 mb-2">Access Not Configured</h2>
           <p className="text-slate-600 mb-4">
-            Your account doesn't have fleet access configured. Please contact support.
+            Your account doesn&apos;t have fleet access configured. Please contact support.
           </p>
           <UserButton afterSignOutUrl="/" />
         </div>

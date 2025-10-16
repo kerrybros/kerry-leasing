@@ -332,7 +332,7 @@ export class WolverineDataService {
         
         
             const completedDate = this.parseDate(record.dateActionCompleted)
-            if (!completedDate || !this.isAtLeastOneWeekOld(completedDate)) {
+            if (!completedDate) {
               return
             }
 
@@ -380,6 +380,7 @@ export class WolverineDataService {
           return {
             id: `W${String(index + 1).padStart(4, '0')}`,
             vehicleId: group.unit,
+            vehicleNumber: group.unit, // Add vehicleNumber field for filtering
             order: group.order,
             type: 'repair' as const, // All orders are repairs
             description: `Service Work Completed`,
@@ -489,11 +490,6 @@ export class WolverineDataService {
     }
   }
 
-  private isAtLeastOneWeekOld(date: Date): boolean {
-    const oneWeekAgo = new Date()
-    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7)
-    return date <= oneWeekAgo
-  }
 
   private getRandomPastDate(daysBack: number): Date {
     const date = new Date()

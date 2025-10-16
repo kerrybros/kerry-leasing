@@ -57,13 +57,13 @@ export default function DashboardPage() {
   const searchParams = useSearchParams()
   
   // Get initial tab from URL or default to overview
-  const getInitialTab = (): TabType => {
+  const getInitialTab = useCallback((): TabType => {
     const tabParam = searchParams.get('tab')
     if (tabParam && ['overview', 'maintenance', 'fuel', 'idle'].includes(tabParam)) {
       return tabParam as TabType
     }
     return 'overview'
-  }
+  }, [searchParams])
   
   const [activeTab, setActiveTab] = useState<TabType>(getInitialTab())
   const [fleetData, setFleetData] = useState<FleetVehicle[]>([])
@@ -175,7 +175,7 @@ export default function DashboardPage() {
     
     window.addEventListener('popstate', handlePopState)
     return () => window.removeEventListener('popstate', handlePopState)
-  }, [searchParams])
+  }, [searchParams, getInitialTab])
 
   const openUnitInNewTab = (unit: UnitDetails) => {
     // Create URL with unit data
@@ -212,7 +212,7 @@ export default function DashboardPage() {
           </div>
           <h2 className="text-xl font-semibold text-slate-800 mb-2">Access Not Configured</h2>
           <p className="text-slate-600 mb-4">
-            Your account doesn't have fleet access configured. Please contact support.
+            Your account doesn&apos;t have fleet access configured. Please contact support.
           </p>
           <UserButton afterSignOutUrl="/" />
         </div>

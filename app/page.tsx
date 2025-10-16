@@ -232,7 +232,7 @@ export default function HomePage() {
                   </svg>
                 </div>
                 <p className="text-slate-600">
-                  We've sent password reset instructions to <strong>{email}</strong>
+                  We&apos;ve sent password reset instructions to <strong>{email}</strong>
                 </p>
                 <Button 
                   onClick={resetForm}

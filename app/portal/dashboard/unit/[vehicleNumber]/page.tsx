@@ -61,13 +61,13 @@ export default function UnitDetailPage({ params }: { params: Promise<{ vehicleNu
   const { customerConfig } = useCustomer()
   
   // Get initial tab from URL or default to maintenance
-  const getInitialTab = (): TabType => {
+  const getInitialTab = useCallback((): TabType => {
     const tabParam = searchParams.get('tab')
     if (tabParam && ['maintenance', 'performance', 'idle'].includes(tabParam)) {
       return tabParam as TabType
     }
     return 'maintenance'
-  }
+  }, [searchParams])
   
   const [activeTab, setActiveTab] = useState<TabType>(getInitialTab())
   const [maintenanceRecords, setMaintenanceRecords] = useState<MaintenanceRecord[]>([])
@@ -77,6 +77,15 @@ export default function UnitDetailPage({ params }: { params: Promise<{ vehicleNu
   
   // Memoize unit number to prevent unnecessary re-renders
   const unitNumber = useMemo(() => resolvedParams.vehicleNumber, [resolvedParams.vehicleNumber])
+  
+  // Clean up URL by removing data parameter if present
+  useEffect(() => {
+    const url = new URL(window.location.href)
+    if (url.searchParams.has('data')) {
+      url.searchParams.delete('data')
+      window.history.replaceState({}, '', url.toString())
+    }
+  }, [])
 
   // Memoize the data fetching function
   const fetchUnitAndMaintenanceData = useCallback(async () => {
@@ -137,14 +146,19 @@ export default function UnitDetailPage({ params }: { params: Promise<{ vehicleNu
         
         // Fetch maintenance records for this specific unit
         const allMaintenanceRecords = await dataService.getCustomerMaintenanceData()
-        console.log('All maintenance records:', allMaintenanceRecords.length)
-        console.log('Looking for unit:', unitNumber)
-        console.log('Sample records:', allMaintenanceRecords.slice(0, 3).map(r => ({ id: r.id, vehicleId: r.vehicleId, description: r.description })))
         
-        const unitMaintenanceRecords = allMaintenanceRecords.filter(record => 
-          record.vehicleId === unitNumber
-        )
-        console.log('Filtered maintenance records for unit', unitNumber, ':', unitMaintenanceRecords.length)
+        const unitMaintenanceRecords = allMaintenanceRecords.filter(record => {
+          // Handle different unit number formats from CSV
+          const recordUnit = record.vehicleId || record.vehicleNumber || ''
+          const cleanRecordUnit = recordUnit.replace(/^="|"$/g, '').trim()
+          const finalRecordUnit = cleanRecordUnit.startsWith('=') ? cleanRecordUnit.substring(1) : cleanRecordUnit
+          
+          // Check multiple possible matches
+          return recordUnit === unitNumber || 
+                 cleanRecordUnit === unitNumber || 
+                 finalRecordUnit === unitNumber ||
+                 record.vehicleNumber === unitNumber
+        })
         
         // Only use real maintenance records, no mock data
         setMaintenanceRecords(unitMaintenanceRecords)
@@ -233,7 +247,7 @@ export default function UnitDetailPage({ params }: { params: Promise<{ vehicleNu
     
     window.addEventListener('popstate', handlePopState)
     return () => window.removeEventListener('popstate', handlePopState)
-  }, [searchParams])
+  }, [searchParams, getInitialTab])
 
   if (!customerConfig || loading || !unit) {
     return (
