@@ -1,6 +1,6 @@
 // Tab Components for Dashboard
 
-import { useState, useMemo, useCallback } from 'react'
+import React, { useState, useMemo, useCallback } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { CustomerConfig } from '@/lib/customer-config'
@@ -32,6 +32,7 @@ interface UnitDetails {
   model: string
   year: number
   status: string
+  type: string
   mileage: number
   mpg: number
   idlePercent: number
@@ -236,7 +237,7 @@ export function OverviewTab({
               </div>
               <div className="w-12 h-12 bg-orange-100 rounded-lg flex items-center justify-center">
                 <svg className="w-6 h-6 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
               </div>
             </div>
@@ -280,9 +281,6 @@ export function OverviewTab({
                         <span>{repair.date.toLocaleDateString()}</span>
                         <span>{repair.technician}</span>
                       </div>
-                    </div>
-                    <div className="text-right">
-                      <p className="font-semibold text-slate-900">${repair.cost.toLocaleString()}</p>
                     </div>
                   </div>
                 ))
@@ -374,6 +372,9 @@ export function MaintenanceTab({
   onUnitClick: (unit: UnitDetails) => void
   onOpenInNewTab: (unit: UnitDetails) => void
 }) {
+  const [unitSearchTerm, setUnitSearchTerm] = useState<string>('')
+  const [sortField, setSortField] = useState<string>('')
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
   const thisMonth = new Date().getMonth()
   const thisYear = new Date().getFullYear()
   
@@ -384,6 +385,55 @@ export function MaintenanceTab({
   const yearlyJobs = maintenanceData.filter(m => 
     m.date.getFullYear() === thisYear
   )
+
+  // Handle sorting
+  const handleSort = (field: string) => {
+    if (sortField === field) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortField(field)
+      setSortDirection('asc')
+    }
+  }
+
+  // Filter and sort units
+  const filteredAndSortedUnits = useMemo(() => {
+    let filtered = unitDetails
+    
+    // Apply search filter
+    if (unitSearchTerm.trim()) {
+      const searchLower = unitSearchTerm.toLowerCase()
+      filtered = filtered.filter(unit => 
+        unit.vehicleNumber.toLowerCase().includes(searchLower)
+      )
+    }
+    
+    // Apply sorting
+    if (sortField) {
+      filtered = [...filtered].sort((a, b) => {
+        let aVal: any = a[sortField as keyof UnitDetails]
+        let bVal: any = b[sortField as keyof UnitDetails]
+        
+        // Handle different data types
+        if (sortField === 'vehicleNumber' || sortField === 'totalRepairs' || sortField === 'year') {
+          aVal = parseInt(aVal) || 0
+          bVal = parseInt(bVal) || 0
+        } else if (sortField === 'make' || sortField === 'model') {
+          aVal = aVal?.toString().toLowerCase() || ''
+          bVal = bVal?.toString().toLowerCase() || ''
+        } else if (sortField === 'lastService') {
+          aVal = aVal ? new Date(aVal).getTime() : 0
+          bVal = bVal ? new Date(bVal).getTime() : 0
+        }
+        
+        if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1
+        if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1
+        return 0
+      })
+    }
+    
+    return filtered
+  }, [unitDetails, unitSearchTerm, sortField, sortDirection])
 
   return (
     <div className="space-y-8">
@@ -422,16 +472,6 @@ export function MaintenanceTab({
           </CardContent>
         </Card>
         
-        <Card>
-          <CardContent className="p-6">
-            <div className="text-center">
-              <p className="text-2xl font-bold" style={{ color: customerConfig.branding.primaryColor }}>
-                ${monthlyJobs.reduce((sum, m) => sum + (m.cost || 0), 0).toLocaleString()}
-              </p>
-              <p className="text-sm text-slate-600">Monthly Cost</p>
-            </div>
-          </CardContent>
-        </Card>
       </div>
 
       {/* Unit List with Repair Data */}
@@ -445,22 +485,141 @@ export function MaintenanceTab({
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="overflow-x-auto">
+          {/* Search Input */}
+          <div className="mb-4">
+            <div className="relative">
+              <svg className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              <input
+                type="text"
+                placeholder="Search by unit number..."
+                value={unitSearchTerm}
+                onChange={(e) => setUnitSearchTerm(e.target.value)}
+                className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-sm"
+              />
+              {unitSearchTerm && (
+                <button
+                  onClick={() => setUnitSearchTerm('')}
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              )}
+            </div>
+            {unitSearchTerm && (
+              <div className="text-sm text-slate-600 mb-2">
+                Showing {filteredAndSortedUnits.length} of {unitDetails.length} units
+              </div>
+            )}
+          </div>
+          <div className="overflow-x-auto max-h-96 overflow-y-auto">
             <table className="w-full text-sm">
-              <thead>
+              <thead className="sticky top-0 bg-white z-10">
                 <tr className="border-b border-slate-200">
-                  <th className="text-left py-3 px-4 font-medium text-slate-700">Unit</th>
-                  <th className="text-left py-3 px-4 font-medium text-slate-700">Make/Model</th>
-                  <th className="text-left py-3 px-4 font-medium text-slate-700">Total Repairs</th>
-                  <th className="text-left py-3 px-4 font-medium text-slate-700">Last Service</th>
+                  <th 
+                    className="text-left py-3 px-4 font-medium text-slate-700 cursor-pointer hover:bg-slate-50 select-none"
+                    onClick={() => handleSort('vehicleNumber')}
+                  >
+                    <div className="flex items-center gap-1">
+                      Unit
+                      {sortField === 'vehicleNumber' && (
+                        <svg className={`w-4 h-4 ${sortDirection === 'asc' ? 'rotate-0' : 'rotate-180'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                        </svg>
+                      )}
+                    </div>
+                  </th>
+                  <th 
+                    className="text-left py-3 px-4 font-medium text-slate-700 cursor-pointer hover:bg-slate-50 select-none"
+                    onClick={() => handleSort('year')}
+                  >
+                    <div className="flex items-center gap-1">
+                      Year
+                      {sortField === 'year' && (
+                        <svg className={`w-4 h-4 ${sortDirection === 'asc' ? 'rotate-0' : 'rotate-180'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                        </svg>
+                      )}
+                    </div>
+                  </th>
+                  <th 
+                    className="text-left py-3 px-4 font-medium text-slate-700 cursor-pointer hover:bg-slate-50 select-none"
+                    onClick={() => handleSort('make')}
+                  >
+                    <div className="flex items-center gap-1">
+                      Make
+                      {sortField === 'make' && (
+                        <svg className={`w-4 h-4 ${sortDirection === 'asc' ? 'rotate-0' : 'rotate-180'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                        </svg>
+                      )}
+                    </div>
+                  </th>
+                  <th 
+                    className="text-left py-3 px-4 font-medium text-slate-700 cursor-pointer hover:bg-slate-50 select-none"
+                    onClick={() => handleSort('model')}
+                  >
+                    <div className="flex items-center gap-1">
+                      Model
+                      {sortField === 'model' && (
+                        <svg className={`w-4 h-4 ${sortDirection === 'asc' ? 'rotate-0' : 'rotate-180'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                        </svg>
+                      )}
+                    </div>
+                  </th>
+                  <th 
+                    className="text-left py-3 px-4 font-medium text-slate-700 cursor-pointer hover:bg-slate-50 select-none"
+                    onClick={() => handleSort('totalRepairs')}
+                  >
+                    <div className="flex items-center gap-1">
+                      Total Repairs
+                      {sortField === 'totalRepairs' && (
+                        <svg className={`w-4 h-4 ${sortDirection === 'asc' ? 'rotate-0' : 'rotate-180'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                        </svg>
+                      )}
+                    </div>
+                  </th>
+                  <th 
+                    className="text-left py-3 px-4 font-medium text-slate-700 cursor-pointer hover:bg-slate-50 select-none"
+                    onClick={() => handleSort('lastService')}
+                  >
+                    <div className="flex items-center gap-1">
+                      Last Service
+                      {sortField === 'lastService' && (
+                        <svg className={`w-4 h-4 ${sortDirection === 'asc' ? 'rotate-0' : 'rotate-180'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                        </svg>
+                      )}
+                    </div>
+                  </th>
                   <th className="text-left py-3 px-4 font-medium text-slate-700">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {unitDetails.map((unit) => (
+                {filteredAndSortedUnits.length === 0 && unitSearchTerm ? (
+                  <tr>
+                    <td colSpan={7} className="py-8 text-center text-slate-500">
+                      <div className="flex flex-col items-center gap-2">
+                        <svg className="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.172 16.172a4 4 0 015.656 0M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        <p>No units found matching "{unitSearchTerm}"</p>
+                        <p className="text-sm">Try searching by unit number only</p>
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
+                  filteredAndSortedUnits.map((unit) => (
                   <tr key={unit.id} className="border-b border-slate-100 hover:bg-slate-50">
                     <td className="py-3 px-4 font-medium">{unit.vehicleNumber}</td>
-                    <td className="py-3 px-4">{unit.year} {unit.make} {unit.model}</td>
+                    <td className="py-3 px-4">{unit.year}</td>
+                    <td className="py-3 px-4">{unit.make}</td>
+                    <td className="py-3 px-4">{unit.model}</td>
                     <td className="py-3 px-4">{unit.totalRepairs}</td>
                     <td className="py-3 px-4">
                       {unit.lastService ? unit.lastService.toLocaleDateString() : 'N/A'}
@@ -488,63 +647,14 @@ export function MaintenanceTab({
                       </div>
                     </td>
                   </tr>
-                ))}
+                ))
+                )}
               </tbody>
             </table>
           </div>
         </CardContent>
       </Card>
 
-      {/* Recent Repairs by Type */}
-      <div className="grid lg:grid-cols-2 gap-8">
-        <Card>
-          <CardHeader>
-            <CardTitle style={{ color: customerConfig.branding.primaryColor }}>
-              Jobs by Type (This Month)
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {[
-                { type: 'Repair', count: monthlyJobs.length, color: 'bg-red-100 text-red-800' }
-              ].map((item) => (
-                <div key={item.type} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
-                  <span className="font-medium">{item.type} Maintenance</span>
-                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${item.color}`}>
-                    {item.count} jobs
-                  </span>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle style={{ color: customerConfig.branding.primaryColor }}>
-              Cost Breakdown (YTD)
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {[
-                { 
-                  type: 'Repairs', 
-                  cost: yearlyJobs.reduce((sum, m) => sum + (m.cost || 0), 0),
-                  color: 'text-red-600'
-                }
-              ].map((item) => (
-                <div key={item.type} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
-                  <span className="font-medium">{item.type}</span>
-                  <span className={`font-bold ${item.color}`}>
-                    ${item.cost.toLocaleString()}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
     </div>
   )
 }
@@ -561,17 +671,74 @@ export function FuelTab({
   onUnitClick: (unit: UnitDetails) => void
   onOpenInNewTab: (unit: UnitDetails) => void
 }) {
-  const avgMPG = unitDetails.length > 0 
-    ? Math.round((unitDetails.reduce((sum, u) => sum + u.mpg, 0) / unitDetails.length) * 10) / 10
+  const [unitSearchTerm, setUnitSearchTerm] = useState<string>('')
+  const [sortField, setSortField] = useState<string>('')
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
+  
+  // Filter out trailers since they don't have engines/fuel consumption
+  const motorizedUnits = unitDetails.filter(unit => {
+    // More robust filtering - check for trailer in type field
+    const unitType = unit.type?.toLowerCase() || ''
+    return unitType !== 'trailer'
+  })
+  
+  const avgMPG = motorizedUnits.length > 0 
+    ? Math.round((motorizedUnits.reduce((sum, u) => sum + u.mpg, 0) / motorizedUnits.length) * 10) / 10
     : 0
   
-  const avgIdlePercent = unitDetails.length > 0 
-    ? Math.round((unitDetails.reduce((sum, u) => sum + u.idlePercent, 0) / unitDetails.length) * 10) / 10
+  const avgIdlePercent = motorizedUnits.length > 0 
+    ? Math.round((motorizedUnits.reduce((sum, u) => sum + u.idlePercent, 0) / motorizedUnits.length) * 10) / 10
     : 0
   
-  const totalFuelUsed = unitDetails.reduce((sum, u) => sum + u.fuelUsed, 0)
-  const totalIdleFuelUsed = unitDetails.reduce((sum, u) => sum + u.idleFuelUsed, 0)
-  const totalMilesDriven = unitDetails.reduce((sum, u) => sum + u.mileage, 0)
+  const totalFuelUsed = motorizedUnits.reduce((sum, u) => sum + u.fuelUsed, 0)
+  const totalIdleFuelUsed = motorizedUnits.reduce((sum, u) => sum + u.idleFuelUsed, 0)
+  const totalMilesDriven = motorizedUnits.reduce((sum, u) => sum + u.mileage, 0)
+
+  // Handle sorting
+  const handleSort = (field: string) => {
+    if (sortField === field) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortField(field)
+      setSortDirection('asc')
+    }
+  }
+
+  // Filter and sort units
+  const filteredAndSortedUnits = useMemo(() => {
+    let filtered = motorizedUnits
+    
+    // Apply search filter
+    if (unitSearchTerm.trim()) {
+      const searchLower = unitSearchTerm.toLowerCase()
+      filtered = filtered.filter(unit => 
+        unit.vehicleNumber.toLowerCase().includes(searchLower)
+      )
+    }
+    
+    // Apply sorting
+    if (sortField) {
+      filtered = [...filtered].sort((a, b) => {
+        let aVal: any = a[sortField as keyof UnitDetails]
+        let bVal: any = b[sortField as keyof UnitDetails]
+        
+        // Handle different data types
+        if (sortField === 'vehicleNumber' || sortField === 'year' || sortField === 'mpg' || sortField === 'mileage' || sortField === 'idlePercent' || sortField === 'fuelUsed' || sortField === 'idleFuelUsed') {
+          aVal = parseFloat(aVal) || 0
+          bVal = parseFloat(bVal) || 0
+        } else if (sortField === 'make' || sortField === 'model') {
+          aVal = aVal?.toString().toLowerCase() || ''
+          bVal = bVal?.toString().toLowerCase() || ''
+        }
+        
+        if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1
+        if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1
+        return 0
+      })
+    }
+    
+    return filtered
+  }, [motorizedUnits, unitSearchTerm, sortField, sortDirection])
 
   return (
     <div className="space-y-8">
@@ -633,45 +800,6 @@ export function FuelTab({
         </Card>
       </div>
 
-      {/* Idle Map Placeholder */}
-      <Card>
-        <CardHeader>
-          <CardTitle style={{ color: customerConfig.branding.primaryColor }}>
-            Idle Map Visualization
-          </CardTitle>
-          <CardDescription>
-            Interactive map showing idle locations, duration, and driver data (Coming Soon)
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="h-96 bg-slate-100 rounded-lg flex items-center justify-center border-2 border-dashed border-slate-300">
-            <div className="text-center">
-              <svg className="w-16 h-16 text-slate-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
-              <h3 className="text-lg font-medium text-slate-700 mb-2">Idle Map Coming Soon</h3>
-              <p className="text-slate-500 mb-4">
-                This will display an interactive map showing where units are idling, for how long, and which drivers are involved.
-              </p>
-              <div className="grid grid-cols-3 gap-4 text-sm">
-                <div className="p-3 bg-white rounded border">
-                  <p className="font-medium text-slate-700">Idle Locations</p>
-                  <p className="text-slate-500">GPS coordinates</p>
-                </div>
-                <div className="p-3 bg-white rounded border">
-                  <p className="font-medium text-slate-700">Duration</p>
-                  <p className="text-slate-500">Time spent idling</p>
-                </div>
-                <div className="p-3 bg-white rounded border">
-                  <p className="font-medium text-slate-700">Driver Data</p>
-                  <p className="text-slate-500">Driver assignments</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
 
       {/* Unit Fuel Performance */}
       <Card>
@@ -684,25 +812,179 @@ export function FuelTab({
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="overflow-x-auto">
+          <div className="mb-4">
+            <div className="relative">
+              <svg className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              <input
+                type="text"
+                placeholder="Search by unit number..."
+                value={unitSearchTerm}
+                onChange={(e) => setUnitSearchTerm(e.target.value)}
+                className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-sm"
+              />
+              {unitSearchTerm && (
+                <button
+                  onClick={() => setUnitSearchTerm('')}
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              )}
+            </div>
+            {unitSearchTerm && (
+              <div className="text-sm text-slate-600 mb-2">
+                Showing {filteredAndSortedUnits.length} of {motorizedUnits.length} units
+              </div>
+            )}
+          </div>
+          <div className="overflow-x-auto max-h-96 overflow-y-auto">
             <table className="w-full text-sm">
-              <thead>
+              <thead className="sticky top-0 bg-white z-10">
                 <tr className="border-b border-slate-200">
-                  <th className="text-left py-3 px-4 font-medium text-slate-700">Unit</th>
-                  <th className="text-left py-3 px-4 font-medium text-slate-700">Make/Model</th>
-                  <th className="text-left py-3 px-4 font-medium text-slate-700">MPG</th>
-                  <th className="text-left py-3 px-4 font-medium text-slate-700">Miles</th>
-                  <th className="text-left py-3 px-4 font-medium text-slate-700">Idle %</th>
-                  <th className="text-left py-3 px-4 font-medium text-slate-700">Fuel Used</th>
-                  <th className="text-left py-3 px-4 font-medium text-slate-700">Idle Fuel</th>
+                  <th 
+                    className="text-left py-3 px-4 font-medium text-slate-700 cursor-pointer hover:bg-slate-50 select-none"
+                    onClick={() => handleSort('vehicleNumber')}
+                  >
+                    <div className="flex items-center gap-1">
+                      Unit
+                      {sortField === 'vehicleNumber' && (
+                        <svg className={`w-4 h-4 ${sortDirection === 'asc' ? 'rotate-0' : 'rotate-180'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                        </svg>
+                      )}
+                    </div>
+                  </th>
+                  <th 
+                    className="text-left py-3 px-4 font-medium text-slate-700 cursor-pointer hover:bg-slate-50 select-none"
+                    onClick={() => handleSort('year')}
+                  >
+                    <div className="flex items-center gap-1">
+                      Year
+                      {sortField === 'year' && (
+                        <svg className={`w-4 h-4 ${sortDirection === 'asc' ? 'rotate-0' : 'rotate-180'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                        </svg>
+                      )}
+                    </div>
+                  </th>
+                  <th 
+                    className="text-left py-3 px-4 font-medium text-slate-700 cursor-pointer hover:bg-slate-50 select-none"
+                    onClick={() => handleSort('make')}
+                  >
+                    <div className="flex items-center gap-1">
+                      Make
+                      {sortField === 'make' && (
+                        <svg className={`w-4 h-4 ${sortDirection === 'asc' ? 'rotate-0' : 'rotate-180'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                        </svg>
+                      )}
+                    </div>
+                  </th>
+                  <th 
+                    className="text-left py-3 px-4 font-medium text-slate-700 cursor-pointer hover:bg-slate-50 select-none"
+                    onClick={() => handleSort('model')}
+                  >
+                    <div className="flex items-center gap-1">
+                      Model
+                      {sortField === 'model' && (
+                        <svg className={`w-4 h-4 ${sortDirection === 'asc' ? 'rotate-0' : 'rotate-180'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                        </svg>
+                      )}
+                    </div>
+                  </th>
+                  <th 
+                    className="text-left py-3 px-4 font-medium text-slate-700 cursor-pointer hover:bg-slate-50 select-none"
+                    onClick={() => handleSort('mpg')}
+                  >
+                    <div className="flex items-center gap-1">
+                      MPG
+                      {sortField === 'mpg' && (
+                        <svg className={`w-4 h-4 ${sortDirection === 'asc' ? 'rotate-0' : 'rotate-180'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                        </svg>
+                      )}
+                    </div>
+                  </th>
+                  <th 
+                    className="text-left py-3 px-4 font-medium text-slate-700 cursor-pointer hover:bg-slate-50 select-none"
+                    onClick={() => handleSort('mileage')}
+                  >
+                    <div className="flex items-center gap-1">
+                      Miles
+                      {sortField === 'mileage' && (
+                        <svg className={`w-4 h-4 ${sortDirection === 'asc' ? 'rotate-0' : 'rotate-180'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                        </svg>
+                      )}
+                    </div>
+                  </th>
+                  <th 
+                    className="text-left py-3 px-4 font-medium text-slate-700 cursor-pointer hover:bg-slate-50 select-none"
+                    onClick={() => handleSort('idlePercent')}
+                  >
+                    <div className="flex items-center gap-1">
+                      Idle %
+                      {sortField === 'idlePercent' && (
+                        <svg className={`w-4 h-4 ${sortDirection === 'asc' ? 'rotate-0' : 'rotate-180'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                        </svg>
+                      )}
+                    </div>
+                  </th>
+                  <th 
+                    className="text-left py-3 px-4 font-medium text-slate-700 cursor-pointer hover:bg-slate-50 select-none"
+                    onClick={() => handleSort('fuelUsed')}
+                  >
+                    <div className="flex items-center gap-1">
+                      Fuel Used
+                      {sortField === 'fuelUsed' && (
+                        <svg className={`w-4 h-4 ${sortDirection === 'asc' ? 'rotate-0' : 'rotate-180'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                        </svg>
+                      )}
+                    </div>
+                  </th>
+                  <th 
+                    className="text-left py-3 px-4 font-medium text-slate-700 cursor-pointer hover:bg-slate-50 select-none"
+                    onClick={() => handleSort('idleFuelUsed')}
+                  >
+                    <div className="flex items-center gap-1">
+                      Idle Fuel
+                      {sortField === 'idleFuelUsed' && (
+                        <svg className={`w-4 h-4 ${sortDirection === 'asc' ? 'rotate-0' : 'rotate-180'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                        </svg>
+                      )}
+                    </div>
+                  </th>
                   <th className="text-left py-3 px-4 font-medium text-slate-700">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {unitDetails.map((unit) => (
+                {filteredAndSortedUnits.length === 0 && unitSearchTerm ? (
+                  <tr>
+                    <td colSpan={10} className="py-8 text-center text-slate-500">
+                      <div className="flex flex-col items-center gap-2">
+                        <svg className="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.172 16.172a4 4 0 015.656 0M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        <p>No units found matching "{unitSearchTerm}"</p>
+                        <p className="text-sm">Try searching by unit number only</p>
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
+                  filteredAndSortedUnits.map((unit) => (
                   <tr key={unit.id} className="border-b border-slate-100 hover:bg-slate-50">
                     <td className="py-3 px-4 font-medium">{unit.vehicleNumber}</td>
-                    <td className="py-3 px-4">{unit.make} {unit.model}</td>
+                    <td className="py-3 px-4">{unit.year}</td>
+                    <td className="py-3 px-4">{unit.make}</td>
+                    <td className="py-3 px-4">{unit.model}</td>
                     <td className="py-3 px-4">
                       <span className={`font-medium ${
                         unit.mpg >= 7 ? 'text-green-600' : 
@@ -749,7 +1031,8 @@ export function FuelTab({
                       </div>
                     </td>
                   </tr>
-                ))}
+                  ))
+                )}
               </tbody>
             </table>
           </div>
@@ -798,124 +1081,104 @@ export function UnitDetailsModal({
             </div>
           </div>
 
-          <div className="grid md:grid-cols-2 gap-6">
-            {/* Vehicle Info */}
+          <div className="space-y-6">
+            {/* Vehicle Information */}
             <Card>
-              <CardHeader>
+              <CardHeader className="pb-4">
                 <CardTitle className="text-lg">Vehicle Information</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="flex justify-between">
-                  <span className="text-slate-600">Make & Model:</span>
-                  <span className="font-medium">{unit.make} {unit.model}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-600">Year:</span>
-                  <span className="font-medium">{unit.year}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-600">Status:</span>
-                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                    unit.status === 'active' 
-                      ? 'bg-green-100 text-green-800'
-                      : unit.status === 'maintenance'
-                      ? 'bg-orange-100 text-orange-800'
-                      : 'bg-slate-100 text-slate-800'
-                  }`}>
-                    {unit.status}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-600">Mileage:</span>
-                  <span className="font-medium">{unit.mileage.toLocaleString()} mi</span>
+              <CardContent>
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                  <div className="text-center">
+                    <div className="text-sm text-slate-600 mb-1">Make</div>
+                    <div className="font-semibold text-slate-900">{unit.make}</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-sm text-slate-600 mb-1">Model</div>
+                    <div className="font-semibold text-slate-900">{unit.model}</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-sm text-slate-600 mb-1">Year</div>
+                    <div className="font-semibold text-slate-900">{unit.year}</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-sm text-slate-600 mb-1">Status</div>
+                    <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                      unit.status === 'active' 
+                        ? 'bg-green-100 text-green-800'
+                        : unit.status === 'maintenance'
+                        ? 'bg-orange-100 text-orange-800'
+                        : 'bg-slate-100 text-slate-800'
+                    }`}>
+                      {unit.status}
+                    </span>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-sm text-slate-600 mb-1">Mileage</div>
+                    <div className="font-semibold text-slate-900">{unit.mileage.toLocaleString()} mi</div>
+                  </div>
                 </div>
               </CardContent>
             </Card>
 
             {/* Performance Metrics */}
             <Card>
-              <CardHeader>
+              <CardHeader className="pb-4">
                 <CardTitle className="text-lg">Performance Metrics</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="flex justify-between">
-                  <span className="text-slate-600">MPG:</span>
-                  <span className={`font-medium ${
-                    unit.mpg >= 7 ? 'text-green-600' : 
-                    unit.mpg >= 5 ? 'text-orange-600' : 'text-red-600'
-                  }`}>
-                    {unit.mpg}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-600">Idle Percentage:</span>
-                  <span className={`font-medium ${
-                    unit.idlePercent <= 10 ? 'text-green-600' : 
-                    unit.idlePercent <= 20 ? 'text-orange-600' : 'text-red-600'
-                  }`}>
-                    {unit.idlePercent}%
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-600">Fuel Used:</span>
-                  <span className="font-medium">{unit.fuelUsed.toLocaleString()} gal</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-600">Idle Fuel:</span>
-                  <span className="font-medium text-red-600">{unit.idleFuelUsed} gal</span>
+              <CardContent>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="text-center">
+                    <div className="text-sm text-slate-600 mb-1">MPG</div>
+                    <div className={`text-xl font-bold ${
+                      unit.mpg >= 7 ? 'text-green-600' : 
+                      unit.mpg >= 5 ? 'text-orange-600' : 'text-red-600'
+                    }`}>
+                      {unit.mpg}
+                    </div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-sm text-slate-600 mb-1">Idle Percentage</div>
+                    <div className={`text-xl font-bold ${
+                      unit.idlePercent <= 10 ? 'text-green-600' : 
+                      unit.idlePercent <= 20 ? 'text-orange-600' : 'text-red-600'
+                    }`}>
+                      {unit.idlePercent}%
+                    </div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-sm text-slate-600 mb-1">Fuel Used</div>
+                    <div className="text-xl font-bold text-slate-900">{unit.fuelUsed.toLocaleString()} gal</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-sm text-slate-600 mb-1">Idle Fuel</div>
+                    <div className="text-xl font-bold text-red-600">{unit.idleFuelUsed} gal</div>
+                  </div>
                 </div>
               </CardContent>
             </Card>
 
-            {/* Maintenance Info */}
+            {/* Maintenance History */}
             <Card>
-              <CardHeader>
+              <CardHeader className="pb-4">
                 <CardTitle className="text-lg">Maintenance History</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="flex justify-between">
-                  <span className="text-slate-600">Total Repairs:</span>
-                  <span className="font-medium">{unit.totalRepairs}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-600">Repair Cost:</span>
-                  <span className="font-medium">${unit.repairCost.toLocaleString()}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-600">Last Service:</span>
-                  <span className="font-medium">
-                    {unit.lastService ? unit.lastService.toLocaleDateString() : 'N/A'}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-600">Next Service:</span>
-                  <span className="font-medium">
-                    {unit.nextService ? unit.nextService.toLocaleDateString() : 'Not scheduled'}
-                  </span>
+              <CardContent>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="text-center">
+                    <div className="text-sm text-slate-600 mb-1">Total Repairs</div>
+                    <div className="text-xl font-bold text-slate-900">{unit.totalRepairs}</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-sm text-slate-600 mb-1">Last Service</div>
+                    <div className="text-xl font-bold text-slate-900">
+                      {unit.lastService ? unit.lastService.toLocaleDateString() : 'N/A'}
+                    </div>
+                  </div>
                 </div>
               </CardContent>
             </Card>
 
-            {/* Quick Actions */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">Quick Actions</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <Button 
-                  className="w-full"
-                  style={{ backgroundColor: customerConfig.branding.primaryColor }}
-                >
-                  Schedule Maintenance
-                </Button>
-                <Button variant="outline" className="w-full">
-                  View Full History
-                </Button>
-                <Button variant="outline" className="w-full">
-                  Generate Report
-                </Button>
-              </CardContent>
-            </Card>
           </div>
         </div>
       </div>

@@ -37,6 +37,7 @@ interface UnitDetails {
   model: string
   year: number
   status: string
+  type: string
   mileage: number
   mpg: number
   idlePercent: number
@@ -96,7 +97,7 @@ function DashboardPageContent() {
           setMaintenanceData(maintenance)
           
           // Generate mock metrics based on real data
-          const totalMiles = fleet.reduce((sum, vehicle) => sum + (vehicle.mileage || 0), 0)
+          const totalMiles = fleet.reduce((sum, vehicle) => sum + Math.round((vehicle.mileage || 0) / 10), 0) // Use scaled mileage
           const activeVehicles = fleet.filter(v => v.status === 'active').length
           const completedMaintenance = maintenance.filter(m => m.status === 'completed').length
           
@@ -133,10 +134,11 @@ function DashboardPageContent() {
             model: vehicle.model,
             year: vehicle.year,
             status: vehicle.status,
-            mileage: vehicle.mileage || 0,
+            type: vehicle.type || 'Unknown', // Include the type field
+            mileage: Math.round((vehicle.mileage || 0) / 10), // Scale down for realistic fleet totals (~2M miles/year)
             mpg: Math.round((5.5 + Math.random() * 3) * 10) / 10,
             idlePercent: Math.round((8 + Math.random() * 15) * 10) / 10,
-            fuelUsed: Math.round((vehicle.mileage || 0) / (5.5 + Math.random() * 3)),
+            fuelUsed: Math.round(((vehicle.mileage || 0) / 10) / (5.5 + Math.random() * 3)), // Use scaled mileage for fuel calculation
             idleFuelUsed: Math.round((25 + Math.random() * 50) * 10) / 10,
             totalRepairs: maintenance.filter(m => m.vehicleId === vehicle.vehicleNumber).length,
             repairCost: maintenance
@@ -324,7 +326,7 @@ function DashboardPageContent() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
                 </svg>
-                Idle Analysis
+                Idle Map
               </div>
             </button>
           </div>
@@ -333,7 +335,7 @@ function DashboardPageContent() {
 
       {/* Main Content */}
       {activeTab === 'idle' ? (
-        // Full-width layout for Idle Analysis
+        // Full-width layout for Idle Map
         <main className="h-[calc(100vh-8rem)] overflow-hidden">
           {!dataLoading && (
             <IdleAnalysisTab 

@@ -294,46 +294,6 @@ export function IdleAnalysisProfessional({ isFleetView = true, vehicleNumber, cu
           </div>
         </div>
 
-        {/* Compact Map Controls */}
-        <div className="p-3 border-b border-gray-100">
-          <h3 className="text-xs font-medium text-gray-600 mb-2">Map Base</h3>
-          <div className="space-y-1">
-            <label className="flex items-center text-xs">
-              <input type="radio" name="mapBase" defaultChecked className="mr-1.5 scale-75" />
-              <span className="text-gray-700">Default</span>
-            </label>
-            <label className="flex items-center text-xs">
-              <input type="radio" name="mapBase" className="mr-1.5 scale-75" />
-              <span className="text-gray-700">Terrain</span>
-            </label>
-            <label className="flex items-center text-xs">
-              <input type="radio" name="mapBase" className="mr-1.5 scale-75" />
-              <span className="text-gray-700">Satellite</span>
-            </label>
-          </div>
-        </div>
-
-        <div className="p-3 border-b border-gray-100">
-          <h3 className="text-xs font-medium text-gray-600 mb-2">Overlay</h3>
-          <div className="space-y-1">
-            <label className="flex items-center text-xs">
-              <input type="checkbox" defaultChecked className="mr-1.5 scale-75" />
-              <span className="text-gray-700">Traffic</span>
-            </label>
-            <label className="flex items-center text-xs">
-              <input type="checkbox" className="mr-1.5 scale-75" />
-              <span className="text-gray-700">Weather</span>
-            </label>
-            <label className="flex items-center text-xs">
-              <input type="checkbox" defaultChecked className="mr-1.5 scale-75" />
-              <span className="text-gray-700">Idle Events</span>
-            </label>
-            <label className="flex items-center text-xs">
-              <input type="checkbox" defaultChecked className="mr-1.5 scale-75" />
-              <span className="text-gray-700">Geofences</span>
-            </label>
-          </div>
-        </div>
 
         {/* Compact Details */}
         {(selectedEvent || selectedAggregation) && (

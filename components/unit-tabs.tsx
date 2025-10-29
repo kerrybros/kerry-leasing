@@ -438,11 +438,11 @@ export function PerformanceTab({
           </CardContent>
         </Card>
 
-        {/* Idle Analysis */}
+        {/* Idle Map */}
         <Card>
           <CardHeader>
             <CardTitle style={{ color: customerConfig.branding.primaryColor }}>
-              Idle Analysis
+              Idle Map
             </CardTitle>
             <CardDescription>Idle time patterns and efficiency</CardDescription>
           </CardHeader>

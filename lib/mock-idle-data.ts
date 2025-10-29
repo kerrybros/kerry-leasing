@@ -70,7 +70,7 @@ export const mockGeofences: Geofence[] = [
 export const mockDrivers: Driver[] = [
   {
     id: 'drv-1',
-    name: 'Mike Johnson',
+    name: 'Driver 1',
     employeeId: 'EMP001',
     licenseNumber: 'CDL123456',
     hireDate: new Date('2020-03-15'),
@@ -79,7 +79,7 @@ export const mockDrivers: Driver[] = [
   },
   {
     id: 'drv-2',
-    name: 'Sarah Williams',
+    name: 'Driver 2',
     employeeId: 'EMP002',
     licenseNumber: 'CDL234567',
     hireDate: new Date('2019-07-22'),
@@ -88,7 +88,7 @@ export const mockDrivers: Driver[] = [
   },
   {
     id: 'drv-3',
-    name: 'Robert Davis',
+    name: 'Driver 3',
     employeeId: 'EMP003',
     licenseNumber: 'CDL345678',
     hireDate: new Date('2021-01-10'),
@@ -97,7 +97,7 @@ export const mockDrivers: Driver[] = [
   },
   {
     id: 'drv-4',
-    name: 'Lisa Chen',
+    name: 'Driver 4',
     employeeId: 'EMP004',
     licenseNumber: 'CDL456789',
     hireDate: new Date('2018-11-05'),
@@ -106,7 +106,7 @@ export const mockDrivers: Driver[] = [
   },
   {
     id: 'drv-5',
-    name: 'David Miller',
+    name: 'Driver 5',
     employeeId: 'EMP005',
     licenseNumber: 'CDL567890',
     hireDate: new Date('2022-02-14'),
