@@ -93,18 +93,15 @@ export function OverviewTab({
         if (repair.status === 'completed') {
           acc.periodCompletedJobs++
         }
-        // Use mock cost since cost was removed from MaintenanceRecord
-        acc.periodTotalCost += repair.cost || Math.round((200 + Math.random() * 1500) * 100) / 100
         return acc
       },
-      { periodJobsCount: 0, periodCompletedJobs: 0, periodTotalCost: 0 }
+      { periodJobsCount: 0, periodCompletedJobs: 0 }
     )
 
     // Generate period-specific performance metrics
     const periodMetrics = {
       totalJobs: periodJobsCount || Math.floor(Math.random() * 20) + 5, // Mock data with some variation
       completedJobs: periodCompletedJobs || Math.floor(Math.random() * 15) + 3,
-      totalCost: periodTotalCost || Math.floor(Math.random() * 25000) + 10000,
       avgMPG: metrics.avgMPG + (Math.random() * 0.4 - 0.2), // Slight variation
       fuelEfficiency: Math.max(75, Math.min(95, metrics.fuelEfficiency + (Math.random() * 10 - 5))),
       idleTime: Math.max(5, Math.min(25, metrics.idleTime + (Math.random() * 6 - 3)))
@@ -184,26 +181,6 @@ export function OverviewTab({
           </CardContent>
         </Card>
 
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center">
-              <div className="flex-1">
-                <p className="text-sm font-medium text-slate-600">Total Cost</p>
-                <p className="text-2xl font-bold" style={{ color: customerConfig.branding.primaryColor }}>
-                  ${Math.round(periodMetrics.totalCost).toLocaleString()}
-                </p>
-              </div>
-              <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
-                <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1" />
-                </svg>
-              </div>
-            </div>
-            <p className="text-xs text-slate-500 mt-2">
-              Period total
-            </p>
-          </CardContent>
-        </Card>
 
         <Card>
           <CardContent className="p-6">
