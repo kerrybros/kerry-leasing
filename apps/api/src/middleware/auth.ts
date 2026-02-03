@@ -38,8 +38,10 @@ export async function clerkAuthMiddleware(
 
     const token = authHeader.substring(7); // Remove 'Bearer ' prefix
 
-    // Verify the token using Clerk
-    const verified = await (clerkClient as any).verifyToken(token);
+    // Verify the token using Clerk's verifyToken method
+    const verified = await clerkClient.verifyToken(token, {
+      secretKey: config.clerk.secretKey,
+    });
 
     if (!verified || !verified.sub) {
       return res.status(401).json({
@@ -50,7 +52,7 @@ export async function clerkAuthMiddleware(
 
     const userId = verified.sub;
 
-    // Get active organization from the token or user's primary org
+    // Get active organization from the token
     let orgId: string | null = null;
     let role: 'internal' | 'external' = 'external';
 
@@ -61,18 +63,21 @@ export async function clerkAuthMiddleware(
 
     // Get org role if orgId exists
     if (orgId) {
-      const orgMemberships = await clerkClient.users.getOrganizationMembershipList({
-        userId,
-      });
-      
-      const currentOrgMembership = orgMemberships.data.find(
-        (membership) => membership.organization.id === orgId
-      );
+      try {
+        const orgMemberships = await clerkClient.users.getOrganizationMembershipList({
+          userId,
+        });
+        
+        const currentOrgMembership = orgMemberships.data.find(
+          (membership) => membership.organization.id === orgId
+        );
 
-      if (currentOrgMembership) {
-        // Map Clerk roles to our internal/external system
-        // Adjust this based on your Clerk role configuration
-        role = currentOrgMembership.role === 'org:admin' ? 'internal' : 'external';
+        if (currentOrgMembership) {
+          // Map Clerk roles to our internal/external system
+          role = currentOrgMembership.role === 'org:admin' ? 'internal' : 'external';
+        }
+      } catch (err) {
+        console.error('Error fetching org memberships:', err);
       }
     }
 
