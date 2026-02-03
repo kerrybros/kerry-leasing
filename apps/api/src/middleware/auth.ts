@@ -39,7 +39,7 @@ export async function clerkAuthMiddleware(
     const token = authHeader.substring(7); // Remove 'Bearer ' prefix
 
     // Verify the token using Clerk
-    const verified = await clerkClient.verifyToken(token);
+    const verified = await (clerkClient as any).verifyToken(token);
 
     if (!verified || !verified.sub) {
       return res.status(401).json({
