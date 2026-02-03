@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { createClerkClient } from '@clerk/backend';
+import { createClerkClient, verifyToken } from '@clerk/backend';
 import { config } from '../config.js';
 
 // Initialize Clerk client
@@ -39,7 +39,7 @@ export async function clerkAuthMiddleware(
     const token = authHeader.substring(7); // Remove 'Bearer ' prefix
 
     // Verify the token using Clerk's verifyToken method
-    const verified = await clerkClient.verifyToken(token, {
+    const verified = await verifyToken(token, {
       secretKey: config.clerk.secretKey,
     });
 
