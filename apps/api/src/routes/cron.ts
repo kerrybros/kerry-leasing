@@ -4,7 +4,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { syncMotiveDaily } from '../telematics/motive/syncService';
+import { syncMotiveDaily } from '../telematics/motive/syncService.js';
 
 const router = Router();
 
