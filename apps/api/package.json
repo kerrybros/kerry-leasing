@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc",
+    "build": "tsc && cp -r src/generated dist/",
     "start": "node dist/index.js",
     "lint": "eslint src/",
     "test": "vitest run",
