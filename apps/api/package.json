@@ -28,6 +28,8 @@
     "@clerk/backend": "^1.0.0",
     "@kerry-leasing/shared": "workspace:*",
     "@prisma/client": "^5.7.0",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
     "@types/node": "^20.10.0",
     "axios": "^1.6.0",
     "cors": "^2.8.5",
@@ -38,8 +40,6 @@
     "zod": "^3.22.4"
   },
   "devDependencies": {
-    "@types/cors": "^2.8.17",
-    "@types/express": "^4.17.21",
     "tsx": "^4.7.0",
     "vitest": "^1.0.0"
   }
