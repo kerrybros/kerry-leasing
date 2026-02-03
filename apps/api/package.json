@@ -1,0 +1,46 @@
+{
+  "name": "@kerry-leasing/api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "lint": "eslint src/",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "clean": "rm -rf dist",
+    "prisma:repair:pull": "prisma db pull --schema prisma/repair/schema.prisma",
+    "prisma:repair:generate": "prisma generate --schema prisma/repair/schema.prisma",
+    "prisma:app:migrate": "prisma migrate dev --schema prisma/app/schema.prisma",
+    "prisma:app:migrate:deploy": "prisma migrate deploy --schema prisma/app/schema.prisma",
+    "prisma:app:generate": "prisma generate --schema prisma/app/schema.prisma",
+    "prisma:app:studio": "prisma studio --schema prisma/app/schema.prisma",
+    "prisma:generate": "pnpm prisma:repair:generate && pnpm prisma:app:generate",
+    "sync-motive": "tsx src/cron/sync-motive-daily.ts",
+    "backdate": "tsx src/telematics/motive/backdate.ts",
+    "backdate-jan-2026": "tsx src/scripts/backdate-january-2026.mjs",
+    "update-org-id": "tsx src/scripts/update-org-id.mjs",
+    "deploy:build": "pnpm prisma:generate && pnpm build"
+  },
+  "dependencies": {
+    "@clerk/backend": "^1.0.0",
+    "@kerry-leasing/shared": "workspace:*",
+    "@prisma/client": "^5.7.0",
+    "axios": "^1.6.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.10.0",
+    "prisma": "^5.7.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3",
+    "vitest": "^1.0.0"
+  }
+}

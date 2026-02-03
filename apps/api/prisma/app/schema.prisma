@@ -1,0 +1,440 @@
+// This is your Prisma schema file for the APP database (portal-owned data)
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../../src/generated/app-client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("APP_DATABASE_URL")
+}
+
+// Maps Clerk organization IDs to customer IDs in the repair database
+model CustomerOrgMap {
+  id          String   @id @default(cuid())
+  clerkOrgId  String   @unique @map("clerk_org_id")
+  customerId  String   @map("customer_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([clerkOrgId])
+  @@map("customer_org_maps")
+}
+
+// Telematics Provider Configuration
+// Each org can have ONE provider configured (SAMSARA or MOTIVE)
+model TelematicsProviderAccount {
+  id              String                     @id @default(cuid())
+  clerkOrgId      String                     @unique @map("clerk_org_id")
+  provider        TelematicsProvider
+  credentialsJson Json                       @map("credentials_json") // Encrypted in future
+  status          TelematicsProviderStatus   @default(ACTIVE)
+  lastSyncAt      DateTime?                  @map("last_sync_at")
+  lastError       String?                    @map("last_error")
+  createdAt       DateTime                   @default(now()) @map("created_at")
+  updatedAt       DateTime                   @updatedAt @map("updated_at")
+
+  @@index([clerkOrgId])
+  @@index([status])
+  @@map("telematics_provider_accounts")
+}
+
+// SAMSARA Raw Data (source of truth)
+// Stores complete Samsara API responses with typed schema
+model SamsaraRawData {
+  id                  String    @id @default(cuid())
+  clerkOrgId          String    @map("clerk_org_id")
+  vehicleId           String    @map("vehicle_id") // Samsara vehicle ID
+  vin                 String?
+  vehicleName         String?   @map("vehicle_name")
+  date                String    // YYYY-MM-DD
+  startTime           String?   @map("start_time") // ISO 8601
+  endTime             String?   @map("end_time")   // ISO 8601
+  
+  // Odometer (meters)
+  odometerStart       Float?    @map("odometer_start")
+  odometerEnd         Float?    @map("odometer_end")
+  
+  // Fuel (milliliters)
+  fuelConsumedStart   Float?    @map("fuel_consumed_start")
+  fuelConsumedEnd     Float?    @map("fuel_consumed_end")
+  
+  // Idle (milliseconds)
+  idleDurationStart   Float?    @map("idle_duration_start")
+  idleDurationEnd     Float?    @map("idle_duration_end")
+  
+  // Engine hours (milliseconds)
+  engineHoursStart    Float?    @map("engine_hours_start")
+  engineHoursEnd      Float?    @map("engine_hours_end")
+  
+  // Full raw response for reference
+  rawResponse         Json      @map("raw_response")
+  processedAt         DateTime? @map("processed_at")
+  createdAt           DateTime  @default(now()) @map("created_at")
+
+  @@unique([clerkOrgId, vehicleId, date])
+  @@index([clerkOrgId])
+  @@index([vehicleId])
+  @@index([vin])
+  @@index([date])
+  @@index([clerkOrgId, date])
+  @@map("samsara_raw_data")
+}
+
+// MOTIVE Raw Data (source of truth)
+// Stores complete Motive API responses with typed schema
+model MotiveRawData {
+  id                    String    @id @default(cuid())
+  clerkOrgId            String    @map("clerk_org_id")
+  vehicleId             String    @map("vehicle_id") // Motive vehicle ID
+  vin                   String?
+  vehicleNumber         String?   @map("vehicle_number")
+  vehicleName           String?   @map("vehicle_name")
+  date                  String    // YYYY-MM-DD
+  
+  // IFTA Mileage data
+  iftaTotalMiles        Float?    @map("ifta_total_miles")
+  iftaStartDate         String?   @map("ifta_start_date")
+  iftaEndDate           String?   @map("ifta_end_date")
+  
+  // Utilization data
+  totalEngineDuration   Float?    @map("total_engine_duration") // seconds
+  totalIdleDuration     Float?    @map("total_idle_duration")   // seconds
+  totalDrivingDuration  Float?    @map("total_driving_duration") // seconds
+  
+  // Full raw responses for reference
+  iftaRawResponse       Json?     @map("ifta_raw_response")
+  utilizationRawResponse Json?    @map("utilization_raw_response")
+  processedAt           DateTime? @map("processed_at")
+  createdAt             DateTime  @default(now()) @map("created_at")
+
+  @@unique([clerkOrgId, vehicleId, date])
+  @@index([clerkOrgId])
+  @@index([vehicleId])
+  @@index([vin])
+  @@index([date])
+  @@index([clerkOrgId, date])
+  @@map("motive_raw_data")
+}
+
+// Vehicle Mapping: Links provider vehicle IDs to VINs
+// Used when provider doesn't return VIN or returns incorrect VIN
+model TelematicsVehicleMap {
+  id                  String             @id @default(cuid())
+  clerkOrgId          String             @map("clerk_org_id")
+  vin                 String
+  provider            TelematicsProvider
+  providerVehicleId   String             @map("provider_vehicle_id")
+  providerVehicleName String?            @map("provider_vehicle_name")
+  createdAt           DateTime           @default(now()) @map("created_at")
+  updatedAt           DateTime           @updatedAt @map("updated_at")
+
+  @@unique([clerkOrgId, provider, providerVehicleId])
+  @@unique([clerkOrgId, vin])
+  @@index([clerkOrgId])
+  @@index([vin])
+  @@index([providerVehicleId])
+  @@map("telematics_vehicle_maps")
+}
+
+// Normalized Daily Metrics from all telematics providers
+// Stores one row per org + VIN + date (derived from provider-specific raw data)
+model TelematicsDailyMetric {
+  id                String             @id @default(cuid())
+  clerkOrgId        String             @map("clerk_org_id")
+  vin               String
+  date              String             // YYYY-MM-DD format for consistency
+  milesDriven       Float?             @map("miles_driven")
+  idleMinutes       Float?             @map("idle_minutes")
+  fuelGallons       Float?             @map("fuel_gallons")
+  avgMpg            Float?             @map("avg_mpg")
+  engineHours       Float?             @map("engine_hours")
+  source            TelematicsProvider
+  samsaraRawDataId  String?            @map("samsara_raw_data_id") // Link to Samsara source
+  motiveRawDataId   String?            @map("motive_raw_data_id")  // Link to Motive source
+  createdAt         DateTime           @default(now()) @map("created_at")
+  updatedAt         DateTime           @updatedAt @map("updated_at")
+
+  @@unique([clerkOrgId, vin, date])
+  @@index([clerkOrgId])
+  @@index([vin])
+  @@index([date])
+  @@index([clerkOrgId, date])
+  @@index([samsaraRawDataId])
+  @@index([motiveRawDataId])
+  @@map("telematics_daily_metrics")
+}
+
+// MOTIVE Driving Periods (individual driving trips)
+// Source: GET /v1/driving_periods
+// Stores each driving period with origin/destination and distance
+// NOTE: Data may be updated retroactively - requires lookback verification
+model MotiveDrivingPeriod {
+  id                          String    @id @default(cuid())
+  clerkOrgId                  String    @map("clerk_org_id")
+  motivePeriodId              BigInt    @map("motive_period_id") // Motive's period ID
+  
+  // Driver info
+  driverId                    Int       @map("driver_id")
+  driverFirstName             String?   @map("driver_first_name")
+  driverLastName              String?   @map("driver_last_name")
+  driverUsername              String?   @map("driver_username")
+  driverEmail                 String?   @map("driver_email")
+  
+  // Vehicle info
+  vehicleId                   Int       @map("vehicle_id")
+  vehicleNumber               String?   @map("vehicle_number")
+  vin                         String?
+  
+  // Period timing
+  startTime                   String    @map("start_time") // ISO 8601
+  endTime                     String?   @map("end_time")   // ISO 8601 (null if in_progress)
+  date                        String    // YYYY-MM-DD (derived from start_time)
+  duration                    Float?    // seconds
+  
+  // Period metadata
+  status                      String?   // "in_progress", "complete", "interrupted"
+  type                        String?   // "driving", "PC" (personal conveyance), "YM" (yard move)
+  annotationStatus            Int?      @map("annotation_status") // 0=not annotated, 1=annotated, 2=pending
+  notes                       String?
+  source                      Int?      // Data source indicator
+  
+  // Distance/odometer
+  startKilometers             Float?    @map("start_kilometers")
+  endKilometers               Float?    @map("end_kilometers")
+  distance                    String?   // Human-readable distance with units
+  
+  // Origin location
+  origin                      String?
+  originLat                   Float?    @map("origin_lat")
+  originLon                   Float?    @map("origin_lon")
+  
+  // Destination location
+  destination                 String?
+  destinationLat              Float?    @map("destination_lat")
+  destinationLon              Float?    @map("destination_lon")
+  
+  // Electric vehicle metrics (if applicable)
+  startHvbStateOfCharge       Float?    @map("start_hvb_state_of_charge")
+  endHvbStateOfCharge         Float?    @map("end_hvb_state_of_charge")
+  startHvbLifetimeEnergyOutput Float?   @map("start_hvb_lifetime_energy_output")
+  endHvbLifetimeEnergyOutput  Float?    @map("end_hvb_lifetime_energy_output")
+  
+  // Data verification tracking
+  lastVerifiedAt              DateTime? @map("last_verified_at")
+  dataVersion                 Int       @default(1) @map("data_version")
+  
+  // Full API response for reference
+  rawResponse                 Json      @map("raw_response")
+  createdAt                   DateTime  @default(now()) @map("created_at")
+  updatedAt                   DateTime  @updatedAt @map("updated_at")
+
+  @@unique([clerkOrgId, motivePeriodId])
+  @@index([clerkOrgId])
+  @@index([motivePeriodId])
+  @@index([driverId])
+  @@index([vehicleId])
+  @@index([vin])
+  @@index([date])
+  @@index([status])
+  @@index([clerkOrgId, date])
+  @@index([startTime])
+  @@index([lastVerifiedAt])
+  @@map("motive_driving_periods")
+}
+
+// MOTIVE Idle Events (individual idle occurrences)
+// Source: GET /v1/idle_events
+// Stores each idle event with location and fuel data
+// NOTE: Data may be added retroactively - requires lookback verification
+model MotiveIdleEvent {
+  id                String    @id @default(cuid())
+  clerkOrgId        String    @map("clerk_org_id")
+  motiveEventId     BigInt    @map("motive_event_id") // Motive's event ID
+  
+  // Driver info
+  driverId          Int       @map("driver_id")
+  driverFirstName   String?   @map("driver_first_name")
+  driverLastName    String?   @map("driver_last_name")
+  driverUsername    String?   @map("driver_username")
+  driverEmail       String?   @map("driver_email")
+  
+  // Vehicle info
+  vehicleId         Int       @map("vehicle_id")
+  vehicleNumber     String?   @map("vehicle_number")
+  vin               String?
+  
+  // Event timing
+  startTime         String    @map("start_time") // ISO 8601
+  endTime           String    @map("end_time")   // ISO 8601
+  date              String    // YYYY-MM-DD (derived from start_time)
+  
+  // Fuel data
+  vehFuelStart      Float?    @map("veh_fuel_start") // milliliters
+  vehFuelEnd        Float?    @map("veh_fuel_end")   // milliliters
+  
+  // Location data
+  lat               Float?
+  lon               Float?
+  city              String?
+  state             String?
+  location          String?   // Combined location string
+  
+  // Road geometry data
+  rgBrg             Float?    @map("rg_brg") // Road bearing
+  rgKm              Float?    @map("rg_km")  // Road distance
+  rgMatch           Boolean?  @map("rg_match")
+  
+  // Event metadata
+  endType           String?   @map("end_type") // "vehicle_moving", "engine_stop", etc.
+  eldDeviceId       Int?      @map("eld_device_id")
+  eldIdentifier     String?   @map("eld_identifier")
+  
+  // Data verification tracking
+  lastVerifiedAt    DateTime? @map("last_verified_at") // When data was last checked against API
+  dataVersion       Int       @default(1) @map("data_version") // Increment when updated from API
+  
+  // Full API response for reference
+  rawResponse       Json      @map("raw_response")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  @@unique([clerkOrgId, motiveEventId])
+  @@index([clerkOrgId])
+  @@index([motiveEventId])
+  @@index([driverId])
+  @@index([vehicleId])
+  @@index([vin])
+  @@index([date])
+  @@index([clerkOrgId, date])
+  @@index([startTime])
+  @@index([lastVerifiedAt]) // For finding records that need re-verification
+  @@map("motive_idle_events")
+}
+
+// MOTIVE Driver Utilization (per day, per driver)
+// Source: GET /v2/driver_utilization (queried with single-day ranges)
+// Stores daily driver utilization metrics
+// NOTE: Data may be updated retroactively - requires lookback verification
+model MotiveDriverUtilization {
+  id                String    @id @default(cuid())
+  clerkOrgId        String    @map("clerk_org_id")
+  driverId          Int       @map("driver_id") // Motive driver ID
+  driverFirstName   String?   @map("driver_first_name")
+  driverLastName    String?   @map("driver_last_name")
+  driverUsername    String?   @map("driver_username")
+  driverEmail       String?   @map("driver_email")
+  date              String    // YYYY-MM-DD (single day)
+  
+  // Daily utilization metrics
+  utilization       Float?    // Percentage
+  idleTime          Int?      @map("idle_time") // seconds
+  drivingTime       Int?      @map("driving_time") // seconds
+  idleFuel          Float?    @map("idle_fuel") // gallons
+  drivingFuel       Float?    @map("driving_fuel") // gallons
+  
+  // Data verification tracking
+  lastVerifiedAt    DateTime? @map("last_verified_at")
+  dataVersion       Int       @default(1) @map("data_version")
+  
+  // Full API response for reference
+  rawResponse       Json      @map("raw_response")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  @@unique([clerkOrgId, driverId, date])
+  @@index([clerkOrgId])
+  @@index([driverId])
+  @@index([date])
+  @@index([clerkOrgId, date])
+  @@index([lastVerifiedAt])
+  @@map("motive_driver_utilization")
+}
+
+// MOTIVE Vehicle Utilization (per day, per vehicle)
+// Source: GET /v2/vehicle_utilization
+// Stores daily utilization metrics for each vehicle
+// NOTE: Data may be updated retroactively - requires lookback verification
+model MotiveVehicleUtilization {
+  id                      String    @id @default(cuid())
+  clerkOrgId              String    @map("clerk_org_id")
+  vehicleId               Int       @map("vehicle_id") // Motive vehicle ID
+  vehicleNumber           String?   @map("vehicle_number")
+  vin                     String?
+  date                    String    // YYYY-MM-DD
+  
+  // Utilization metrics
+  lastLocatedAt           String?   @map("last_located_at") // ISO 8601 timestamp
+  utilizationPercentage   Float?    @map("utilization_percentage")
+  idleTime                Int?      @map("idle_time") // seconds
+  idleFuel                Float?    @map("idle_fuel") // gallons
+  drivingTime             Int?      @map("driving_time") // seconds
+  drivingFuel             Float?    @map("driving_fuel") // gallons
+  totalFuel               Float?    @map("total_fuel") // gallons
+  totalDistance           Float?    @map("total_distance") // miles
+  message                 String?   // API messages/errors
+  
+  // Data verification tracking
+  lastVerifiedAt          DateTime? @map("last_verified_at")
+  dataVersion             Int       @default(1) @map("data_version")
+  
+  // Full API response for reference
+  rawResponse             Json      @map("raw_response")
+  createdAt               DateTime  @default(now()) @map("created_at")
+  updatedAt               DateTime  @updatedAt @map("updated_at")
+
+  @@unique([clerkOrgId, vehicleId, date])
+  @@index([clerkOrgId])
+  @@index([vehicleId])
+  @@index([vin])
+  @@index([date])
+  @@index([clerkOrgId, date])
+  @@index([lastVerifiedAt])
+  @@map("motive_vehicle_utilization")
+}
+
+// MOTIVE Geofences (location boundaries/zones)
+// Source: GET /v1/geofences
+// Stores geofence definitions with polygons
+// NOTE: This is configuration data, not transactional - synced periodically
+model MotiveGeofence {
+  id                String    @id @default(cuid())
+  clerkOrgId        String    @map("clerk_org_id")
+  motiveGeofenceId  Int       @map("motive_geofence_id") // Motive's geofence ID
+  
+  // Geofence metadata
+  name              String
+  status            String    // "active", "deactivated"
+  address           String?
+  description       String?
+  category          String?   // "Uncategorized", "Fuel Station", "Customer", etc.
+  
+  // Location polygon (array of lat/lon points)
+  locationPoints    Json      @map("location_points") // [{lat, lon}, {lat, lon}, ...]
+  
+  // Full API response for reference
+  rawResponse       Json      @map("raw_response")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  @@unique([clerkOrgId, motiveGeofenceId])
+  @@index([clerkOrgId])
+  @@index([motiveGeofenceId])
+  @@index([status])
+  @@index([category])
+  @@map("motive_geofences")
+}
+
+// Enums for telematics
+enum TelematicsProvider {
+  SAMSARA
+  MOTIVE
+}
+
+enum TelematicsProviderStatus {
+  ACTIVE
+  ERROR
+  DISABLED
+}

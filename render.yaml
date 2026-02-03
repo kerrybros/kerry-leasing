@@ -1,0 +1,40 @@
+# Render deployment configuration
+# Place this in the root of your repository
+
+services:
+  - type: web
+    name: kerry-leasing-api
+    runtime: node
+    region: oregon # Change to your preferred region
+    buildCommand: cd apps/api && pnpm install && pnpm prisma:app:generate && pnpm prisma:repair:generate && pnpm build
+    startCommand: cd apps/api && pnpm start
+    rootDir: .
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 4000
+      - key: REPAIR_DATABASE_URL
+        sync: false # Set in Render dashboard
+      - key: APP_DATABASE_URL
+        sync: false # Set in Render dashboard
+      - key: CLERK_SECRET_KEY
+        sync: false # Set in Render dashboard
+      - key: CLERK_PUBLISHABLE_KEY
+        sync: false # Set in Render dashboard
+      - key: ALLOWED_ORIGINS
+        sync: false # Set in Render dashboard
+      - key: CRON_SECRET
+        generateValue: true # Render will auto-generate
+    healthCheckPath: /health
+
+  # Optional: Cron job for daily telematics sync
+  # Uncomment and configure after API is deployed
+  # - type: cron
+  #   name: motive-daily-sync
+  #   schedule: "0 6 * * *" # 6 AM daily
+  #   buildCommand: echo "No build needed"
+  #   startCommand: |
+  #     curl -X POST \
+  #       -H "x-cron-secret: $CRON_SECRET" \
+  #       https://kerry-leasing-api.onrender.com/cron/sync-motive

@@ -1,0 +1,446 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../../src/generated/repair-client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("REPAIR_DATABASE_URL")
+}
+
+model customer_units {
+  organization_id                           String
+  cust_id                                   String?
+  customer                                  String?
+  customer_active                           String?
+  customer_group                            String?
+  unit_id                                   String
+  unit_active                               String?
+  type                                      String?
+  subtype                                   String?
+  in_service_date                           String?
+  shop_has_possession                       String?
+  daily_rate                                String?
+  number                                    String?
+  fleet_num                                 String?
+  unit_external_id                          String?
+  nickname                                  String?
+  license_plate_state                       String?
+  license_plate                             String?
+  tax_location                              String?
+  vin                                       String?
+  chassis_maintenance_year                  String?
+  chassis_maintenance_make                  String?
+  chassis_maintenance_model                 String?
+  mileage                                   String?
+  tire_size                                 String?
+  engine_year                               String?
+  engine_make                               String?
+  engine_model                              String?
+  engine_serial_num                         String?
+  engine_usage                              String?
+  tires_year                                String?
+  tires_make                                String?
+  tires_model                               String?
+  tires_serial_num                          String?
+  tires_usage                               String?
+  track_preventive_maintenance              String?
+  units_default_bill_to_customer            String?
+  units_default_bill_to_customer_authorizer String?
+  default_carrier                           String?
+  ship_to_address                           String?
+  billing_location                          String?
+  driver_contact                            String?
+  access_method                             String?
+  display_notes_on_so                       String?
+  new_note                                  String?
+
+  @@id([organization_id, unit_id])
+}
+
+model customers {
+  organization_id                         String
+  access_method                           String?
+  assigned_shop                           String?
+  assist_with_preventive_maintenance      String?
+  associated_labor_rates                  String?
+  associated_shops                        String?
+  attach_pdf                              String?
+  auth_num_required                       String?
+  auto_receive                            String?
+  blanket_authorize                       String?
+  blanket_po_num                          String?
+  can_pay_invoices                        String?
+  can_print_procedures                    String?
+  can_see_invoices                        String?
+  company_name                            String?
+  credit_limit                            String?
+  credit_terms                            String?
+  customer_active                         String?
+  customer_group                          String?
+  customer_id                             BigInt
+  customer_main_phone                     String?
+  customer_secondary_phone                String?
+  customers_auto_fee_setting              String?
+  default_labor_rate                      String?
+  designated_tech                         String?
+  discount                                String?
+  display_notes_on_so                     String?
+  dot_num                                 String?
+  external_id                             String?
+  fax                                     String?
+  lead_source                             String?
+  mileage_rate                            String?
+  payment_method                          String?
+  po_required_last_complaint              String?
+  po_required_to_create_invoice           String?
+  po_required_to_create_so                String?
+  portal_is_on                            String?
+  portal_link                             String?
+  pre_auth_dollar_threshold               String?
+  price_level                             String?
+  restricted_from_adding_contacts         String?
+  restricted_from_adding_units            String?
+  sales_rep                               String?
+  show_auth_num                           String?
+  show_authorized_estimates_tab_in_portal String?
+  skip_diagnose                           String?
+  statement_preference                    String?
+  sublet_rate                             String?
+  supply_rate                             String?
+  tax_exempt_num                          String?
+  tax_location_rate                       String?
+  taxable                                 String?
+
+  @@id([organization_id, customer_id])
+}
+
+model daily_jobs_report {
+  organization_id      String
+  report_date          DateTime @db.Date
+  created_at           DateTime @default(now())
+  accounts_receivable  Decimal? @db.Decimal(14, 2)
+  authorized_hours     Json?
+  cost_of_labor_wip    Json?
+  cost_of_parts_wip    Json?
+  invoiced_dollars     Json?
+  labor_percent        Json?
+  new_dollars          Json?
+  new_today            Json?
+  total_revenue        Json?
+  total_work_dollars   Json?
+  wait_on_auth_oldest  Json?
+  day_before_count     Json?
+  day_before_dollars   Json?
+  percent_change       Json?
+  wait_on_auth_dollars Json?
+  wait_on_auth_hours   Json?
+  total_work_count     Json?
+  wip_dollars          Json?
+  total_billed_hours   Json?
+
+  @@id([organization_id, report_date])
+  @@index([organization_id])
+  @@index([organization_id, report_date])
+}
+
+model employee_group_members {
+  id                 Int             @id @default(autoincrement())
+  group_id           String
+  employee_tech_name String
+  created_at         DateTime        @default(now())
+  employee_groups    employee_groups @relation(fields: [group_id], references: [id], onDelete: Cascade)
+
+  @@unique([group_id, employee_tech_name])
+  @@index([employee_tech_name])
+}
+
+model employee_groups {
+  id                     String                   @id
+  organization_id        String?
+  name                   String
+  description            String?
+  color                  String?
+  always_exclude         Boolean                  @default(false)
+  visibility             EmployeeGroupVisibility  @default(USER)
+  created_by_user_id     String
+  created_at             DateTime                 @default(now())
+  updated_at             DateTime
+  employee_group_members employee_group_members[]
+
+  @@index([organization_id, created_by_user_id])
+  @@index([organization_id, visibility])
+}
+
+model employee_stats {
+  organization_id                String
+  tech_name                      String
+  invoiced_hours                 Decimal?
+  completed_hours                Decimal?
+  clocked_hours                  Decimal?
+  so_hours                       Decimal?
+  total_so_hours_completed_ais   Decimal?
+  expected_hours                 Decimal?
+  labor_revenue                  Decimal?
+  efficiency_invoiced            Decimal?
+  efficiency_completed           Decimal?
+  efficiency_expected            Decimal?
+  utilization                    Decimal?
+  date                           DateTime @db.Date
+  labor_revenue_per_clocked_hour Decimal?
+
+  @@id([organization_id, date, tech_name])
+}
+
+model employee_stats_read_model {
+  id                  String   @id
+  organization_id     String
+  tech_name           String
+  date                DateTime @db.Date
+  clocked_hours       Decimal? @db.Decimal(18, 4)
+  invoiced_hours      Decimal? @db.Decimal(18, 4)
+  so_hours            Decimal? @db.Decimal(18, 4)
+  labor_revenue       Decimal? @db.Decimal(18, 4)
+  invoice_num         String?
+  so_no               String?
+  customer_name       String?
+  unit                String?
+  shop                String?
+  billed_hours        Decimal? @db.Decimal(18, 4)
+  actual_hours        Decimal? @db.Decimal(18, 4)
+  cost_of_labor       Decimal? @db.Decimal(18, 4)
+  parts_revenue       Decimal? @db.Decimal(18, 4)
+  parts_cost          Decimal? @db.Decimal(18, 4)
+  service_description String?
+  component           String?
+  system              String?
+  service_writer      String?
+  total               Decimal? @db.Decimal(18, 4)
+
+  @@index([organization_id, date(sort: Desc)])
+  @@index([organization_id, tech_name, date])
+}
+
+model etl_log {
+  organization_id String   @db.VarChar(255)
+  report_date     DateTime @db.Date
+  file_slug       String   @db.VarChar(100)
+  run_start_time  DateTime @db.Timestamptz(3)
+  run_end_time    DateTime @db.Timestamptz(3)
+  status          String   @db.VarChar(20)
+  rows_loaded     BigInt   @default(0)
+  error_message   String?
+
+  @@id([organization_id, report_date, file_slug])
+  @@index([organization_id, file_slug, status, report_date])
+}
+
+model lookups_read_model {
+  id                   String   @id
+  organization_id      String
+  order_num            String
+  invoice_num          String
+  invoice_date         DateTime @db.Date
+  customer_name        String?
+  customer_external_id String?
+  shop                 String?
+  unit                 String?
+  unit_nickname        String?
+  unit_make            String?
+  unit_model           String?
+  unit_year            String?
+  unit_miles           String?
+  total                Decimal? @db.Decimal(18, 4)
+  type                 String?
+  qty                  Decimal? @db.Decimal(18, 4)
+  rate                 Decimal? @db.Decimal(18, 4)
+  parts_margin_pct     Decimal? @db.Decimal(18, 4)
+  part_cost            Decimal? @db.Decimal(18, 4)
+  labor_efficiency_pct Decimal? @db.Decimal(18, 4)
+  service_description  String?
+  part_description     String?
+  part_num             String?
+  po                   String?
+  engine_make          String?
+  engine_model         String?
+  engine_year          String?
+
+  @@index([organization_id, invoice_date(sort: Desc)])
+  @@index([organization_id, order_num, invoice_date])
+}
+
+model organization_config {
+  slug        String   @unique @db.VarChar(50)
+  dev_org_id  String   @db.VarChar(50)
+  prod_org_id String   @db.VarChar(50)
+  is_active   Boolean  @default(true)
+  data_config Json
+  created_at  DateTime @default(now()) @db.Timestamptz(3)
+  updated_at  DateTime @db.Timestamptz(3)
+
+  @@id([dev_org_id, prod_org_id])
+  @@index([is_active])
+}
+
+model pm_filter_group_members {
+  id               Int              @id @default(autoincrement())
+  group_id         String
+  created_at       DateTime         @default(now())
+  filter_type      PMFilterType
+  filter_value     String
+  pm_filter_groups pm_filter_groups @relation(fields: [group_id], references: [id], onDelete: Cascade)
+
+  @@unique([group_id, filter_type, filter_value])
+}
+
+model pm_filter_groups {
+  id                      String                    @id
+  organization_id         String?
+  name                    String
+  description             String?
+  color                   String?
+  always_exclude          Boolean                   @default(false)
+  visibility              EmployeeGroupVisibility   @default(USER)
+  created_by_user_id      String
+  created_at              DateTime                  @default(now())
+  updated_at              DateTime
+  pm_filter_group_members pm_filter_group_members[]
+
+  @@index([organization_id, created_by_user_id])
+  @@index([organization_id, visibility])
+}
+
+model pm_schedules {
+  id              Int      @id @default(autoincrement())
+  organization_id String
+  customer        String?
+  shop            String?
+  pm              String?
+  unit            String?
+  unit_nickname   String?
+  interval        String?
+  last_performed  String?
+  next_due        String?
+  current_usage   String?
+  component       String?
+  system          String?
+  hours           Decimal?
+  labor_revenue   String?
+
+  @@index([organization_id, customer])
+  @@index([organization_id])
+  @@index([organization_id, unit])
+}
+
+model refresh_log {
+  organization_id String   @db.VarChar(255)
+  refresh_time    DateTime @db.Timestamptz(3)
+  user            String   @db.VarChar(100)
+  status          String   @db.VarChar(20)
+  error_message   String?
+  type            String   @default("fullbay_refresh") @db.VarChar(50)
+
+  @@id([organization_id, type])
+}
+
+model revenue_details {
+  id                         Int       @id @default(autoincrement())
+  organization_id            String
+  shop                       String?
+  customer_group             String?
+  customer                   String?
+  customer_external_id       String?
+  credit_terms               String?
+  sales_rep                  String?
+  unit                       String?
+  unit_nickname              String?
+  unit_type                  String?
+  unit_address               String?
+  unit_miles                 String?
+  engine_hours               String?
+  number                     String?
+  invoice_date               DateTime? @db.Date
+  order                      String?
+  po                         String?
+  auth_num                   String?
+  service_writer             String?
+  created_date               DateTime? @db.Date
+  order_created_date         DateTime? @db.Date
+  soai_id                    String?
+  type                       String?
+  item                       String?
+  item_display_title         String?
+  labor_rate                 String?
+  complaint_description      String?
+  shop_unit                  String?
+  cause_type                 String?
+  severity                   String?
+  correction_id              String?
+  service_description        String?
+  global_service_description String?
+  component                  String?
+  system                     String?
+  date_action_completed      String?
+  part_category              String?
+  part_num                   String?
+  part_description           String?
+  powered_by_motor           String?
+  powered_by_mitchell1       String?
+  qty                        Decimal?
+  rate                       Decimal?
+  total                      Decimal?
+  tax_location               String?
+  taxable_state_bill_to      String?
+  sales_tax                  Decimal?
+  part_cost                  Decimal?
+  total_cost_of_parts        Decimal?
+  parts_margin               Decimal?
+  parts_margin_percent       Decimal?
+  technician_rate            Decimal?
+  actual_hours               Decimal?
+  cost_of_labor              Decimal?
+  lead_tech                  String?
+  taxable_sales              Decimal?
+  non_taxable_sales          Decimal?
+  sales_total                Decimal?
+
+  @@index([organization_id, number])
+}
+
+model revenue_read_model {
+  organization_id String
+  invoice_num     String
+  invoice_date    DateTime @db.Date
+  so_no           String?
+  customer_name   String?
+  unit            String?
+  shop            String?
+  revenue         Decimal? @db.Decimal(18, 4)
+  billed_hours    Decimal? @db.Decimal(18, 4)
+  actual_hours    Decimal? @db.Decimal(18, 4)
+  labor_revenue   Decimal? @db.Decimal(18, 4)
+  labor_cost      Decimal? @db.Decimal(18, 4)
+  parts_revenue   Decimal? @db.Decimal(18, 4)
+  parts_cost      Decimal? @db.Decimal(18, 4)
+  otc_revenue     Decimal? @db.Decimal(18, 4)
+  otc_cost        Decimal? @db.Decimal(18, 4)
+  component       String?
+  lead_technician String?
+  service_writer  String?
+  system          String?
+
+  @@id([organization_id, invoice_num, invoice_date])
+  @@index([organization_id, invoice_date(sort: Desc)])
+}
+
+enum EmployeeGroupVisibility {
+  USER
+  ORG
+}
+
+enum PMFilterType {
+  CUSTOMER
+  PM_TYPE
+  UNIT
+  SHOP
+}
