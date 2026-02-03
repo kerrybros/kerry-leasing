@@ -4,8 +4,8 @@
  * Uses start_date/end_date parameters (YYYY-MM-DD format)
  */
 
-import { MotiveClient } from '../client';
-import { MotiveIdleEventsResponse } from '../types';
+import { MotiveClient } from '../client.js';
+import { MotiveIdleEventsResponse } from '../types.js';
 
 export async function fetchIdleEvents(
   client: MotiveClient,
@@ -35,3 +35,4 @@ export async function fetchIdleEvents(
     throw error;
   }
 }
+

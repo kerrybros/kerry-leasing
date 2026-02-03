@@ -3,10 +3,10 @@
  * Fetches driving periods from Motive API and stores in database
  */
 
-import { appPrisma } from '../../../lib/prisma';
-import { MotiveClient } from '../client';
-import { fetchDrivingPeriods } from '../endpoints/drivingPeriods';
-import { SyncResult } from '../types';
+import { appPrisma } from '../../../lib/prisma.js';
+import { MotiveClient } from '../client.js';
+import { fetchDrivingPeriods } from '../endpoints/drivingPeriods.js';
+import { SyncResult } from '../types.js';
 
 export async function syncDrivingPeriods(
   clerkOrgId: string,
@@ -159,3 +159,4 @@ export async function syncDrivingPeriods(
     throw error;
   }
 }
+

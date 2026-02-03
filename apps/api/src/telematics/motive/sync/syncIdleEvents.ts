@@ -3,10 +3,10 @@
  * Fetches idle events from Motive API and stores in database
  */
 
-import { appPrisma } from '../../../lib/prisma';
-import { MotiveClient } from '../client';
-import { fetchIdleEvents } from '../endpoints/idleEvents';
-import { SyncResult } from '../types';
+import { appPrisma } from '../../../lib/prisma.js';
+import { MotiveClient } from '../client.js';
+import { fetchIdleEvents } from '../endpoints/idleEvents.js';
+import { SyncResult } from '../types.js';
 
 export async function syncIdleEvents(
   clerkOrgId: string,
@@ -152,3 +152,4 @@ export async function syncIdleEvents(
     throw error;
   }
 }
+

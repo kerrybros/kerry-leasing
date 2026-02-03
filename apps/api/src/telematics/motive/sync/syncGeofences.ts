@@ -4,10 +4,10 @@
  * NOTE: Geofences are configuration data, not transactional - no verification needed
  */
 
-import { appPrisma } from '../../../lib/prisma';
-import { MotiveClient } from '../client';
-import { fetchGeofences } from '../endpoints/geofences';
-import { SyncResult } from '../types';
+import { appPrisma } from '../../../lib/prisma.js';
+import { MotiveClient } from '../client.js';
+import { fetchGeofences } from '../endpoints/geofences.js';
+import { SyncResult } from '../types.js';
 
 export async function syncGeofences(
   clerkOrgId: string,
@@ -92,3 +92,4 @@ export async function syncGeofences(
     throw error;
   }
 }
+

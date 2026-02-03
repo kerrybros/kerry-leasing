@@ -3,10 +3,10 @@
  * Fetches vehicle utilization from Motive API and stores in database
  */
 
-import { appPrisma } from '../../../lib/prisma';
-import { MotiveClient } from '../client';
-import { fetchVehicleUtilization } from '../endpoints/vehicleUtilization';
-import { SyncResult } from '../types';
+import { appPrisma } from '../../../lib/prisma.js';
+import { MotiveClient } from '../client.js';
+import { fetchVehicleUtilization } from '../endpoints/vehicleUtilization.js';
+import { SyncResult } from '../types.js';
 
 export async function syncVehicleUtilization(
   clerkOrgId: string,
@@ -133,3 +133,4 @@ export async function syncVehicleUtilization(
     throw error;
   }
 }
+

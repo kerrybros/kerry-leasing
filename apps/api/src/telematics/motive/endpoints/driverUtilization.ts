@@ -3,8 +3,8 @@
  * Fetches daily driver utilization metrics from Motive
  */
 
-import { MotiveClient } from '../client';
-import { MotiveDriverUtilizationResponse } from '../types';
+import { MotiveClient } from '../client.js';
+import { MotiveDriverUtilizationResponse } from '../types.js';
 
 export async function fetchDriverUtilization(
   client: MotiveClient,
@@ -34,3 +34,4 @@ export async function fetchDriverUtilization(
     throw error;
   }
 }
+

@@ -3,13 +3,13 @@
  * Main orchestrator for syncing all Motive data
  */
 
-import { appPrisma } from '../../lib/prisma';
-import { syncVehicleUtilization } from './sync/syncVehicleUtilization';
-import { syncDriverUtilization } from './sync/syncDriverUtilization';
-import { syncIdleEvents } from './sync/syncIdleEvents';
-import { syncDrivingPeriods } from './sync/syncDrivingPeriods';
-import { syncGeofences } from './sync/syncGeofences';
-import { getYesterday, getTwoDaysAgo, SyncResult } from './types';
+import { appPrisma } from '../../lib/prisma.js';
+import { syncVehicleUtilization } from './sync/syncVehicleUtilization.js';
+import { syncDriverUtilization } from './sync/syncDriverUtilization.js';
+import { syncIdleEvents } from './sync/syncIdleEvents.js';
+import { syncDrivingPeriods } from './sync/syncDrivingPeriods.js';
+import { syncGeofences } from './sync/syncGeofences.js';
+import { getYesterday, getTwoDaysAgo, SyncResult } from './types.js';
 
 interface OrgSyncResult {
   clerkOrgId: string;

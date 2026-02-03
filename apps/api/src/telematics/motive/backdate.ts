@@ -6,9 +6,9 @@
  *   npm run backdate -- --org=org_xxxxx --start=2025-05-01 --end=2026-02-02
  */
 
-import { appPrisma } from '../../lib/prisma';
-import { syncMotiveOrgForDate } from './syncService';
-import { getDateRange } from './types';
+import { appPrisma } from '../../lib/prisma.js';
+import { syncMotiveOrgForDate } from './syncService.js';
+import { getDateRange } from './types.js';
 
 interface BackdateOptions {
   clerkOrgId: string;
@@ -174,3 +174,4 @@ if (require.main === module) {
 }
 
 export { backdateMotiveData };
+

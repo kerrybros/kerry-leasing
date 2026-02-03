@@ -8,7 +8,7 @@
  *   tsx src/cron/sync-motive-daily.ts
  */
 
-import { syncMotiveDaily } from '../telematics/motive/syncService';
+import { syncMotiveDaily } from '../telematics/motive/syncService.js';
 
 async function main() {
   console.log(`\n${'='.repeat(60)}`);
@@ -42,3 +42,4 @@ async function main() {
 
 // Run
 main();
+

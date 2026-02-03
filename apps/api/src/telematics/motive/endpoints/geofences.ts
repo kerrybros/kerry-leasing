@@ -4,8 +4,8 @@
  * No date parameters - this is configuration data
  */
 
-import { MotiveClient } from '../client';
-import { MotiveGeofencesResponse } from '../types';
+import { MotiveClient } from '../client.js';
+import { MotiveGeofencesResponse } from '../types.js';
 
 export async function fetchGeofences(
   client: MotiveClient
@@ -23,3 +23,4 @@ export async function fetchGeofences(
     throw error;
   }
 }
+
