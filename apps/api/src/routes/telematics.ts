@@ -17,8 +17,11 @@ import { getAppClient } from '../db/appRepo.js';
 import { syncOrgForDate, syncAllOrgsForDate, getYesterdayToronto } from '../telematics/syncTelematics.js';
 import { validateCredentials } from '../telematics/providers/index.js';
 import { TelematicsProvider, TelematicsProviderStatus } from '../telematics/types.js';
+import { TtlCache } from '../lib/ttlCache.js';
 
 const router = Router();
+const TEN_HOURS_MS = 10 * 60 * 60 * 1000;
+    const telematicsCache = new TtlCache<any>(TEN_HOURS_MS, 300); // Cache update forced for migration
 
 /**
  * GET /telematics/daily
@@ -37,6 +40,8 @@ router.get(
   requireOrg,
   async (req: AuthRequest, res) => {
     try {
+      const startedAt = Date.now();
+      const fetchedAt = new Date().toISOString();
       const orgId = req.auth!.orgId!;
       const { vin, from, to } = req.query;
 
@@ -63,14 +68,29 @@ router.get(
         where.vin = vin as string;
       }
 
-      // Fetch metrics
-      const metrics = await appClient.telematicsDailyMetric.findMany({
-        where,
-        orderBy: [
-          { date: 'desc' },
-          { vin: 'asc' },
-        ],
+      const cacheKey = `telematics:daily:${orgId}:${String(vin || '')}:${String(from)}:${String(to)}`;
+      const { value: metrics, hit } = await telematicsCache.getOrSet(cacheKey, async () => {
+        return await appClient.telematicsDailyMetric.findMany({
+          where,
+          orderBy: [{ date: 'desc' }, { vin: 'asc' }],
+        });
       });
+
+      const elapsedMs = Date.now() - startedAt;
+      console.log('[Telematics] GET /telematics/daily', {
+        fetchedAt,
+        orgId,
+        vin: vin || null,
+        from,
+        to,
+        rows: Array.isArray(metrics) ? metrics.length : 0,
+        cache: hit ? 'HIT' : 'MISS',
+        elapsedMs,
+      });
+
+      res.setHeader('Cache-Control', 'private, max-age=36000');
+      res.setHeader('X-Cache', hit ? 'HIT' : 'MISS');
+      res.setHeader('X-Elapsed-Ms', String(elapsedMs));
 
       // Return metrics directly as array (frontend expects this format)
       res.json(metrics);
@@ -100,6 +120,8 @@ router.get(
   requireOrg,
   async (req: AuthRequest, res) => {
     try {
+      const startedAt = Date.now();
+      const fetchedAt = new Date().toISOString();
       const orgId = req.auth!.orgId!;
       const { from, to } = req.query;
 
@@ -112,15 +134,17 @@ router.get(
 
       const appClient = getAppClient();
 
-      // Fetch all metrics for this org in the date range
-      const metrics = await appClient.telematicsDailyMetric.findMany({
-        where: {
-          clerkOrgId: orgId,
-          date: {
-            gte: from as string,
-            lte: to as string,
+      const cacheKey = `telematics:summary:${orgId}:${String(from)}:${String(to)}`;
+      const { value: metrics, hit } = await telematicsCache.getOrSet(cacheKey, async () => {
+        return await appClient.telematicsDailyMetric.findMany({
+          where: {
+            clerkOrgId: orgId,
+            date: {
+              gte: from as string,
+              lte: to as string,
+            },
           },
-        },
+        });
       });
 
       // Calculate aggregates
@@ -150,6 +174,20 @@ router.get(
         summary.avgMpg = summary.avgMpg / mpgCount;
       }
 
+      const elapsedMs = Date.now() - startedAt;
+      console.log('[Telematics] GET /telematics/summary', {
+        fetchedAt,
+        orgId,
+        from,
+        to,
+        rows: Array.isArray(metrics) ? metrics.length : 0,
+        cache: hit ? 'HIT' : 'MISS',
+        elapsedMs,
+      });
+
+      res.setHeader('Cache-Control', 'private, max-age=36000');
+      res.setHeader('X-Cache', hit ? 'HIT' : 'MISS');
+      res.setHeader('X-Elapsed-Ms', String(elapsedMs));
       res.json(summary);
     } catch (error) {
       console.error('Error fetching telematics summary:', error);
@@ -361,6 +399,94 @@ router.post(
       res.status(500).json({
         error: 'Internal Server Error',
         message: 'Failed to trigger sync',
+      });
+    }
+  }
+);
+
+// GET /telematics/motive/vehicle-utilization
+// Returns raw Motive vehicle utilization data for the org
+router.get(
+  '/motive/vehicle-utilization',
+  clerkAuthMiddleware,
+  requireOrg,
+  async (req: AuthRequest, res) => {
+    try {
+      const startedAt = Date.now();
+      const fetchedAt = new Date().toISOString();
+      const orgId = req.auth!.orgId!;
+      const appClient = getAppClient();
+
+      const cacheKey = `telematics:motive:vehicle-utilization:${orgId}`;
+      const { value: records, hit } = await telematicsCache.getOrSet(cacheKey, async () => {
+        return await appClient.motiveVehicleUtilization.findMany({
+          where: { clerkOrgId: orgId },
+          orderBy: [{ date: 'desc' }, { vehicleId: 'asc' }],
+        });
+      });
+
+      const elapsedMs = Date.now() - startedAt;
+      console.log('[Telematics] GET /telematics/motive/vehicle-utilization', {
+        fetchedAt,
+        orgId,
+        rows: Array.isArray(records) ? records.length : 0,
+        cache: hit ? 'HIT' : 'MISS',
+        elapsedMs,
+      });
+
+      res.setHeader('Cache-Control', 'private, max-age=36000');
+      res.setHeader('X-Cache', hit ? 'HIT' : 'MISS');
+      res.setHeader('X-Elapsed-Ms', String(elapsedMs));
+      res.json(records);
+    } catch (error) {
+      console.error('Error fetching vehicle utilization:', error);
+      res.status(500).json({
+        error: 'Internal Server Error',
+        message: 'Failed to fetch vehicle utilization data',
+      });
+    }
+  }
+);
+
+// GET /telematics/motive/driver-utilization
+// Returns raw Motive driver utilization data for the org
+router.get(
+  '/motive/driver-utilization',
+  clerkAuthMiddleware,
+  requireOrg,
+  async (req: AuthRequest, res) => {
+    try {
+      const startedAt = Date.now();
+      const fetchedAt = new Date().toISOString();
+      const orgId = req.auth!.orgId!;
+      const appClient = getAppClient();
+
+      const cacheKey = `telematics:motive:driver-utilization:${orgId}`;
+      const { value: records, hit } = await telematicsCache.getOrSet(cacheKey, async () => {
+        return await appClient.motiveDriverUtilization.findMany({
+          where: { clerkOrgId: orgId },
+          orderBy: [{ date: 'desc' }, { driverId: 'asc' }],
+        });
+      });
+
+      const elapsedMs = Date.now() - startedAt;
+      console.log('[Telematics] GET /telematics/motive/driver-utilization', {
+        fetchedAt,
+        orgId,
+        rows: Array.isArray(records) ? records.length : 0,
+        cache: hit ? 'HIT' : 'MISS',
+        elapsedMs,
+      });
+
+      res.setHeader('Cache-Control', 'private, max-age=36000');
+      res.setHeader('X-Cache', hit ? 'HIT' : 'MISS');
+      res.setHeader('X-Elapsed-Ms', String(elapsedMs));
+      res.json(records);
+    } catch (error) {
+      console.error('Error fetching driver utilization:', error);
+      res.status(500).json({
+        error: 'Internal Server Error',
+        message: 'Failed to fetch driver utilization data',
       });
     }
   }

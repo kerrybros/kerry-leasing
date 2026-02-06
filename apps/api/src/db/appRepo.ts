@@ -62,6 +62,52 @@ export async function getCustomerIdForOrg(
 }
 
 /**
+ * Repair customer config (KL org -> Repair customer name + contract start)
+ *
+ * This intentionally uses "klOrgId" naming to avoid confusion with repair DB IDs.
+ */
+export async function getRepairCustomerConfig(klOrgId: string): Promise<{
+  klOrgId: string;
+  customerName: string;
+  contractStartDate: Date;
+} | null> {
+  const client = getAppClient();
+
+  const config = await client.repairCustomerConfig.findUnique({
+    where: { klOrgId },
+    select: {
+      klOrgId: true,
+      customerName: true,
+      contractStartDate: true,
+    },
+  });
+
+  return config || null;
+}
+
+export async function upsertRepairCustomerConfig(input: {
+  klOrgId: string;
+  customerName: string;
+  contractStartDate: Date;
+}) {
+  const client = getAppClient();
+
+  return await client.repairCustomerConfig.upsert({
+    where: { klOrgId: input.klOrgId },
+    create: {
+      klOrgId: input.klOrgId,
+      customerName: input.customerName,
+      contractStartDate: input.contractStartDate,
+    },
+    update: {
+      customerName: input.customerName,
+      contractStartDate: input.contractStartDate,
+      updatedAt: new Date(),
+    },
+  });
+}
+
+/**
  * Link a Clerk organization to a customer ID
  * @param clerkOrgId - Clerk organization ID
  * @param customerId - Customer ID from repair database
@@ -125,4 +171,120 @@ export async function disconnectAppDb() {
     await appClient.$disconnect();
     appClient = null;
   }
+}
+
+/**
+ * Get units from telematics data (when there's no repair database mapping)
+ * @param clerkOrgId - Clerk organization ID
+ * @returns Array of units with basic info from telematics data
+ */
+export async function getUnitsFromTelematics(clerkOrgId: string) {
+  const client = getAppClient();
+  
+  // Get distinct VINs from multiple sources
+  const vinSet = new Set<string>();
+  const vehicleInfo = new Map<string, { number?: string; name?: string }>();
+  
+  // 1. Get VINs from vehicle maps
+  const vehicleMaps = await client.telematicsVehicleMap.findMany({
+    where: { clerkOrgId },
+    select: {
+      vin: true,
+      providerVehicleName: true,
+    },
+    distinct: ['vin'],
+  });
+  vehicleMaps.forEach(v => {
+    vinSet.add(v.vin);
+    vehicleInfo.set(v.vin, { name: v.providerVehicleName || undefined });
+  });
+  
+  // 2. Get VINs from normalized daily metrics
+  const telematicsVins = await client.telematicsDailyMetric.findMany({
+    where: { clerkOrgId },
+    select: { vin: true },
+    distinct: ['vin'],
+  });
+  telematicsVins.forEach(v => vinSet.add(v.vin));
+  
+  // 3. Get VINs from Motive raw data (vehicle utilization)
+  const motiveVehicles = await client.motiveVehicleUtilization.findMany({
+    where: {
+      clerkOrgId,
+      vin: { not: null },
+    },
+    select: {
+      vin: true,
+      vehicleNumber: true,
+    },
+    distinct: ['vin'],
+  });
+  motiveVehicles.forEach(v => {
+    if (v.vin) {
+      vinSet.add(v.vin);
+      if (v.vehicleNumber && !vehicleInfo.has(v.vin)) {
+        vehicleInfo.set(v.vin, { number: v.vehicleNumber });
+      }
+    }
+  });
+  
+  // 4. Get VINs from Motive driving periods
+  const motivePeriods = await client.motiveDrivingPeriod.findMany({
+    where: {
+      clerkOrgId,
+      vin: { not: null },
+    },
+    select: {
+      vin: true,
+      vehicleNumber: true,
+    },
+    distinct: ['vin'],
+  });
+  motivePeriods.forEach(v => {
+    if (v.vin) {
+      vinSet.add(v.vin);
+      if (v.vehicleNumber && !vehicleInfo.has(v.vin)) {
+        vehicleInfo.set(v.vin, { number: v.vehicleNumber });
+      }
+    }
+  });
+  
+  // 5. Get VINs from Motive idle events
+  const motiveIdle = await client.motiveIdleEvent.findMany({
+    where: {
+      clerkOrgId,
+      vin: { not: null },
+    },
+    select: {
+      vin: true,
+      vehicleNumber: true,
+    },
+    distinct: ['vin'],
+  });
+  motiveIdle.forEach(v => {
+    if (v.vin) {
+      vinSet.add(v.vin);
+      if (v.vehicleNumber && !vehicleInfo.has(v.vin)) {
+        vehicleInfo.set(v.vin, { number: v.vehicleNumber });
+      }
+    }
+  });
+  
+  // Build unit objects
+  const units = Array.from(vinSet).map(vin => {
+    const info = vehicleInfo.get(vin);
+    const unitNumber = info?.number || info?.name || vin.slice(-6);
+    
+    return {
+      vin,
+      unitNumber,
+      make: null,
+      model: null,
+      year: null,
+      customerId: clerkOrgId, // Use orgId as pseudo-customer ID
+      customerName: null,
+    };
+  });
+  
+  return units;
 }

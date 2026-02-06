@@ -8,8 +8,12 @@ import {
 import * as repairRepo from '../db/repairRepo.js';
 import * as appRepo from '../db/appRepo.js';
 import { getRepairDbSafetyStatus } from '../safety/repairDbSafety.js';
+import { getAppPrisma } from '../lib/prisma.js';
 import telematicsRoutes from './telematics.js';
 import cronRoutes from './cron.js';
+import servicePlanRoutes from './servicePlan.js';
+import fleetRoutes from './fleet.js';
+import repairsRoutes from './repairs.js';
 
 const router = Router();
 
@@ -44,10 +48,16 @@ router.get(
       const customerId = await appRepo.getCustomerIdForOrg(orgId);
       
       if (!customerId) {
-        return res.status(503).json({
-          error: 'Service Unavailable',
-          message: 'Organization not linked to a customer. Contact administrator to set up org mapping.',
+        // No repair database mapping - return units from telematics data only
+        console.log(`No customer mapping for org ${orgId}, returning telematics-only units`);
+        
+        const telematicsUnits = await appRepo.getUnitsFromTelematics(orgId);
+        
+        return res.json({
+          units: telematicsUnits,
+          count: telematicsUnits.length,
           orgId,
+          source: 'telematics',
         });
       }
 
@@ -59,6 +69,7 @@ router.get(
         count: units.length,
         orgId,
         customerId,
+        source: 'repair',
       });
     } catch (error) {
       console.error('Error fetching units:', error);
@@ -101,10 +112,26 @@ router.get(
       const customerId = await appRepo.getCustomerIdForOrg(orgId);
       
       if (!customerId) {
-        return res.status(503).json({
-          error: 'Service Unavailable',
-          message: 'Organization not linked to a customer. Contact administrator to set up org mapping.',
-          orgId,
+        // No repair database mapping - return telematics-only unit
+        console.log(`No customer mapping for org ${orgId}, returning telematics-only unit for VIN ${vin}`);
+        
+        const telematicsUnits = await appRepo.getUnitsFromTelematics(orgId);
+        const telematicsUnit = telematicsUnits.find(u => u.vin === vin);
+        
+        return res.json({
+          repairs: [],
+          count: 0,
+          vin,
+          unit: {
+            vin,
+            unitNumber: telematicsUnit?.unitNumber || vin.slice(-6),
+            make: null,
+            model: null,
+            year: null,
+            customerId: orgId,
+            customerName: null,
+          },
+          source: 'telematics',
         });
       }
 
@@ -142,6 +169,7 @@ router.get(
           customerId: unit.customerId,
           customerName: unit.customerName,
         },
+        source: 'repair',
       });
     } catch (error) {
       console.error('Error fetching repairs:', error);
@@ -229,6 +257,106 @@ router.get(
   }
 );
 
+// Admin endpoint - configure repair customer for this KL org
+// Stores customer_name + contract_start_date keyed by kl_org_id (Clerk org id)
+router.put(
+  '/admin/repair-customer',
+  clerkAuthMiddleware,
+  requireOrg,
+  requireRole(['internal']),
+  async (req: AuthRequest, res) => {
+    try {
+      const klOrgId = req.auth!.orgId!;
+      const { customerName, contractStartDate } = req.body || {};
+
+      if (!customerName || typeof customerName !== 'string') {
+        return res.status(400).json({
+          error: 'Bad Request',
+          message: 'customerName (string) is required',
+        });
+      }
+
+      if (!contractStartDate || typeof contractStartDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(contractStartDate)) {
+        return res.status(400).json({
+          error: 'Bad Request',
+          message: 'contractStartDate (string) is required in YYYY-MM-DD format',
+        });
+      }
+
+      const appPrisma = getAppPrisma();
+      const saved = await appPrisma.repairCustomerConfig.upsert({
+        where: { klOrgId },
+        create: {
+          klOrgId,
+          customerName: customerName.trim(),
+          contractStartDate: new Date(contractStartDate),
+        },
+        update: {
+          customerName: customerName.trim(),
+          contractStartDate: new Date(contractStartDate),
+          updatedAt: new Date(),
+        },
+      });
+
+      res.json({
+        success: true,
+        config: {
+          klOrgId: saved.klOrgId,
+          customerName: saved.customerName,
+          contractStartDate: saved.contractStartDate.toISOString().split('T')[0],
+          updatedAt: saved.updatedAt,
+        },
+      });
+    } catch (error) {
+      console.error('Error saving repair customer config:', error);
+      res.status(500).json({
+        error: 'Internal Server Error',
+        message: 'Failed to save repair customer config',
+      });
+    }
+  }
+);
+
+router.get(
+  '/admin/repair-customer',
+  clerkAuthMiddleware,
+  requireOrg,
+  requireRole(['internal']),
+  async (req: AuthRequest, res) => {
+    try {
+      const klOrgId = req.auth!.orgId!;
+      const appPrisma = getAppPrisma();
+
+      const config = await appPrisma.repairCustomerConfig.findUnique({
+        where: { klOrgId },
+        select: {
+          klOrgId: true,
+          customerName: true,
+          contractStartDate: true,
+          updatedAt: true,
+        },
+      });
+
+      res.json({
+        config: config
+          ? {
+              klOrgId: config.klOrgId,
+              customerName: config.customerName,
+              contractStartDate: config.contractStartDate.toISOString().split('T')[0],
+              updatedAt: config.updatedAt,
+            }
+          : null,
+      });
+    } catch (error) {
+      console.error('Error fetching repair customer config:', error);
+      res.status(500).json({
+        error: 'Internal Server Error',
+        message: 'Failed to fetch repair customer config',
+      });
+    }
+  }
+);
+
 // Admin endpoint - check repair database safety configuration
 router.get(
   '/admin/repair-db-safety',
@@ -295,5 +423,19 @@ router.use('/telematics', telematicsRoutes);
 
 // Mount cron routes
 router.use('/cron', cronRoutes);
+
+// Mount fleet routes (combined telematics + repair data, filtered by service plan)
+router.use('/fleet', fleetRoutes);
+
+// Mount service plan admin routes (requires auth and org - role check temporarily disabled for dev)
+router.use(
+  '/admin/service-plan',
+  clerkAuthMiddleware,
+  requireOrg,
+  servicePlanRoutes
+);
+
+// Mount repairs aggregation routes
+router.use('/repairs', repairsRoutes);
 
 export default router;

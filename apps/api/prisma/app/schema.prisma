@@ -23,6 +23,24 @@ model CustomerOrgMap {
   @@map("customer_org_maps")
 }
 
+// Repair customer configuration for this portal org (KL org)
+// This avoids mixing Clerk org IDs with "customer_id" naming.
+// Scoping for repair reads is done via:
+// - REPAIR_SHOP_ORG_ID (fixed repair shop)
+// - customer_name (this model)
+// - contract_start_date (this model)
+model RepairCustomerConfig {
+  id                String   @id @default(cuid())
+  klOrgId            String   @unique @map("kl_org_id")
+  customerName       String   @map("customer_name")
+  contractStartDate  DateTime @map("contract_start_date")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  @@index([klOrgId])
+  @@map("repair_customer_configs")
+}
+
 // Telematics Provider Configuration
 // Each org can have ONE provider configured (SAMSARA or MOTIVE)
 model TelematicsProviderAccount {
@@ -437,4 +455,48 @@ enum TelematicsProviderStatus {
   ACTIVE
   ERROR
   DISABLED
+}
+
+// Service Plan Units: Links repair units to telematics and manages inclusion
+// This is the source of truth for which units should appear in the fleet view
+model ServicePlanUnit {
+  id                String    @id @default(cuid())
+  clerkOrgId        String    @map("clerk_org_id")
+  
+  // Repair database identifiers (source of truth)
+  repairUnitId      String    @map("repair_unit_id")      // customer_units.unit_id
+  repairUnitNumber  String?   @map("repair_unit_number")  // customer_units.number
+  repairVin         String?   @map("repair_vin")          // VIN from repair DB
+  repairCustomerId  String?   @map("repair_customer_id")  // customer_units.cust_id
+  
+  // Telematics matching
+  telematicsVin     String?   @map("telematics_vin")      // Matched telematics VIN
+  matchType         ServicePlanMatchType @default(UNMATCHED) @map("match_type")
+  matchConfidence   Float?    @map("match_confidence")    // 0.0 to 1.0 for auto-matches
+  
+  // Service plan configuration
+  isIncluded        Boolean   @default(true) @map("is_included") // Show in fleet view
+  notes             String?
+  
+  // Audit trail
+  matchedBy         String?   @map("matched_by")          // Clerk user ID who manually matched
+  matchedAt         DateTime? @map("matched_at")
+  lastSyncedAt      DateTime? @map("last_synced_at")      // Last sync from repair DB
+  
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+  
+  @@unique([clerkOrgId, repairUnitId])
+  @@index([clerkOrgId])
+  @@index([isIncluded])
+  @@index([matchType])
+  @@index([repairVin])
+  @@index([telematicsVin])
+  @@map("service_plan_units")
+}
+
+enum ServicePlanMatchType {
+  AUTO          // Automatically matched via VIN
+  MANUAL        // Manually matched by admin
+  UNMATCHED     // No telematics match
 }

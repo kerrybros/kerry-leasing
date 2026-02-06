@@ -24,9 +24,10 @@ export async function apiRequest<T>(
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const response = await fetch(`${API_URL}${endpoint}`, {
+    const response = await fetch(`${API_URL}${endpoint}`, {
     ...options,
     headers,
+    cache: 'no-store'
   });
 
   if (!response.ok) {
@@ -40,23 +41,32 @@ export async function apiRequest<T>(
   return response.json();
 }
 
-// Convenience methods that accept a token parameter
-export const createApiClient = (token: string | null) => ({
+// Convenience methods that accept a token parameter and optional headers
+export const createApiClient = (token: string | null, customHeaders: Record<string, string> = {}) => ({
   get: <T>(endpoint: string) =>
-    apiRequest<T>(endpoint, token, { method: 'GET' }),
+    apiRequest<T>(endpoint, token, { 
+      method: 'GET',
+      headers: customHeaders,
+      cache: 'no-store'
+    }),
 
   post: <T>(endpoint: string, data?: unknown) =>
     apiRequest<T>(endpoint, token, {
       method: 'POST',
       body: data ? JSON.stringify(data) : undefined,
+      headers: customHeaders,
     }),
 
   put: <T>(endpoint: string, data?: unknown) =>
     apiRequest<T>(endpoint, token, {
       method: 'PUT',
       body: data ? JSON.stringify(data) : undefined,
+      headers: customHeaders,
     }),
 
   delete: <T>(endpoint: string) =>
-    apiRequest<T>(endpoint, token, { method: 'DELETE' }),
+    apiRequest<T>(endpoint, token, { 
+      method: 'DELETE',
+      headers: customHeaders,
+    }),
 });
