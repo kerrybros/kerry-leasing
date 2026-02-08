@@ -1460,7 +1460,7 @@ export default function FleetOverviewPage() {
                           dataKey="totalMiles" 
                           position="top" 
                           offset={12} 
-                          formatter={(val: number) => val >= 1000 ? `${(val/1000).toFixed(0)}K` : val}
+                          formatter={(val) => typeof val === 'number' && val >= 1000 ? `${(val/1000).toFixed(0)}K` : val}
                           style={{ fill: 'var(--text-secondary)', fontSize: '12px', fontWeight: 700 }} 
                         />
                       </Line>
