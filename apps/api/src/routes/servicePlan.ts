@@ -133,7 +133,7 @@ router.post('/sync', async (req: AuthRequest, res) => {
     
     // Among telematics-only, filter for truly NEW ones (not already in service plan)
     const newTelematicsOnlyVins = telematicsOnlyVins.filter(
-      vin => !existingTelematicsVins.has(vin)
+      vin => !existingTelematicsVins.has(vin as string)
     );
     
     console.log(`[ServicePlan] Telematics-only units: ${telematicsOnlyVins.length} total, ${newTelematicsOnlyVins.length} new`);

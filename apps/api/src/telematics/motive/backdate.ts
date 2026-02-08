@@ -6,6 +6,7 @@
  *   npm run backdate -- --org=org_xxxxx --start=2025-05-01 --end=2026-02-02
  */
 
+import { fileURLToPath } from 'url';
 import { appPrisma } from '../../lib/prisma.js';
 import { syncMotiveOrgForDate } from './syncService.js';
 import { getDateRange } from './types.js';
@@ -169,7 +170,8 @@ async function main() {
 }
 
 // Run if executed directly
-if (require.main === module) {
+const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
+if (isMain) {
   main();
 }
 
