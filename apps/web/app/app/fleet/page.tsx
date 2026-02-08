@@ -565,7 +565,7 @@ export default function FleetOverviewPage() {
     if (selectedTableYear < startYear || selectedTableYear > endYear) {
       setSelectedTableYear(endYear);
     }
-  }, [startDate, endDate]);
+  }, [startDate, endDate, selectedTableYear]);
 
   // Reset page data when switching organizations
   useEffect(() => {
@@ -711,6 +711,15 @@ export default function FleetOverviewPage() {
       console.log('[RepairData] Loading aggregated repairs (full contract range)...');
 
       const repairs = await api.get<{
+        customer?: {
+          klOrgId: string;
+          customerName: string;
+          contractStartDate: string;
+        };
+        period?: {
+          from: string;
+          to: string;
+        };
         units: RepairUnitSummary[];
         summary: {
           unitCount: number;
@@ -1023,7 +1032,7 @@ export default function FleetOverviewPage() {
     });
 
     return { chartData, tableData };
-  }, [filteredVehicleData, filteredDriverData, viewMode, selectedId, selectedTableYear]);
+  }, [filteredVehicleData, filteredDriverData, viewMode, selectedId, selectedTableYear, startDate, endDate]);
 
   // Calculate totals for the footer (Table Data Only)
   const totals = useMemo(() => {

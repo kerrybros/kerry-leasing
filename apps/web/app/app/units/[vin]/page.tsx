@@ -1,7 +1,7 @@
 'use client';
 
 import { useAuth, useOrganization } from '@clerk/nextjs';
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { createApiClient, ApiError } from '@/lib/api';
 import { KpiCard } from '@/components/KpiCard';
@@ -62,13 +62,7 @@ export default function UnitDetailPage() {
   const [repairs, setRepairs] = useState<Repair[]>([]);
   const [telematicsData, setTelematicsData] = useState<VehicleUtilization[]>([]);
 
-  useEffect(() => {
-    if (organization) {
-      loadUnitData();
-    }
-  }, [vin, organization]);
-
-  const loadUnitData = async () => {
+  const loadUnitData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -160,7 +154,13 @@ export default function UnitDetailPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [getToken, organization?.id, vin]);
+
+  useEffect(() => {
+    if (organization) {
+      loadUnitData();
+    }
+  }, [loadUnitData, organization]);
 
   // --- Aggregation Logic (Similar to Fleet Page) ---
 
