@@ -5,6 +5,7 @@
 
 import { Router, Request, Response } from 'express';
 import { syncMotiveDaily } from '../telematics/motive/syncService.js';
+import { syncSamsaraDaily } from '../telematics/samsara/syncService.js';
 
 const router = Router();
 
@@ -50,6 +51,63 @@ router.post('/sync-motive', async (req: Request, res: Response) => {
 
     // 3. Run sync in background (don't await)
     syncMotiveDaily()
+      .then(result => {
+        console.log(`✅ Sync completed: ${result.successCount}/${result.totalOrgs} orgs successful`);
+      })
+      .catch(error => {
+        console.error(`❌ Sync failed:`, error);
+      });
+  } catch (error: any) {
+    console.error('Cron endpoint error:', error);
+    return res.status(500).json({ 
+      error: 'Internal server error',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/cron/sync-samsara
+ * Triggers the Samsara daily sync
+ * 
+ * Authentication: x-cron-secret header must match CRON_SECRET env var
+ * 
+ * Usage:
+ *   curl -X POST https://your-api.onrender.com/api/cron/sync-samsara \
+ *     -H "x-cron-secret: your-secret-key"
+ */
+router.post('/sync-samsara', async (req: Request, res: Response) => {
+  try {
+    // 1. Verify secret token
+    const token = req.headers['x-cron-secret'];
+    const expectedSecret = process.env.CRON_SECRET;
+
+    if (!expectedSecret) {
+      console.error('CRON_SECRET not configured');
+      return res.status(500).json({ 
+        error: 'Server configuration error',
+        message: 'CRON_SECRET not set'
+      });
+    }
+
+    if (token !== expectedSecret) {
+      console.warn(`Unauthorized cron attempt from ${req.ip}`);
+      return res.status(401).json({ 
+        error: 'Unauthorized',
+        message: 'Invalid cron secret'
+      });
+    }
+
+    console.log(`\n✅ Authorized cron request from ${req.ip}`);
+
+    // 2. Respond immediately (non-blocking)
+    res.status(202).json({ 
+      message: 'Samsara sync started',
+      timestamp: new Date().toISOString()
+    });
+
+    // 3. Run sync in background (don't await)
+    syncSamsaraDaily()
       .then(result => {
         console.log(`✅ Sync completed: ${result.successCount}/${result.totalOrgs} orgs successful`);
       })

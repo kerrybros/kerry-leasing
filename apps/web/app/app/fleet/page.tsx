@@ -32,6 +32,7 @@ const chartStyles = {
     border: '1px solid var(--border)',
     borderTop: 'none',
     height: '220px',
+    minHeight: '220px',
   }
 };
 
@@ -498,11 +499,20 @@ const getMonthName = (monthIndex: number) => {
 export default function FleetOverviewPage() {
   const router = useRouter();
   const { getToken } = useAuth();
-  const { organization } = useOrganization();
+  const { organization, isLoaded: orgLoaded } = useOrganization();
   
   const [activeTab, setActiveTab] = useState<'telematics' | 'repairs'>('telematics');
   const [viewMode, setViewMode] = useState<'unit' | 'driver'>('unit');
   const [selectedId, setSelectedId] = useState<string | number | null>(null); // VIN (string) or DriverID (number)
+  
+  // Organization settings (feature flags)
+  const [orgSettings, setOrgSettings] = useState<{
+    tracksDrivers: boolean;
+    telematicsProvider: 'MOTIVE' | 'SAMSARA' | null;
+  }>({
+    tracksDrivers: true,
+    telematicsProvider: null,
+  });
   
   // Telematics View State
   const [telematicsView, setTelematicsView] = useState<'trends' | 'breakdown'>('trends');
@@ -522,6 +532,7 @@ export default function FleetOverviewPage() {
   const telematicsInFlightRef = useRef(false);
   const repairsInFlightRef = useRef(false);
   const orgIdRef = useRef<string | null>(null);
+  const isInitialMount = useRef(true);
   
   // Repair filters
   const [selectedMonths, setSelectedMonths] = useState<string[]>([]);
@@ -569,41 +580,95 @@ export default function FleetOverviewPage() {
 
   // Reset page data when switching organizations
   useEffect(() => {
+    // Wait for Clerk to load organization
+    if (!orgLoaded) return;
+    
     const orgId = organization?.id || null;
-    if (orgIdRef.current && orgId && orgIdRef.current !== orgId) {
-      setVehicleData([]);
-      setDriverData([]);
-      setRepairUnits([]);
-      setTelematicsLoaded(false);
-      setRepairsLoaded(false);
-      setTelematicsError(null);
-      setRepairsError(null);
-      setSelectedId(null);
-      telematicsInFlightRef.current = false;
-      repairsInFlightRef.current = false;
+    
+    // Skip on initial mount
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      orgIdRef.current = orgId;
+      return;
     }
+    
+    // Detect org change (switching between orgs)
+    if (orgIdRef.current && orgId && orgIdRef.current !== orgId) {
+      console.log(`[OrgSwitch] Detected org change from ${orgIdRef.current} to ${orgId}`);
+      console.log(`[OrgSwitch] Reloading page in 100ms...`);
+      
+      // Small delay to ensure Clerk state is fully updated
+      setTimeout(() => {
+        window.location.reload();
+      }, 100);
+    }
+    
     orgIdRef.current = orgId;
-  }, [organization?.id]);
+  }, [organization?.id, orgLoaded]);
 
   // Prefetch BOTH datasets once per org so tab switching never "reloads"
   useEffect(() => {
     if (!organization) return;
 
-    if (!telematicsLoaded) {
-      loadTelematicsData();
-    }
-    if (!repairsLoaded) {
-      loadRepairData();
-    }
+    // Load settings first, then load data
+    const loadDataSequentially = async () => {
+      const settings = await loadOrgSettings(); // Get settings synchronously
+      
+      // Only load if not already loaded for this org
+      if (!telematicsLoaded && !telematicsInFlightRef.current) {
+        loadTelematicsData({ provider: settings.telematicsProvider }); // Pass provider directly
+      }
+      if (!repairsLoaded && !repairsInFlightRef.current) {
+        loadRepairData();
+      }
+    };
+    
+    loadDataSequentially();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [organization?.id]);
+  }, [organization?.id, telematicsLoaded, repairsLoaded]);
+
+  const loadOrgSettings = async (): Promise<{
+    tracksDrivers: boolean;
+    telematicsProvider: 'MOTIVE' | 'SAMSARA' | null;
+  }> => {
+    try {
+      const token = await getToken();
+      const headers: Record<string, string> = {};
+      if (organization?.id) {
+        headers['x-organization-id'] = organization.id;
+      }
+      
+      const api = createApiClient(token, headers);
+      const settings = await api.get<{
+        tracksDrivers: boolean;
+        telematicsProvider: 'MOTIVE' | 'SAMSARA' | null;
+      }>('/org/settings');
+      setOrgSettings(settings);
+      
+      // If org doesn't track drivers, force unit view
+      if (!settings.tracksDrivers && viewMode === 'driver') {
+        setViewMode('unit');
+      }
+      
+      return settings; // Return settings for immediate use
+    } catch (err) {
+      console.error('[OrgSettings] Failed to load settings:', err);
+      // Default to true on error (backward compatible)
+      const defaultSettings = {
+        tracksDrivers: true,
+        telematicsProvider: null as 'MOTIVE' | 'SAMSARA' | null,
+      };
+      setOrgSettings(defaultSettings);
+      return defaultSettings;
+    }
+  };
 
   // Reset selection when switching view modes
   useEffect(() => {
     setSelectedId(null);
   }, [viewMode]);
 
-  const loadTelematicsData = async (opts?: { force?: boolean }) => {
+  const loadTelematicsData = async (opts?: { force?: boolean; provider?: 'MOTIVE' | 'SAMSARA' | null }) => {
     const force = opts?.force === true;
     if (!force && (telematicsLoaded || telematicsInFlightRef.current)) return;
     telematicsInFlightRef.current = true;
@@ -645,28 +710,45 @@ export default function FleetOverviewPage() {
           .map(u => u.telematicsVin!)
       );
       
-      // Load full telematics data for included units only
-      const vehicleUtil = await api.get<VehicleUtilization[]>('/telematics/motive/vehicle-utilization');
-      const driverUtil = await api.get<DriverUtilization[]>('/telematics/motive/driver-utilization');
+      // Load telematics data based on provider
+      // Both Motive and Samsara return data in the same VehicleUtilization format
+      let filteredVehicleUtil: VehicleUtilization[] = [];
       
-      // Filter telematics data to only included units
-      const filteredVehicleUtil = vehicleUtil.filter(v => v.vin && includedVins.has(v.vin));
-      const filteredDriverUtil = driverUtil; // Driver data is fleet-wide, no filtering needed
+      // Use passed provider or fall back to state (for backward compatibility)
+      const telematicsProvider = opts?.provider ?? orgSettings.telematicsProvider;
+      
+      if (telematicsProvider === 'MOTIVE') {
+        // Load from Motive endpoint
+        const vehicleUtil = await api.get<VehicleUtilization[]>('/telematics/motive/vehicle-utilization');
+        
+        // Filter to only included VINs
+        filteredVehicleUtil = vehicleUtil.filter(v => v.vin && includedVins.has(v.vin));
+      } else if (telematicsProvider === 'SAMSARA') {
+        // Load from Samsara endpoint (already transformed to match Motive format)
+        const vehicleUtil = await api.get<VehicleUtilization[]>('/telematics/samsara/vehicle-stats');
+        
+        // Filter to only included VINs
+        filteredVehicleUtil = vehicleUtil.filter(v => v.vin && includedVins.has(v.vin));
+      }
+      
+      // For drivers, only load if org tracks drivers
+      let filteredDriverUtil: DriverUtilization[] = [];
+      if (orgSettings.tracksDrivers) {
+        try {
+          // Only Motive has driver data currently
+          // Samsara driver endpoint not yet implemented
+          if (telematicsProvider === 'MOTIVE') {
+            const driverUtil = await api.get<DriverUtilization[]>('/telematics/motive/driver-utilization');
+            filteredDriverUtil = driverUtil;
+          }
+        } catch (err) {
+          // Driver data not available - silent fail
+        }
+      }
       
       setVehicleData(filteredVehicleUtil);
       setDriverData(filteredDriverUtil);
       setTelematicsLoaded(true);
-
-      // DEBUG: Log date range of loaded data
-      if (filteredVehicleUtil.length > 0) {
-        const dates = filteredVehicleUtil.map(d => d.date).sort();
-        console.log('[TelematicsData] Date Range:', dates[0], 'to', dates[dates.length - 1]);
-        console.log('[TelematicsData] Total Records:', filteredVehicleUtil.length);
-      } else {
-        console.warn('[TelematicsData] No vehicle data after filtering!');
-        console.log('Included VINs count:', includedVins.size);
-        console.log('Total fetched records:', vehicleUtil.length);
-      }
 
       const elapsedMs = Math.round(performance.now() - t0);
       console.log('[TelematicsData] Loaded', {
@@ -707,8 +789,6 @@ export default function FleetOverviewPage() {
       }
       
       const api = createApiClient(token, headers);
-      
-      console.log('[RepairData] Loading aggregated repairs (full contract range)...');
 
       const repairs = await api.get<{
         customer?: {
@@ -730,23 +810,12 @@ export default function FleetOverviewPage() {
         };
       }>('/repairs');
 
-      console.log(
-        `[RepairData] Loaded ${repairs.summary.invoiceCount} invoices across ${repairs.summary.unitCount} units`
-      );
       setRepairUnits(repairs.units);
-      
-      console.log('[RepairData] Received customer config:', repairs.customer);
       
       // Update start date from contract if available
       if (repairs.customer?.contractStartDate) {
         const contractDate = repairs.customer.contractStartDate;
-        console.log('[RepairData] Updating repairStartDate to contract date:', contractDate);
         setRepairStartDate(contractDate);
-        
-        // Ensure date range picker updates by forcing a state update if it matches the default
-        // This is handled by React automatically if the value changes
-      } else {
-        console.warn('[RepairData] No contract start date found in response');
       }
       
       setRepairsLoaded(true);
@@ -1194,21 +1263,23 @@ export default function FleetOverviewPage() {
 
         {activeTab === 'telematics' && (
           <div className="flex items-center gap-4 mb-2">
-            {/* Unit / Driver Toggle */}
-            <div className="toggle">
-              <button
-                className={`toggle-btn ${viewMode === 'unit' ? 'active' : ''}`}
-                onClick={() => setViewMode('unit')}
-              >
-                Unit
-              </button>
-              <button
-                className={`toggle-btn ${viewMode === 'driver' ? 'active' : ''}`}
-                onClick={() => setViewMode('driver')}
-              >
-                Driver
-              </button>
-            </div>
+            {/* Unit / Driver Toggle - Only show if org tracks drivers */}
+            {orgSettings.tracksDrivers && (
+              <div className="toggle">
+                <button
+                  className={`toggle-btn ${viewMode === 'unit' ? 'active' : ''}`}
+                  onClick={() => setViewMode('unit')}
+                >
+                  Unit
+                </button>
+                <button
+                  className={`toggle-btn ${viewMode === 'driver' ? 'active' : ''}`}
+                  onClick={() => setViewMode('driver')}
+                >
+                  Driver
+                </button>
+              </div>
+            )}
 
             {/* View Mode Toggle */}
             <div className="toggle">
@@ -1334,7 +1405,10 @@ export default function FleetOverviewPage() {
                   <Skeleton style={{ height: '100%', borderRadius: 8 }} />
                 ) : (
                   <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={monthlyMetrics.chartData}>
+                    <LineChart 
+                      data={monthlyMetrics.chartData}
+                      margin={{ top: 20, right: 30, left: 30, bottom: 5 }}
+                    >
                       <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
                       <XAxis 
                         dataKey="month" 
@@ -1342,6 +1416,7 @@ export default function FleetOverviewPage() {
                         fontSize={12} 
                         tickLine={false}
                         axisLine={false}
+                        padding={{ left: 20, right: 20 }}
                       />
                       <YAxis 
                         stroke="var(--text-secondary)" 
@@ -1349,6 +1424,7 @@ export default function FleetOverviewPage() {
                         tickLine={false}
                         axisLine={false}
                         domain={['auto', 'auto']}
+                        width={40}
                       />
                       <Tooltip 
                         contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '4px' }}
@@ -1382,7 +1458,10 @@ export default function FleetOverviewPage() {
                   <Skeleton style={{ height: '100%', borderRadius: 8 }} />
                 ) : (
                   <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={monthlyMetrics.chartData}>
+                    <LineChart 
+                      data={monthlyMetrics.chartData}
+                      margin={{ top: 20, right: 30, left: 30, bottom: 5 }}
+                    >
                       <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
                       <XAxis 
                         dataKey="month" 
@@ -1390,12 +1469,14 @@ export default function FleetOverviewPage() {
                         fontSize={12} 
                         tickLine={false}
                         axisLine={false}
+                        padding={{ left: 20, right: 20 }}
                       />
                       <YAxis 
                         stroke="var(--text-secondary)" 
                         fontSize={12} 
                         tickLine={false}
                         axisLine={false}
+                        width={40}
                       />
                       <Tooltip 
                         contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '4px' }}
@@ -1430,7 +1511,10 @@ export default function FleetOverviewPage() {
                   <Skeleton style={{ height: '100%', borderRadius: 8 }} />
                 ) : (
                   <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={monthlyMetrics.chartData}>
+                    <LineChart 
+                      data={monthlyMetrics.chartData}
+                      margin={{ top: 20, right: 30, left: 30, bottom: 5 }}
+                    >
                       <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
                       <XAxis 
                         dataKey="month" 
@@ -1438,12 +1522,14 @@ export default function FleetOverviewPage() {
                         fontSize={12} 
                         tickLine={false}
                         axisLine={false}
+                        padding={{ left: 20, right: 20 }}
                       />
                       <YAxis 
                         stroke="var(--text-secondary)" 
                         fontSize={12} 
                         tickLine={false}
                         axisLine={false}
+                        width={40}
                       />
                       <Tooltip 
                         contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '4px' }}
@@ -1477,24 +1563,27 @@ export default function FleetOverviewPage() {
             
             {/* Filters (Moved here) */}
             <div className="flex flex-col gap-2">
-              <div className="flex gap-2 items-center">
-                <div className="toggle" style={{ height: 'fit-content', flex: 1 }}>
-                  <button
-                    className={`toggle-btn ${viewMode === 'unit' ? 'active' : ''}`}
-                    onClick={() => setViewMode('unit')}
-                    style={{ flex: 1 }}
-                  >
-                    Unit
-                  </button>
-                  <button
-                    className={`toggle-btn ${viewMode === 'driver' ? 'active' : ''}`}
-                    onClick={() => setViewMode('driver')}
-                    style={{ flex: 1 }}
-                  >
-                    Driver
-                  </button>
+              {/* Unit / Driver Toggle - Only show if org tracks drivers */}
+              {orgSettings.tracksDrivers && (
+                <div className="flex gap-2 items-center">
+                  <div className="toggle" style={{ height: 'fit-content', flex: 1 }}>
+                    <button
+                      className={`toggle-btn ${viewMode === 'unit' ? 'active' : ''}`}
+                      onClick={() => setViewMode('unit')}
+                      style={{ flex: 1 }}
+                    >
+                      Unit
+                    </button>
+                    <button
+                      className={`toggle-btn ${viewMode === 'driver' ? 'active' : ''}`}
+                      onClick={() => setViewMode('driver')}
+                      style={{ flex: 1 }}
+                    >
+                      Driver
+                    </button>
+                  </div>
                 </div>
-              </div>
+              )}
               
               {/* Unit/Driver MultiSelect Filter */}
               {viewMode === 'unit' ? (
@@ -1506,13 +1595,15 @@ export default function FleetOverviewPage() {
                   className="w-full"
                 />
               ) : (
-                <MultiSelect
-                  options={driverOptions}
-                  selected={telematicsSelectedDrivers}
-                  onChange={setTelematicsSelectedDrivers}
-                  placeholder="Filter Drivers..."
-                  className="w-full"
-                />
+                orgSettings.tracksDrivers && (
+                  <MultiSelect
+                    options={driverOptions}
+                    selected={telematicsSelectedDrivers}
+                    onChange={setTelematicsSelectedDrivers}
+                    placeholder="Filter Drivers..."
+                    className="w-full"
+                  />
+                )
               )}
             </div>
 

@@ -41,6 +41,19 @@ model RepairCustomerConfig {
   @@map("repair_customer_configs")
 }
 
+// Organization Settings
+// Configures feature flags and display preferences per organization
+model OrganizationSettings {
+  id                String   @id @default(cuid())
+  clerkOrgId        String   @unique @map("clerk_org_id")
+  tracksDrivers     Boolean  @default(true) @map("tracks_drivers") // Whether org uses driver tracking
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  @@index([clerkOrgId])
+  @@map("organization_settings")
+}
+
 // Telematics Provider Configuration
 // Each org can have ONE provider configured (SAMSARA or MOTIVE)
 model TelematicsProviderAccount {
@@ -101,6 +114,26 @@ model SamsaraRawData {
   @@map("samsara_raw_data")
 }
 
+// SAMSARA Idling Events (source table: one row per event, no aggregation)
+// Link to fuel-energy by assetId = vehicle.id and date when combining in API
+model SamsaraIdlingEvent {
+  id                     String   @id @default(cuid())
+  clerkOrgId             String   @map("clerk_org_id")
+  assetId                String   @map("asset_id")   // same as vehicle.id in fuel-energy
+  startTime              String   @map("start_time") // ISO 8601
+  durationMilliseconds   Float?   @map("duration_milliseconds")
+  fuelConsumedMilliliters Float?  @map("fuel_consumed_milliliters")
+  eventDate              String   @map("event_date") // YYYY-MM-DD for querying
+  rawResponse            Json?    @map("raw_response")
+  createdAt              DateTime @default(now()) @map("created_at")
+
+  @@unique([clerkOrgId, assetId, startTime])
+  @@index([clerkOrgId])
+  @@index([clerkOrgId, eventDate])
+  @@index([assetId])
+  @@map("samsara_idling_events")
+}
+
 // MOTIVE Raw Data (source of truth)
 // Stores complete Motive API responses with typed schema
 model MotiveRawData {
@@ -157,34 +190,6 @@ model TelematicsVehicleMap {
   @@map("telematics_vehicle_maps")
 }
 
-// Normalized Daily Metrics from all telematics providers
-// Stores one row per org + VIN + date (derived from provider-specific raw data)
-model TelematicsDailyMetric {
-  id                String             @id @default(cuid())
-  clerkOrgId        String             @map("clerk_org_id")
-  vin               String
-  date              String             // YYYY-MM-DD format for consistency
-  milesDriven       Float?             @map("miles_driven")
-  idleMinutes       Float?             @map("idle_minutes")
-  fuelGallons       Float?             @map("fuel_gallons")
-  avgMpg            Float?             @map("avg_mpg")
-  engineHours       Float?             @map("engine_hours")
-  source            TelematicsProvider
-  samsaraRawDataId  String?            @map("samsara_raw_data_id") // Link to Samsara source
-  motiveRawDataId   String?            @map("motive_raw_data_id")  // Link to Motive source
-  createdAt         DateTime           @default(now()) @map("created_at")
-  updatedAt         DateTime           @updatedAt @map("updated_at")
-
-  @@unique([clerkOrgId, vin, date])
-  @@index([clerkOrgId])
-  @@index([vin])
-  @@index([date])
-  @@index([clerkOrgId, date])
-  @@index([samsaraRawDataId])
-  @@index([motiveRawDataId])
-  @@map("telematics_daily_metrics")
-}
-
 // MOTIVE Driving Periods (individual driving trips)
 // Source: GET /v1/driving_periods
 // Stores each driving period with origin/destination and distance
@@ -194,8 +199,8 @@ model MotiveDrivingPeriod {
   clerkOrgId                  String    @map("clerk_org_id")
   motivePeriodId              BigInt    @map("motive_period_id") // Motive's period ID
   
-  // Driver info
-  driverId                    Int       @map("driver_id")
+  // Driver info (null when period has no driver assigned)
+  driverId                    Int?      @map("driver_id")
   driverFirstName             String?   @map("driver_first_name")
   driverLastName              String?   @map("driver_last_name")
   driverUsername              String?   @map("driver_username")

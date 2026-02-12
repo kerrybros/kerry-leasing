@@ -7,9 +7,9 @@
 
 import { Router } from 'express';
 import { clerkAuthMiddleware, requireOrg, AuthRequest } from '../middleware/auth.js';
-import { getAppPrisma } from '../lib/prisma.js';
-import { getRepairPrisma } from '../lib/prisma.js';
+import { getAppPrisma, getRepairPrisma } from '../lib/prisma.js';
 import { REPAIR_SHOP_ORG_ID } from '../config/repairShop.js';
+import { getSamsaraIdleAggregatesByDate } from '../telematics/samsara/idleAggregates.js';
 
 const router = Router();
 
@@ -58,29 +58,72 @@ router.get('/units', clerkAuthMiddleware, requireOrg, async (req: AuthRequest, r
 
     const telematicsMap = new Map();
     if (telematicsVins.length > 0) {
-      // Use raw query or findMany with distinct to get latest per VIN
-      // Prisma distinct is easy
-      const records = await appPrisma.motiveVehicleUtilization.findMany({
-        where: {
-          clerkOrgId,
-          vin: { in: telematicsVins },
-        },
-        orderBy: { date: 'desc' },
-        distinct: ['vin'],
-        select: {
-          vehicleId: true,
-          vehicleNumber: true,
-          vin: true,
-          date: true,
-          utilizationPercentage: true,
-          totalDistance: true,
-          idleTime: true,
-          totalFuel: true,
-          idleFuel: true,
-        },
+      // Get provider for this org
+      const providerAccount = await appPrisma.telematicsProviderAccount.findUnique({
+        where: { clerkOrgId },
+        select: { provider: true },
       });
-      for (const rec of records) {
-        telematicsMap.set(rec.vin, rec);
+
+      if (providerAccount?.provider === 'MOTIVE') {
+        // Use Motive-specific table
+        const records = await appPrisma.motiveVehicleUtilization.findMany({
+          where: {
+            clerkOrgId,
+            vin: { in: telematicsVins },
+          },
+          orderBy: { date: 'desc' },
+          distinct: ['vin'],
+          select: {
+            vehicleId: true,
+            vehicleNumber: true,
+            vin: true,
+            date: true,
+            utilizationPercentage: true,
+            totalDistance: true,
+            idleTime: true,
+            totalFuel: true,
+            idleFuel: true,
+          },
+        });
+        for (const rec of records) {
+          telematicsMap.set(rec.vin, rec);
+        }
+      } else if (providerAccount?.provider === 'SAMSARA') {
+        // Use Samsara raw data table; idle fuel aggregated on read from idling events (assetId = vehicle.id)
+        const records = await appPrisma.samsaraRawData.findMany({
+          where: {
+            clerkOrgId,
+            vin: { in: telematicsVins },
+          },
+          orderBy: { date: 'desc' },
+          distinct: ['vin'],
+          select: {
+            vin: true,
+            date: true,
+            vehicleId: true,
+            vehicleName: true,
+            rawResponse: true,
+          },
+        });
+        const dates = [...new Set(records.map((r) => r.date))];
+        const idleByDate = await getSamsaraIdleAggregatesByDate(appPrisma, clerkOrgId, dates);
+        for (const rec of records) {
+          if (!rec.vin) continue;
+          const converted = (rec.rawResponse as any)?.convertedMetrics || {};
+          const idle = idleByDate.get(rec.date)?.get(rec.vehicleId);
+          const idleFuelGallons = idle ? idle.idleFuelMl / 3785.41 : null;
+          telematicsMap.set(rec.vin, {
+            vehicleId: null,
+            vehicleNumber: rec.vehicleName ?? null,
+            vin: rec.vin,
+            date: rec.date,
+            utilizationPercentage: null,
+            totalDistance: converted.milesDriven || null,
+            idleTime: converted.idleMinutes ? converted.idleMinutes * 60 : null,
+            totalFuel: converted.fuelGallons || null,
+            idleFuel: idleFuelGallons,
+          });
+        }
       }
     }
 
@@ -92,7 +135,10 @@ router.get('/units', clerkAuthMiddleware, requireOrg, async (req: AuthRequest, r
     const customerUnitsMap = new Map();
     if (repairUnitIds.length > 0) {
       const cUnits = await repairPrisma.customer_units.findMany({
-        where: { unit_id: { in: repairUnitIds } },
+        where: {
+          organization_id: REPAIR_SHOP_ORG_ID,
+          unit_id: { in: repairUnitIds },
+        },
         select: {
           unit_id: true,
           number: true,
@@ -245,13 +291,54 @@ router.get('/units/:identifier', clerkAuthMiddleware, requireOrg, async (req: Au
     // 1. Get full telematics history if available
     let telematicsHistory: any[] = [];
     if (servicePlanUnit.telematicsVin) {
-      telematicsHistory = await appPrisma.motiveVehicleUtilization.findMany({
-        where: {
-          clerkOrgId,
-          vin: servicePlanUnit.telematicsVin,
-        },
-        orderBy: { date: 'desc' },
+      // Get provider for this org
+      const providerAccount = await appPrisma.telematicsProviderAccount.findUnique({
+        where: { clerkOrgId },
+        select: { provider: true },
       });
+
+      if (providerAccount?.provider === 'MOTIVE') {
+        telematicsHistory = await appPrisma.motiveVehicleUtilization.findMany({
+          where: {
+            clerkOrgId,
+            vin: servicePlanUnit.telematicsVin,
+          },
+          orderBy: { date: 'desc' },
+        });
+      } else if (providerAccount?.provider === 'SAMSARA') {
+        const records = await appPrisma.samsaraRawData.findMany({
+          where: {
+            clerkOrgId,
+            vin: servicePlanUnit.telematicsVin,
+          },
+          orderBy: { date: 'desc' },
+          select: {
+            vin: true,
+            date: true,
+            vehicleId: true,
+            vehicleName: true,
+            rawResponse: true,
+          },
+        });
+        const dates = [...new Set(records.map((r) => r.date))];
+        const idleByDate = await getSamsaraIdleAggregatesByDate(appPrisma, clerkOrgId, dates);
+        telematicsHistory = records.map(rec => {
+          const converted = (rec.rawResponse as any)?.convertedMetrics || {};
+          const idle = idleByDate.get(rec.date)?.get(rec.vehicleId);
+          const idleFuelGallons = idle ? idle.idleFuelMl / 3785.41 : null;
+          return {
+            vehicleId: null,
+            vehicleNumber: rec.vehicleName ?? null,
+            vin: rec.vin,
+            date: rec.date,
+            utilizationPercentage: null,
+            totalDistance: converted.milesDriven || null,
+            idleTime: converted.idleMinutes ? converted.idleMinutes * 60 : null,
+            totalFuel: converted.fuelGallons || null,
+            idleFuel: idleFuelGallons,
+          };
+        });
+      }
     }
 
     // 2. Get repair history if available
@@ -265,6 +352,7 @@ router.get('/units/:identifier', clerkAuthMiddleware, requireOrg, async (req: Au
         // Get unit info
         const customerUnit = await repairPrisma.customer_units.findFirst({
           where: {
+            organization_id: REPAIR_SHOP_ORG_ID,
             unit_id: servicePlanUnit.repairUnitId,
           },
         });

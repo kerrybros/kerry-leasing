@@ -70,6 +70,19 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 Fleet
               </Link>
 
+              {isAdmin && (
+                <Link
+                  href="/app/admin/service-plan"
+                  className={`no-underline text-base font-medium transition-colors ${
+                    pathname?.includes('/admin') 
+                      ? 'text-primary font-bold' 
+                      : 'text-text-primary hover:text-primary'
+                  }`}
+                >
+                  Admin
+                </Link>
+              )}
+
               <ThemeToggle />
               <OrganizationSwitcher 
                 hidePersonal={true}
@@ -99,6 +112,20 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               >
                 Fleet
               </Link>
+
+              {isAdmin && (
+                <Link
+                  href="/app/admin/service-plan"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className={`block px-4 py-3 rounded-lg no-underline text-base font-medium transition-colors ${
+                    pathname?.includes('/admin')
+                      ? 'bg-primary text-white'
+                      : 'bg-bg-tertiary text-text-primary hover:bg-bg-hover'
+                  }`}
+                >
+                  Admin
+                </Link>
+              )}
 
               <div className="px-4 pt-2">
                 <OrganizationSwitcher 

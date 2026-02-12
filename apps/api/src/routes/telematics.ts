@@ -13,191 +13,19 @@ import {
   requireRole,
   AuthRequest,
 } from '../middleware/auth.js';
+import { requireProvider } from '../middleware/providerValidation.js';
 import { getAppClient } from '../db/appRepo.js';
-import { syncOrgForDate, syncAllOrgsForDate, getYesterdayToronto } from '../telematics/syncTelematics.js';
+import { getSamsaraIdleAggregatesByDate } from '../telematics/samsara/idleAggregates.js';
 import { validateCredentials } from '../telematics/providers/index.js';
 import { TelematicsProvider, TelematicsProviderStatus } from '../telematics/types.js';
 import { TtlCache } from '../lib/ttlCache.js';
+import { syncMotiveOrgForDate } from '../telematics/motive/syncService.js';
+import { syncSamsaraOrgForDate } from '../telematics/samsara/syncService.js';
+import { getYesterday } from '../telematics/dates.js';
 
 const router = Router();
 const TEN_HOURS_MS = 10 * 60 * 60 * 1000;
-    const telematicsCache = new TtlCache<any>(TEN_HOURS_MS, 300); // Cache update forced for migration
-
-/**
- * GET /telematics/daily
- * 
- * Fetch normalized daily telematics metrics
- * Tenant-scoped to authenticated org
- * 
- * Query params:
- *   vin (optional) - Filter by specific VIN
- *   from (required) - Start date YYYY-MM-DD
- *   to (required) - End date YYYY-MM-DD
- */
-router.get(
-  '/daily',
-  clerkAuthMiddleware,
-  requireOrg,
-  async (req: AuthRequest, res) => {
-    try {
-      const startedAt = Date.now();
-      const fetchedAt = new Date().toISOString();
-      const orgId = req.auth!.orgId!;
-      const { vin, from, to } = req.query;
-
-      // Validate dates
-      if (!from || !to) {
-        return res.status(400).json({
-          error: 'Bad Request',
-          message: 'Both "from" and "to" date parameters are required (YYYY-MM-DD format)',
-        });
-      }
-
-      const appClient = getAppClient();
-
-      // Build where clause
-      const where: any = {
-        clerkOrgId: orgId,
-        date: {
-          gte: from as string,
-          lte: to as string,
-        },
-      };
-
-      if (vin) {
-        where.vin = vin as string;
-      }
-
-      const cacheKey = `telematics:daily:${orgId}:${String(vin || '')}:${String(from)}:${String(to)}`;
-      const { value: metrics, hit } = await telematicsCache.getOrSet(cacheKey, async () => {
-        return await appClient.telematicsDailyMetric.findMany({
-          where,
-          orderBy: [{ date: 'desc' }, { vin: 'asc' }],
-        });
-      });
-
-      const elapsedMs = Date.now() - startedAt;
-      console.log('[Telematics] GET /telematics/daily', {
-        fetchedAt,
-        orgId,
-        vin: vin || null,
-        from,
-        to,
-        rows: Array.isArray(metrics) ? metrics.length : 0,
-        cache: hit ? 'HIT' : 'MISS',
-        elapsedMs,
-      });
-
-      res.setHeader('Cache-Control', 'private, max-age=36000');
-      res.setHeader('X-Cache', hit ? 'HIT' : 'MISS');
-      res.setHeader('X-Elapsed-Ms', String(elapsedMs));
-
-      // Return metrics directly as array (frontend expects this format)
-      res.json(metrics);
-    } catch (error) {
-      console.error('Error fetching telematics daily:', error);
-      res.status(500).json({
-        error: 'Internal Server Error',
-        message: 'Failed to fetch telematics data',
-      });
-    }
-  }
-);
-
-/**
- * GET /telematics/summary
- * 
- * Get aggregated metrics for org on a specific date or date range
- * Tenant-scoped to authenticated org
- * 
- * Query params:
- *   from (required) - Start date YYYY-MM-DD
- *   to (required) - End date YYYY-MM-DD
- */
-router.get(
-  '/summary',
-  clerkAuthMiddleware,
-  requireOrg,
-  async (req: AuthRequest, res) => {
-    try {
-      const startedAt = Date.now();
-      const fetchedAt = new Date().toISOString();
-      const orgId = req.auth!.orgId!;
-      const { from, to } = req.query;
-
-      if (!from || !to) {
-        return res.status(400).json({
-          error: 'Bad Request',
-          message: 'Both "from" and "to" date parameters are required (YYYY-MM-DD format)',
-        });
-      }
-
-      const appClient = getAppClient();
-
-      const cacheKey = `telematics:summary:${orgId}:${String(from)}:${String(to)}`;
-      const { value: metrics, hit } = await telematicsCache.getOrSet(cacheKey, async () => {
-        return await appClient.telematicsDailyMetric.findMany({
-          where: {
-            clerkOrgId: orgId,
-            date: {
-              gte: from as string,
-              lte: to as string,
-            },
-          },
-        });
-      });
-
-      // Calculate aggregates
-      const summary = {
-        period: `${from} to ${to}`,
-        vehicleCount: new Set(metrics.map(m => m.vin)).size,
-        totalMiles: 0,
-        totalIdleMinutes: 0,
-        totalFuelGallons: 0,
-        avgMpg: 0,
-      };
-
-      let mpgCount = 0;
-
-      for (const metric of metrics) {
-        if (metric.milesDriven) summary.totalMiles += metric.milesDriven;
-        if (metric.idleMinutes) summary.totalIdleMinutes += metric.idleMinutes;
-        if (metric.fuelGallons) summary.totalFuelGallons += metric.fuelGallons;
-        if (metric.avgMpg) {
-          summary.avgMpg += metric.avgMpg;
-          mpgCount++;
-        }
-      }
-
-      // Average MPG
-      if (mpgCount > 0) {
-        summary.avgMpg = summary.avgMpg / mpgCount;
-      }
-
-      const elapsedMs = Date.now() - startedAt;
-      console.log('[Telematics] GET /telematics/summary', {
-        fetchedAt,
-        orgId,
-        from,
-        to,
-        rows: Array.isArray(metrics) ? metrics.length : 0,
-        cache: hit ? 'HIT' : 'MISS',
-        elapsedMs,
-      });
-
-      res.setHeader('Cache-Control', 'private, max-age=36000');
-      res.setHeader('X-Cache', hit ? 'HIT' : 'MISS');
-      res.setHeader('X-Elapsed-Ms', String(elapsedMs));
-      res.json(summary);
-    } catch (error) {
-      console.error('Error fetching telematics summary:', error);
-      res.status(500).json({
-        error: 'Internal Server Error',
-        message: 'Failed to fetch telematics summary',
-      });
-    }
-  }
-);
+const telematicsCache = new TtlCache<any>(TEN_HOURS_MS, 300);
 
 /**
  * POST /admin/telematics/configure
@@ -348,8 +176,12 @@ router.post(
 /**
  * POST /admin/telematics/sync
  * 
- * Trigger telematics sync for all orgs or specific date
+ * Trigger manual telematics sync for all orgs or specific date
  * Internal/admin only
+ * 
+ * Body params:
+ *   date (optional) - YYYY-MM-DD date to sync (defaults to yesterday)
+ *   provider (optional) - Filter to specific provider (MOTIVE or SAMSARA)
  */
 router.post(
   '/admin/telematics/sync',
@@ -357,8 +189,8 @@ router.post(
   requireRole(['internal']),
   async (req: AuthRequest, res) => {
     try {
-      const { date } = req.body;
-      const syncDate = date || getYesterdayToronto();
+      const { date, provider } = req.body;
+      const syncDate = date || getYesterday();
 
       // Validate date format if provided
       if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
@@ -371,11 +203,74 @@ router.post(
       // Run sync asynchronously
       console.log(`Manual sync triggered for ${syncDate} by ${req.auth?.userId}`);
       
-      const results = await syncAllOrgsForDate(syncDate);
+      const appClient = getAppClient();
+      
+      // Get all active provider accounts, optionally filtered by provider
+      const where: any = { status: TelematicsProviderStatus.ACTIVE };
+      if (provider) {
+        if (!Object.values(TelematicsProvider).includes(provider)) {
+          return res.status(400).json({
+            error: 'Bad Request',
+            message: `Invalid provider. Must be one of: ${Object.values(TelematicsProvider).join(', ')}`,
+          });
+        }
+        where.provider = provider;
+      }
+      
+      const accounts = await appClient.telematicsProviderAccount.findMany({ where });
+      
+      console.log(`Found ${accounts.length} active accounts to sync`);
+      
+      const results: any[] = [];
+      let successCount = 0;
+      let failCount = 0;
 
-      const successCount = results.filter(r => r.success).length;
-      const failCount = results.filter(r => !r.success).length;
-      const totalMetrics = results.reduce((sum, r) => sum + r.metricsCount, 0);
+      // Sync each org with its provider-specific service
+      for (const account of accounts) {
+        try {
+          let result: any;
+          
+          if (account.provider === TelematicsProvider.MOTIVE) {
+            const apiKey = (account.credentialsJson as any).apiKey;
+            result = await syncMotiveOrgForDate(
+              account.clerkOrgId,
+              apiKey,
+              syncDate,
+              false // Not verification
+            );
+          } else if (account.provider === TelematicsProvider.SAMSARA) {
+            const apiToken = (account.credentialsJson as any).apiToken;
+            result = await syncSamsaraOrgForDate(
+              account.clerkOrgId,
+              apiToken,
+              syncDate,
+              false // Not verification
+            );
+          } else {
+            throw new Error(`Unsupported provider: ${account.provider}`);
+          }
+          
+          results.push({
+            clerkOrgId: account.clerkOrgId,
+            provider: account.provider,
+            success: result.success,
+            date: syncDate,
+          });
+          
+          if (result.success) successCount++;
+          else failCount++;
+          
+        } catch (error: any) {
+          failCount++;
+          results.push({
+            clerkOrgId: account.clerkOrgId,
+            provider: account.provider,
+            success: false,
+            error: error.message,
+            date: syncDate,
+          });
+        }
+      }
 
       res.json({
         success: true,
@@ -384,15 +279,8 @@ router.post(
           total: results.length,
           success: successCount,
           failed: failCount,
-          totalMetrics,
         },
-        results: results.map(r => ({
-          clerkOrgId: r.clerkOrgId,
-          provider: r.provider,
-          success: r.success,
-          metricsCount: r.metricsCount,
-          error: r.error,
-        })),
+        results,
       });
     } catch (error) {
       console.error('Error triggering sync:', error);
@@ -410,6 +298,7 @@ router.get(
   '/motive/vehicle-utilization',
   clerkAuthMiddleware,
   requireOrg,
+  requireProvider(TelematicsProvider.MOTIVE),
   async (req: AuthRequest, res) => {
     try {
       const startedAt = Date.now();
@@ -449,11 +338,12 @@ router.get(
 );
 
 // GET /telematics/motive/driver-utilization
-// Returns raw Motive driver utilization data for the org
+// Returns Motive driver utilization with totalDistance (miles) from driving_periods
 router.get(
   '/motive/driver-utilization',
   clerkAuthMiddleware,
   requireOrg,
+  requireProvider(TelematicsProvider.MOTIVE),
   async (req: AuthRequest, res) => {
     try {
       const startedAt = Date.now();
@@ -463,10 +353,37 @@ router.get(
 
       const cacheKey = `telematics:motive:driver-utilization:${orgId}`;
       const { value: records, hit } = await telematicsCache.getOrSet(cacheKey, async () => {
-        return await appClient.motiveDriverUtilization.findMany({
+        const utilization = await appClient.motiveDriverUtilization.findMany({
           where: { clerkOrgId: orgId },
           orderBy: [{ date: 'desc' }, { driverId: 'asc' }],
         });
+
+        if (utilization.length === 0) {
+          return utilization.map((r: any) => ({ ...r, totalDistance: null }));
+        }
+
+        const dates = [...new Set(utilization.map((r: any) => r.date))];
+        const periods = await appClient.motiveDrivingPeriod.findMany({
+          where: { clerkOrgId: orgId, date: { in: dates } },
+          select: { driverId: true, date: true, startKilometers: true, endKilometers: true },
+        });
+
+        // Aggregate miles per (driverId, date): sum (endKm - startKm), convert km -> miles
+        const KM_TO_MILES = 0.62137119223733;
+        const milesByDriverDate = new Map<string, number>();
+        for (const p of periods) {
+          const start = p.startKilometers ?? 0;
+          const end = p.endKilometers ?? 0;
+          const km = end > start ? end - start : 0;
+          if (km <= 0) continue;
+          const key = `${p.driverId}:${p.date}`;
+          milesByDriverDate.set(key, (milesByDriverDate.get(key) ?? 0) + km * KM_TO_MILES);
+        }
+
+        return utilization.map((r: any) => ({
+          ...r,
+          totalDistance: milesByDriverDate.get(`${r.driverId}:${r.date}`) ?? null,
+        }));
       });
 
       const elapsedMs = Date.now() - startedAt;
@@ -487,6 +404,74 @@ router.get(
       res.status(500).json({
         error: 'Internal Server Error',
         message: 'Failed to fetch driver utilization data',
+      });
+    }
+  }
+);
+
+// GET /telematics/samsara/vehicle-stats
+// Returns Samsara vehicle data transformed to match Motive's VehicleUtilization format
+// This ensures the frontend can consume both providers identically
+router.get(
+  '/samsara/vehicle-stats',
+  clerkAuthMiddleware,
+  requireOrg,
+  requireProvider(TelematicsProvider.SAMSARA),
+  async (req: AuthRequest, res) => {
+    try {
+      const startedAt = Date.now();
+      const fetchedAt = new Date().toISOString();
+      const orgId = req.auth!.orgId!;
+      const appClient = getAppClient();
+
+      const cacheKey = `telematics:samsara:vehicle-stats:${orgId}`;
+      const { value: rawRecords, hit } = await telematicsCache.getOrSet(cacheKey, async () => {
+        return await appClient.samsaraRawData.findMany({
+          where: { clerkOrgId: orgId },
+          orderBy: [{ date: 'desc' }, { vehicleId: 'asc' }],
+        });
+      });
+
+      // Idle fuel: aggregate on read from idling events (assetId = vehicle.id)
+      const dates = [...new Set(rawRecords.map((r: any) => r.date))];
+      const idleByDate = await getSamsaraIdleAggregatesByDate(appClient, orgId, dates);
+
+      // Transform Samsara data to match Motive's VehicleUtilization format; use vehicle.name for display
+      const transformedRecords = rawRecords.map((record: any) => {
+        const converted = record.rawResponse?.convertedMetrics || {};
+        const idle = idleByDate.get(record.date)?.get(record.vehicleId);
+        const idleFuelGallons = idle ? idle.idleFuelMl / 3785.41 : null;
+        return {
+          vehicleId: parseInt(record.vehicleId) || 0,
+          vehicleNumber: record.vehicleName || null,
+          vin: record.vin,
+          date: record.date,
+          utilizationPercentage: null,
+          totalDistance: converted.milesDriven || null,
+          idleTime: converted.idleMinutes ? converted.idleMinutes * 60 : null,
+          totalFuel: converted.fuelGallons || null,
+          idleFuel: idleFuelGallons,
+        };
+      });
+
+      const elapsedMs = Date.now() - startedAt;
+      console.log('[Telematics] GET /telematics/samsara/vehicle-stats', {
+        fetchedAt,
+        orgId,
+        rows: transformedRecords.length,
+        cache: hit ? 'HIT' : 'MISS',
+        elapsedMs,
+      });
+
+      res.setHeader('Cache-Control', 'private, max-age=36000');
+      res.setHeader('X-Cache', hit ? 'HIT' : 'MISS');
+      res.setHeader('X-Elapsed-Ms', String(elapsedMs));
+      res.json(transformedRecords);
+    } catch (error) {
+      console.error('Error fetching Samsara vehicle stats:', error);
+      res.status(500).json({
+        error: 'Internal Server Error',
+        message: 'Failed to fetch Samsara vehicle stats data',
       });
     }
   }

@@ -52,8 +52,11 @@ Based on TruckGenius.ai aesthetic:
 ### Endpoints Used
 - `GET /units` - Fetch all fleet units
 - `GET /units/:vin/repairs` - Get repair history for unit
-- `GET /telematics/daily?vin=...&from=...&to=...` - Daily telematics metrics
-- `GET /telematics/summary?from=...&to=...` - Aggregated metrics
+- `GET /fleet/units` - Fleet list with telematics (provider-specific)
+- `GET /fleet/units/:identifier` - Unit detail with repair + telematics history
+- `GET /telematics/motive/vehicle-utilization` - Motive orgs only
+- `GET /telematics/motive/driver-utilization` - Motive orgs only
+- `GET /telematics/samsara/vehicle-stats` - Samsara orgs only
 
 ### Data Flow
 1. **Fleet Overview**:

@@ -195,35 +195,6 @@ export interface SyncResult {
 }
 
 // =====================================================
-// DATE HELPERS
+// DATE HELPERS (shared - re-export from telematics/dates)
 // =====================================================
-export function getYesterday(timezone: string = 'America/Toronto'): string {
-  const now = new Date();
-  const yesterday = new Date(now);
-  yesterday.setDate(yesterday.getDate() - 1);
-  
-  // Format as YYYY-MM-DD
-  return yesterday.toISOString().split('T')[0];
-}
-
-export function getTwoDaysAgo(timezone: string = 'America/Toronto'): string {
-  const now = new Date();
-  const twoDaysAgo = new Date(now);
-  twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
-  
-  // Format as YYYY-MM-DD
-  return twoDaysAgo.toISOString().split('T')[0];
-}
-
-export function getDateRange(startDate: string, endDate: string): string[] {
-  const dates: string[] = [];
-  const current = new Date(startDate);
-  const end = new Date(endDate);
-  
-  while (current <= end) {
-    dates.push(current.toISOString().split('T')[0]);
-    current.setDate(current.getDate() + 1);
-  }
-  
-  return dates;
-}
+export { getYesterday, getTwoDaysAgo, getDateRange } from '../dates.js';

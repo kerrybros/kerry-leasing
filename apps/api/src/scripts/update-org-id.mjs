@@ -40,15 +40,7 @@ async function updateOrgId(oldOrgId, newOrgId) {
     });
     console.log(`   ✓ Updated ${vehicleMapResult.count} vehicle mapping(s)`);
 
-    // 3. Update TelematicsDailyMetric
-    console.log('📋 Updating TelematicsDailyMetric...');
-    const metricsResult = await prisma.telematicsDailyMetric.updateMany({
-      where: { clerkOrgId: oldOrgId },
-      data: { clerkOrgId: newOrgId },
-    });
-    console.log(`   ✓ Updated ${metricsResult.count} daily metric(s)`);
-
-    // 4. Update Motive Raw Data Tables
+    // 3. Update Motive Raw Data Tables
     console.log('📋 Updating Motive Raw Data Tables...');
     
     const vehicleUtilResult = await prisma.motiveVehicleUtilization.updateMany({
@@ -89,11 +81,19 @@ async function updateOrgId(oldOrgId, newOrgId) {
     });
     console.log(`   ✓ Updated ${orgMapResult.count} org mapping(s)`);
 
+    // 4. Update Samsara raw data
+    console.log('📋 Updating SamsaraRawData...');
+    const samsaraResult = await prisma.samsaraRawData.updateMany({
+      where: { clerkOrgId: oldOrgId },
+      data: { clerkOrgId: newOrgId },
+    });
+    console.log(`   ✓ Updated ${samsaraResult.count} Samsara raw record(s)`);
+
     // Summary
     const totalUpdated = 
       providerResult.count +
       vehicleMapResult.count +
-      metricsResult.count +
+      samsaraResult.count +
       vehicleUtilResult.count +
       driverUtilResult.count +
       idleEventsResult.count +

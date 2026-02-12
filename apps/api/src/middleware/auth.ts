@@ -91,7 +91,11 @@ export async function clerkAuthMiddleware(
 
         if (currentOrgMembership) {
           // Map Clerk roles to our internal/external system
-          role = currentOrgMembership.role === 'org:admin' ? 'internal' : 'external';
+          // Clerk can return either "admin" or "org:admin" depending on context
+          const clerkRole = currentOrgMembership.role;
+          role = (clerkRole === 'org:admin' || clerkRole === 'admin') ? 'internal' : 'external';
+          
+          console.log(`User role in org ${orgId}: ${clerkRole} → ${role}`);
         } else if (req.headers['x-organization-id']) {
           // DEV MODE: If using header fallback and no membership found, grant internal role for testing
           console.log('⚠️  DEV MODE: Granting internal role via header fallback');

@@ -1,16 +1,13 @@
 /**
- * MOTIVE SYNC SERVICE
- * Main orchestrator for syncing all Motive data
+ * SAMSARA SYNC SERVICE
+ * Main orchestrator for syncing all Samsara data
  */
 
 import { appPrisma } from '../../lib/prisma.js';
-import { syncVehicleUtilization } from './sync/syncVehicleUtilization.js';
-import { syncDriverUtilization } from './sync/syncDriverUtilization.js';
-import { syncIdleEvents } from './sync/syncIdleEvents.js';
-import { syncDrivingPeriods } from './sync/syncDrivingPeriods.js';
-import { syncGeofences } from './sync/syncGeofences.js';
+import { syncFuelEnergyReports } from './sync/syncFuelEnergyReports.js';
 import { getYesterday, getTwoDaysAgo, SyncResult } from './types.js';
 
+/** Same shape as Motive for consistent logging and cron handling */
 interface OrgSyncResult {
   clerkOrgId: string;
   success: boolean;
@@ -21,11 +18,11 @@ interface OrgSyncResult {
 }
 
 /**
- * Sync all Motive endpoints for a single organization and date
+ * Sync all Samsara endpoints for a single organization and date
  */
-export async function syncMotiveOrgForDate(
+export async function syncSamsaraOrgForDate(
   clerkOrgId: string,
-  apiKey: string,
+  apiToken: string,
   date: string,
   verify: boolean = false
 ): Promise<OrgSyncResult> {
@@ -35,34 +32,23 @@ export async function syncMotiveOrgForDate(
     success: true,
     date,
     results: [],
-    duration: 0
+    duration: 0,
   };
 
   try {
-    console.log(`\n📊 Syncing Motive data for ${clerkOrgId} on ${date} (verify: ${verify})`);
+    console.log(`\n📊 Syncing Samsara data for ${clerkOrgId} on ${date} (verify: ${verify})`);
 
-    // Sync all transactional endpoints
-    const vehicleUtilResult = await syncVehicleUtilization(clerkOrgId, apiKey, date, verify);
-    orgResult.results.push(vehicleUtilResult);
-    console.log(`  ✓ Vehicle utilization: ${vehicleUtilResult.newCount} new, ${vehicleUtilResult.updatedCount} updated`);
+    const fuelResult = await syncFuelEnergyReports(clerkOrgId, apiToken, date, verify);
+    orgResult.results.push(fuelResult);
+    console.log(
+      `  ✓ Fuel-energy: ${fuelResult.newCount} new, ${fuelResult.updatedCount} updated, ` +
+      `${fuelResult.errorCount} errors`
+    );
 
-    const driverUtilResult = await syncDriverUtilization(clerkOrgId, apiKey, date, verify);
-    orgResult.results.push(driverUtilResult);
-    console.log(`  ✓ Driver utilization: ${driverUtilResult.newCount} new, ${driverUtilResult.updatedCount} updated`);
-
-    const idleEventsResult = await syncIdleEvents(clerkOrgId, apiKey, date, verify);
-    orgResult.results.push(idleEventsResult);
-    console.log(`  ✓ Idle events: ${idleEventsResult.newCount} new, ${idleEventsResult.updatedCount} updated`);
-
-    const drivingPeriodsResult = await syncDrivingPeriods(clerkOrgId, apiKey, date, verify);
-    orgResult.results.push(drivingPeriodsResult);
-    console.log(`  ✓ Driving periods: ${drivingPeriodsResult.newCount} new, ${drivingPeriodsResult.updatedCount} updated`);
-
-    // Sync geofences daily (no verification)
-    const geofencesResult = await syncGeofences(clerkOrgId, apiKey);
-    orgResult.results.push(geofencesResult);
-    console.log(`  ✓ Geofences: ${geofencesResult.newCount} new, ${geofencesResult.updatedCount} updated`);
-
+    orgResult.success = fuelResult.errorCount === 0;
+    orgResult.error = fuelResult.errors.length > 0
+      ? fuelResult.errors.map(e => e.error).join('; ')
+      : undefined;
     orgResult.duration = Date.now() - startTime;
     console.log(`✅ Completed sync for ${clerkOrgId} in ${Math.round(orgResult.duration / 1000)}s`);
 
@@ -77,11 +63,9 @@ export async function syncMotiveOrgForDate(
 }
 
 /**
- * Daily sync: Sync yesterday + verify 2 days ago for all orgs.
- * Does NOT backfill historical dates. For full-term driver miles/MPG (driving periods),
- * run the backdate script: pnpm backdate -- --org=<clerkOrgId> --start=YYYY-MM-DD --end=YYYY-MM-DD
+ * Daily sync: Sync yesterday + verify 2 days ago for all orgs
  */
-export async function syncMotiveDaily(): Promise<{
+export async function syncSamsaraDaily(): Promise<{
   totalOrgs: number;
   successCount: number;
   errorCount: number;
@@ -92,20 +76,20 @@ export async function syncMotiveDaily(): Promise<{
   const yesterday = getYesterday();
   const twoDaysAgo = getTwoDaysAgo();
 
-  console.log(`\n🚀 MOTIVE DAILY SYNC STARTED`);
+  console.log(`\n🚀 SAMSARA DAILY SYNC STARTED`);
   console.log(`  Primary sync date: ${yesterday}`);
   console.log(`  Verification date: ${twoDaysAgo}`);
   console.log(`  Timestamp: ${new Date().toISOString()}\n`);
 
-  // Get all orgs with Motive configured
+  // Get all orgs with Samsara configured
   const providerAccounts = await appPrisma.telematicsProviderAccount.findMany({
     where: {
-      provider: 'MOTIVE',
+      provider: 'SAMSARA',
       status: 'ACTIVE'
     }
   });
 
-  console.log(`📋 Found ${providerAccounts.length} active Motive organizations\n`);
+  console.log(`📋 Found ${providerAccounts.length} active Samsara organizations\n`);
 
   const results: OrgSyncResult[] = [];
   let successCount = 0;
@@ -114,12 +98,12 @@ export async function syncMotiveDaily(): Promise<{
   // Process each org
   for (const account of providerAccounts) {
     try {
-      const apiKey = (account.credentialsJson as any).apiKey;
+      const apiToken = (account.credentialsJson as any).apiToken;
 
       // 1. Sync yesterday's data (primary)
-      const yesterdayResult = await syncMotiveOrgForDate(
+      const yesterdayResult = await syncSamsaraOrgForDate(
         account.clerkOrgId,
-        apiKey,
+        apiToken,
         yesterday,
         false // Not verification
       );
@@ -132,20 +116,20 @@ export async function syncMotiveDaily(): Promise<{
       }
 
       // 2. Verify 2 days ago (lookback)
-      const verificationResult = await syncMotiveOrgForDate(
+      const verificationResult = await syncSamsaraOrgForDate(
         account.clerkOrgId,
-        apiKey,
+        apiToken,
         twoDaysAgo,
         true // Verification mode
       );
       results.push(verificationResult);
 
-      // Update provider account
+      // Update provider account (same pattern as Motive)
       await appPrisma.telematicsProviderAccount.update({
         where: { id: account.id },
         data: {
           lastSyncAt: new Date(),
-          lastError: yesterdayResult.error || null
+          lastError: yesterdayResult.error ?? null
         }
       });
 
@@ -168,7 +152,7 @@ export async function syncMotiveDaily(): Promise<{
 
   const duration = Date.now() - startTime;
 
-  console.log(`\n✅ MOTIVE DAILY SYNC COMPLETED`);
+  console.log(`\n✅ SAMSARA DAILY SYNC COMPLETED`);
   console.log(`  Total orgs: ${providerAccounts.length}`);
   console.log(`  Success: ${successCount}`);
   console.log(`  Errors: ${errorCount}`);

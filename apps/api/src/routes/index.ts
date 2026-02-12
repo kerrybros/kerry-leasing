@@ -427,15 +427,58 @@ router.use('/cron', cronRoutes);
 // Mount fleet routes (combined telematics + repair data, filtered by service plan)
 router.use('/fleet', fleetRoutes);
 
-// Mount service plan admin routes (requires auth and org - role check temporarily disabled for dev)
+// Mount service plan admin routes (requires auth, org, and org:admin role)
 router.use(
   '/admin/service-plan',
   clerkAuthMiddleware,
   requireOrg,
+  requireRole(['internal']),
   servicePlanRoutes
 );
 
 // Mount repairs aggregation routes
 router.use('/repairs', repairsRoutes);
+
+// Get organization settings (feature flags)
+router.get(
+  '/org/settings',
+  clerkAuthMiddleware,
+  requireOrg,
+  async (req: AuthRequest, res) => {
+    try {
+      const clerkOrgId = req.auth!.orgId!;
+      const appPrisma = getAppPrisma();
+      
+      // Get organization settings (tracksDrivers)
+      const settings = await (appPrisma as any).organizationSettings.findUnique({
+        where: { clerkOrgId },
+        select: {
+          tracksDrivers: true,
+        },
+      });
+      
+      // Get telematics provider
+      const providerAccount = await (appPrisma as any).telematicsProviderAccount.findUnique({
+        where: { clerkOrgId },
+        select: {
+          provider: true,
+        },
+      });
+      
+      // Default to true if no settings found (backward compatible)
+      res.json({
+        tracksDrivers: settings?.tracksDrivers ?? true,
+        telematicsProvider: providerAccount?.provider || null, // MOTIVE, SAMSARA, or null
+      });
+    } catch (error) {
+      console.error('Error fetching org settings:', error);
+      // On error (e.g., table doesn't exist yet), default to true
+      res.json({
+        tracksDrivers: true,
+        telematicsProvider: null,
+      });
+    }
+  }
+);
 
 export default router;

@@ -32,21 +32,10 @@ export async function syncDrivingPeriods(
     
     result.recordCount = records.length;
 
-    // Process each record
+    // Process each record (include periods with or without driver for full data capture)
     for (const record of records) {
       try {
         const motivePeriodId = BigInt(record.id);
-        
-        // Skip records without driver info
-        if (!record.driver || !record.driver.id) {
-          console.log(`  ⚠ Skipping driving period ${record.id} with missing driver info`);
-          result.errorCount++;
-          result.errors.push({
-            recordId: record.id,
-            error: 'Missing driver information'
-          });
-          continue;
-        }
         
         // Check if record exists
         const existing = await appPrisma.motiveDrivingPeriod.findUnique({
@@ -61,11 +50,11 @@ export async function syncDrivingPeriods(
         const recordData = {
           clerkOrgId,
           motivePeriodId,
-          driverId: record.driver.id,
-          driverFirstName: record.driver.first_name || null,
-          driverLastName: record.driver.last_name || null,
-          driverUsername: record.driver.username || null,
-          driverEmail: record.driver.email || null,
+          driverId: record.driver?.id ?? null,
+          driverFirstName: record.driver?.first_name || null,
+          driverLastName: record.driver?.last_name || null,
+          driverUsername: record.driver?.username || null,
+          driverEmail: record.driver?.email || null,
           vehicleId: record.vehicle.id,
           vehicleNumber: record.vehicle.number || null,
           vin: record.vehicle.vin || null,

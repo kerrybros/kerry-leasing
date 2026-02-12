@@ -198,15 +198,22 @@ export async function getUnitsFromTelematics(clerkOrgId: string) {
     vinSet.add(v.vin);
     vehicleInfo.set(v.vin, { name: v.providerVehicleName || undefined });
   });
-  
-  // 2. Get VINs from normalized daily metrics
-  const telematicsVins = await client.telematicsDailyMetric.findMany({
-    where: { clerkOrgId },
-    select: { vin: true },
+
+  // 2. Get VINs from Samsara raw data
+  const samsaraVins = await client.samsaraRawData.findMany({
+    where: { clerkOrgId, vin: { not: null } },
+    select: { vin: true, vehicleName: true },
     distinct: ['vin'],
   });
-  telematicsVins.forEach(v => vinSet.add(v.vin));
-  
+  samsaraVins.forEach(v => {
+    if (v.vin) {
+      vinSet.add(v.vin);
+      if (v.vehicleName && !vehicleInfo.has(v.vin)) {
+        vehicleInfo.set(v.vin, { name: v.vehicleName });
+      }
+    }
+  });
+
   // 3. Get VINs from Motive raw data (vehicle utilization)
   const motiveVehicles = await client.motiveVehicleUtilization.findMany({
     where: {
