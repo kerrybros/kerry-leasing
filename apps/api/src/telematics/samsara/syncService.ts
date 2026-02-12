@@ -115,6 +115,16 @@ export async function syncSamsaraDaily(): Promise<{
         errorCount++;
       }
 
+      const yesterdayFuel = yesterdayResult.results[0];
+      const yesterdaySummary =
+        yesterdayFuel?.recordCount != null
+          ? `${yesterdayFuel.recordCount} units, ${yesterdayFuel.newCount} new, ${yesterdayFuel.updatedCount} updated, ${yesterdayFuel.unchangedCount} unchanged`
+          : 'no data';
+      console.log(`  📅 Yesterday (${yesterday}): ${yesterdaySummary}`);
+      if ((yesterdayFuel?.errorCount ?? 0) > 0) {
+        console.log(`     ⚠️  ${yesterdayFuel!.errorCount} error(s): ${yesterdayFuel!.errors.map((e) => e.error).join('; ')}`);
+      }
+
       // 2. Verify 2 days ago (lookback)
       const verificationResult = await syncSamsaraOrgForDate(
         account.clerkOrgId,
@@ -123,6 +133,17 @@ export async function syncSamsaraDaily(): Promise<{
         true // Verification mode
       );
       results.push(verificationResult);
+
+      const verifyFuel = verificationResult.results[0];
+      const verifySummary =
+        verifyFuel?.recordCount != null
+          ? `${verifyFuel.recordCount} units, ${verifyFuel.newCount} new, ${verifyFuel.updatedCount} updated`
+          : 'no data';
+      const noChanges =
+        verifyFuel && verifyFuel.newCount === 0 && verifyFuel.updatedCount === 0
+          ? ' — no changes'
+          : '';
+      console.log(`  🔍 Verification (${twoDaysAgo}): ${verifySummary}${noChanges}`);
 
       // Update provider account (same pattern as Motive)
       await appPrisma.telematicsProviderAccount.update({
@@ -152,11 +173,16 @@ export async function syncSamsaraDaily(): Promise<{
 
   const duration = Date.now() - startTime;
 
-  console.log(`\n✅ SAMSARA DAILY SYNC COMPLETED`);
-  console.log(`  Total orgs: ${providerAccounts.length}`);
-  console.log(`  Success: ${successCount}`);
-  console.log(`  Errors: ${errorCount}`);
-  console.log(`  Duration: ${Math.round(duration / 1000)}s\n`);
+  console.log(`\n${'─'.repeat(50)}`);
+  console.log(`✅ SAMSARA DAILY SYNC COMPLETED`);
+  console.log(`  Dates checked: yesterday (${yesterday}), verification (${twoDaysAgo})`);
+  console.log(`  Orgs: ${providerAccounts.length} total, ${successCount} succeeded, ${errorCount} failed`);
+  console.log(`  Duration: ${Math.round(duration / 1000)}s`);
+  if (errorCount > 0) {
+    const failed = results.filter((r) => !r.success && r.error);
+    failed.forEach((r) => console.log(`  ❌ ${r.clerkOrgId}: ${r.error}`));
+  }
+  console.log(`${'─'.repeat(50)}\n`);
 
   return {
     totalOrgs: providerAccounts.length,

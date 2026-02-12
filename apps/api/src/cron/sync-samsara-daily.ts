@@ -27,12 +27,12 @@ async function main() {
     // Run daily sync
     const result = await syncSamsaraDaily();
 
-    // Exit with appropriate code
+    // Final status for monitoring / logs
     if (result.errorCount > 0) {
-      console.log(`\n⚠️  Completed with ${result.errorCount} errors`);
+      console.log(`\n⚠️  CRON RESULT: ${result.successCount}/${result.totalOrgs} org(s) succeeded, ${result.errorCount} failed. Exit code 1.`);
       process.exit(1); // Non-zero exit for monitoring tools
     } else {
-      console.log(`\n✅ All syncs completed successfully`);
+      console.log(`\n✅ CRON RESULT: All ${result.totalOrgs} org(s) synced successfully. Exit code 0.`);
       process.exit(0);
     }
   } catch (error: any) {
