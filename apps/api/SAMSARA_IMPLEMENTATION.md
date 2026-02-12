@@ -108,9 +108,11 @@ pnpm backdate-samsara -- --org=org_xxxxx --start=2025-05-01 --end=2026-02-09
 
 Create a Render Cron Job:
 - **Type**: Cron Job
-- **Command**: `pnpm sync-samsara`
-- **Schedule**: `0 6 * * *` (6 AM EST daily)
-- **Environment**: Same as API service (must include `APP_DATABASE_URL`)
+- **Command**: `pnpm sync-samsara` (from repo root) or `bash scripts/sync-samsara.sh`
+- **Schedule**: `0 11 * * *` (6 AM EST; 11:00 UTC) or your preferred time
+- **Environment**: Cron jobs do **not** inherit the API service env. Add these in the Cron Job → Environment:
+  - **`APP_DATABASE_URL`** (required) – same value as your API service
+  - **`REPAIR_DATABASE_URL`** – add if the sync or Prisma ever use the repair DB (optional for Samsara-only)
 
 **Option B: HTTP Endpoint + External Scheduler**
 
