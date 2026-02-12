@@ -154,7 +154,7 @@ export default function UnitDetailPage() {
     } finally {
       setLoading(false);
     }
-  }, [getToken, organization?.id, vin]);
+  }, [getToken, organization?.id, organization?.name, vin]);
 
   useEffect(() => {
     if (organization) {

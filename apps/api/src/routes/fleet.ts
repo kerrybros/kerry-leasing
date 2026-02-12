@@ -105,7 +105,7 @@ router.get('/units', clerkAuthMiddleware, requireOrg, async (req: AuthRequest, r
             rawResponse: true,
           },
         });
-        const dates = [...new Set(records.map((r) => r.date))];
+        const dates = [...new Set(records.map((r) => r.date))] as string[];
         const idleByDate = await getSamsaraIdleAggregatesByDate(appPrisma, clerkOrgId, dates);
         for (const rec of records) {
           if (!rec.vin) continue;
@@ -320,7 +320,7 @@ router.get('/units/:identifier', clerkAuthMiddleware, requireOrg, async (req: Au
             rawResponse: true,
           },
         });
-        const dates = [...new Set(records.map((r) => r.date))];
+        const dates = [...new Set(records.map((r) => r.date))] as string[];
         const idleByDate = await getSamsaraIdleAggregatesByDate(appPrisma, clerkOrgId, dates);
         telematicsHistory = records.map(rec => {
           const converted = (rec.rawResponse as any)?.convertedMetrics || {};

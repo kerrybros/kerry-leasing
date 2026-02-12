@@ -89,14 +89,12 @@ export async function fetchFuelEnergyReports(
       const response = await client.getSinglePage<any>(
         '/fleet/reports/vehicles/fuel-energy',
         params
-      );
+      ) as { data?: { vehicleReports?: SamsaraVehicleReport[] }; pagination?: { hasNextPage?: boolean; endCursor?: string } };
 
-      // response is already the parsed data from axios
       if (response.data?.vehicleReports) {
         allReports = allReports.concat(response.data.vehicleReports);
       }
 
-      // Check pagination
       hasMore = response.pagination?.hasNextPage || false;
       cursor = response.pagination?.endCursor;
 

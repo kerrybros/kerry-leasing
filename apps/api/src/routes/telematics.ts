@@ -433,7 +433,7 @@ router.get(
       });
 
       // Idle fuel: aggregate on read from idling events (assetId = vehicle.id)
-      const dates = [...new Set(rawRecords.map((r: any) => r.date))];
+      const dates = [...new Set(rawRecords.map((r: any) => r.date))] as string[];
       const idleByDate = await getSamsaraIdleAggregatesByDate(appClient, orgId, dates);
 
       // Transform Samsara data to match Motive's VehicleUtilization format; use vehicle.name for display

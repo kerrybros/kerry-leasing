@@ -1,7 +1,7 @@
 'use client';
 
 import { useAuth, useOrganization } from '@clerk/nextjs';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { createApiClient } from '@/lib/api';
 
 interface ServicePlanUnit {
@@ -44,7 +44,7 @@ export default function AdminServicePlanPage() {
   const [syncSuccess, setSyncSuccess] = useState<string | null>(null);
   const [filter, setFilter] = useState<'all' | 'included' | 'excluded' | 'unmatched'>('all');
 
-  const loadUnits = async () => {
+  const loadUnits = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -70,7 +70,7 @@ export default function AdminServicePlanPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [getToken, organization?.id]);
 
   const syncUnits = async () => {
     try {
@@ -155,7 +155,7 @@ export default function AdminServicePlanPage() {
     if (organization?.id) {
       loadUnits();
     }
-  }, [organization?.id]);
+  }, [organization?.id, loadUnits]);
 
   const filteredUnits = units.filter(unit => {
     if (filter === 'included') return unit.isIncluded;
@@ -302,7 +302,7 @@ export default function AdminServicePlanPage() {
               {filteredUnits.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="px-4 py-8 text-center text-text-secondary">
-                    No units found. Click "Sync Units" to import from repair database.
+                    No units found. Click &quot;Sync Units&quot; to import from repair database.
                   </td>
                 </tr>
               ) : (
