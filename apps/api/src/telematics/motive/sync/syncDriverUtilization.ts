@@ -31,23 +31,11 @@ export async function syncDriverUtilization(
     const records = await fetchDriverUtilization(client, date);
     
     result.recordCount = records.length;
-
-    // Process each record
+    // Store all rollups; driver optional (null when missing) — no skip for missing driver
     for (const record of records) {
       try {
-        // Skip records without driver info
-        if (!record.driver || !record.driver.id) {
-          console.log(`  ⚠ Skipping driver utilization record with missing driver info`);
-          result.errorCount++;
-          result.errors.push({
-            recordId: 'unknown',
-            error: 'Missing driver information'
-          });
-          continue;
-        }
-        
-        const driverId = record.driver.id;
-        
+        const driverId = record.driver?.id ?? null;
+
         // Check if record exists
         const existing = await appPrisma.motiveDriverUtilization.findUnique({
           where: {
@@ -62,10 +50,10 @@ export async function syncDriverUtilization(
         const recordData = {
           clerkOrgId,
           driverId,
-          driverFirstName: record.driver.first_name || null,
-          driverLastName: record.driver.last_name || null,
-          driverUsername: record.driver.username || null,
-          driverEmail: record.driver.email || null,
+          driverFirstName: record.driver?.first_name || null,
+          driverLastName: record.driver?.last_name || null,
+          driverUsername: record.driver?.username || null,
+          driverEmail: record.driver?.email || null,
           date,
           utilization: record.utilization ?? null,
           idleTime: record.idle_time ?? null,
@@ -130,7 +118,7 @@ export async function syncDriverUtilization(
       } catch (error: any) {
         result.errorCount++;
         result.errors.push({
-          recordId: record.driver.id,
+          recordId: String(record.driver?.id ?? 'no-driver'),
           error: error.message
         });
       }

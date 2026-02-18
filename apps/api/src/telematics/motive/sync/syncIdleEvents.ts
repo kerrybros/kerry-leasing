@@ -31,23 +31,21 @@ export async function syncIdleEvents(
     const records = await fetchIdleEvents(client, date);
     
     result.recordCount = records.length;
-
-    // Process each record
+    // Store all events; driver optional (null when missing) — no skip for missing driver
     for (const record of records) {
       try {
-        // Skip records without driver info
-        if (!record.driver || !record.driver.id) {
-          console.log(`  ⚠ Skipping idle event ${record.id} with missing driver info`);
+        const motiveEventId = BigInt(record.id);
+
+        // Only skip when we cannot form a row: vehicle is required to attribute the event
+        if (record.vehicle?.id == null) {
           result.errorCount++;
           result.errors.push({
             recordId: record.id,
-            error: 'Missing driver information'
+            error: 'Missing vehicle information'
           });
           continue;
         }
-        
-        const motiveEventId = BigInt(record.id);
-        
+
         // Check if record exists
         const existing = await appPrisma.motiveIdleEvent.findUnique({
           where: {
@@ -61,11 +59,11 @@ export async function syncIdleEvents(
         const recordData = {
           clerkOrgId,
           motiveEventId,
-          driverId: record.driver.id,
-          driverFirstName: record.driver.first_name || null,
-          driverLastName: record.driver.last_name || null,
-          driverUsername: record.driver.username || null,
-          driverEmail: record.driver.email || null,
+          driverId: record.driver?.id ?? null,
+          driverFirstName: record.driver?.first_name || null,
+          driverLastName: record.driver?.last_name || null,
+          driverUsername: record.driver?.username || null,
+          driverEmail: record.driver?.email || null,
           vehicleId: record.vehicle.id,
           vehicleNumber: record.vehicle.number || null,
           vin: record.vehicle.vin || null,
