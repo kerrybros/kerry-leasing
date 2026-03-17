@@ -306,17 +306,11 @@ export default function FleetOverviewPage() {
       const telematicsProvider = opts?.provider ?? orgSettings.telematicsProvider;
       
       if (telematicsProvider === 'MOTIVE') {
-        // Load from Motive endpoint
-        const vehicleUtil = await api.get<VehicleUtilization[]>('/telematics/motive/vehicle-utilization');
-        
-        // Filter to only included VINs
-        filteredVehicleUtil = vehicleUtil.filter(v => v.vin && includedVins.has(v.vin));
+        const resp = await api.get<{ data: VehicleUtilization[] }>('/telematics/motive/vehicle-utilization?pageSize=50000');
+        filteredVehicleUtil = resp.data.filter(v => v.vin && includedVins.has(v.vin));
       } else if (telematicsProvider === 'SAMSARA') {
-        // Load from Samsara endpoint (already transformed to match Motive format)
-        const vehicleUtil = await api.get<VehicleUtilization[]>('/telematics/samsara/vehicle-stats');
-        
-        // Filter to only included VINs
-        filteredVehicleUtil = vehicleUtil.filter(v => v.vin && includedVins.has(v.vin));
+        const resp = await api.get<{ data: VehicleUtilization[] }>('/telematics/samsara/vehicle-stats?pageSize=50000');
+        filteredVehicleUtil = resp.data.filter(v => v.vin && includedVins.has(v.vin));
       }
       
       // For drivers, only load if org tracks drivers

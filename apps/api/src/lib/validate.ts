@@ -96,7 +96,7 @@ export const PaginationSchema = z.object({
     .string()
     .optional()
     .transform((v) => (v ? parseInt(v, 10) : 100))
-    .pipe(z.number().int().min(1).max(500).default(100)),
+    .pipe(z.number().int().min(1).max(50000).default(100)),
 });
 
 // ─── Helper functions ─────────────────────────────────────────────────────────
