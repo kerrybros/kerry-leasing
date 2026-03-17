@@ -64,6 +64,7 @@ model TelematicsProviderAccount {
   status          TelematicsProviderStatus   @default(ACTIVE)
   lastSyncAt      DateTime?                  @map("last_sync_at")
   lastError       String?                    @map("last_error")
+  lastBackdateReport Json?                   @map("last_backdate_report")
   createdAt       DateTime                   @default(now()) @map("created_at")
   updatedAt       DateTime                   @updatedAt @map("updated_at")
 

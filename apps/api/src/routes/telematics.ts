@@ -27,6 +27,7 @@ import {
   VehicleMapSchema,
   AdminSyncSchema,
   BackdateTelematicsSchema,
+  SyncDateSchema,
   PaginationSchema,
   parseBody,
   parseQuery,
@@ -350,6 +351,85 @@ router.post(
       res.status(500).json({
         error: 'Internal Server Error',
         message: 'Failed to start backdate',
+      });
+    }
+  }
+);
+
+/**
+ * GET /admin/telematics/backdate-report
+ *
+ * Returns the last backdate run report for the current org (if any).
+ * Internal/admin only; requires org context.
+ */
+router.get(
+  '/admin/telematics/backdate-report',
+  clerkAuthMiddleware,
+  requireOrg,
+  requireRole(['internal']),
+  async (req: AuthRequest, res) => {
+    try {
+      const orgId = req.auth!.orgId!;
+      const appClient = getAppPrisma();
+      const account = await appClient.telematicsProviderAccount.findUnique({
+        where: { clerkOrgId: orgId },
+        select: { lastBackdateReport: true },
+      });
+      res.json({ report: account?.lastBackdateReport ?? null });
+    } catch (error) {
+      console.error('Error fetching backdate report:', error);
+      res.status(500).json({
+        error: 'Internal Server Error',
+        message: 'Failed to fetch backdate report',
+      });
+    }
+  }
+);
+
+/**
+ * POST /admin/telematics/sync-date
+ *
+ * Sync telematics for the current org for a single date.
+ * Internal/admin only; requires org context.
+ */
+router.post(
+  '/admin/telematics/sync-date',
+  clerkAuthMiddleware,
+  requireOrg,
+  requireRole(['internal']),
+  async (req: AuthRequest, res) => {
+    try {
+      const body = parseBody(SyncDateSchema, req, res);
+      if (!body) return;
+      const orgId = req.auth!.orgId!;
+      const appClient = getAppPrisma();
+      const account = await appClient.telematicsProviderAccount.findUnique({
+        where: { clerkOrgId: orgId },
+        select: { provider: true, status: true, credentialsJson: true },
+      });
+      if (!account || account.status !== TelematicsProviderStatus.ACTIVE) {
+        return res.status(400).json({
+          error: 'Bad Request',
+          message: 'No active telematics provider configured for this organization.',
+        });
+      }
+      const syncDate = body.date;
+      let result: { success: boolean; error?: string };
+      if (account.provider === TelematicsProvider.MOTIVE) {
+        const apiKey = readCredentials(account.credentialsJson).apiKey as string;
+        const r = await syncMotiveOrgForDate(orgId, apiKey, syncDate, false);
+        result = { success: r.success, error: r.success ? undefined : r.error };
+      } else {
+        const apiToken = readCredentials(account.credentialsJson).apiToken as string;
+        const r = await syncSamsaraOrgForDate(orgId, apiToken, syncDate, false);
+        result = { success: r.success, error: r.success ? undefined : r.error };
+      }
+      res.json({ success: result.success, date: syncDate, error: result.error });
+    } catch (error: any) {
+      console.error('Error syncing date:', error);
+      res.status(500).json({
+        error: 'Internal Server Error',
+        message: error?.message ?? 'Failed to sync date',
       });
     }
   }

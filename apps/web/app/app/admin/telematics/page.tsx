@@ -13,6 +13,16 @@ interface TelematicsStatus {
   lastError: string | null;
 }
 
+interface BackdateReport {
+  completedAt: string;
+  startDate: string;
+  endDate: string;
+  totalDays: number;
+  successCount: number;
+  errorCount: number;
+  failedDates: { date: string; error: string }[];
+}
+
 export default function AdminTelematicsPage() {
   const { organization } = useOrganization();
   const { getApi } = useApiClient();
@@ -29,6 +39,12 @@ export default function AdminTelematicsPage() {
   const [syncSuccess, setSyncSuccess] = useState<string | null>(null);
   const [backdateSuccess, setBackdateSuccess] = useState<string | null>(null);
   const [backdating, setBackdating] = useState(false);
+  const [report, setReport] = useState<BackdateReport | null>(null);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [syncDate, setSyncDate] = useState('');
+  const [syncingDate, setSyncingDate] = useState(false);
+  const [syncDateSuccess, setSyncDateSuccess] = useState<string | null>(null);
+  const [syncDateError, setSyncDateError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -47,10 +63,28 @@ export default function AdminTelematicsPage() {
         setStatus(prev => ({ ...prev, provider: settings.telematicsProvider }));
       }
       setContractStartDate(settings.contractStartDate ?? null);
+      if (settings.telematicsProvider) {
+        loadBackdateReport();
+      } else {
+        setReport(null);
+      }
     } catch (err: any) {
       // Settings endpoint may return 404 if not configured yet — that's fine
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadBackdateReport = async () => {
+    try {
+      setReportLoading(true);
+      const api = await getApi();
+      const res = await api.get<{ report: BackdateReport | null }>('/telematics/admin/telematics/backdate-report');
+      setReport(res.report ?? null);
+    } catch {
+      setReport(null);
+    } finally {
+      setReportLoading(false);
     }
   };
 
@@ -129,6 +163,30 @@ export default function AdminTelematicsPage() {
       setError(err.message || 'Failed to start backdate');
     } finally {
       setBackdating(false);
+    }
+  };
+
+  const handleSyncDate = async (date: string) => {
+    if (!organization?.id || !date) return;
+    try {
+      setSyncingDate(true);
+      setSyncDateError(null);
+      setSyncDateSuccess(null);
+      setError(null);
+      const api = await getApi();
+      const result = await api.post<{ success: boolean; date: string; error?: string }>(
+        '/telematics/admin/telematics/sync-date',
+        { date }
+      );
+      if (result.success) {
+        setSyncDateSuccess(`Synced ${date} successfully.`);
+      } else {
+        setSyncDateError(result.error || 'Sync failed');
+      }
+    } catch (err: any) {
+      setSyncDateError(err.message || 'Failed to sync date');
+    } finally {
+      setSyncingDate(false);
     }
   };
 
@@ -280,6 +338,94 @@ export default function AdminTelematicsPage() {
           >
             {backdating ? 'Starting...' : 'Start Backdate'}
           </button>
+        </div>
+      )}
+
+      {/* Last backdate report */}
+      {status.provider && (
+        <div className="bg-bg-secondary border border-border rounded-lg p-6 mb-6 mt-6">
+          <h2 className="text-lg font-semibold mb-2">Last Backdate Report</h2>
+          {reportLoading ? (
+            <p className="text-sm text-text-secondary">Loading report…</p>
+          ) : !report ? (
+            <p className="text-sm text-text-secondary">No backdate report yet. Run a backdate to see results.</p>
+          ) : (
+            <>
+              <p className="text-sm text-text-secondary mb-3">
+                Total days: {report.totalDays}, Succeeded: {report.successCount}, Failed: {report.errorCount}
+                {report.completedAt && (
+                  <span className="block mt-1">Completed at {new Date(report.completedAt).toLocaleString()}</span>
+                )}
+              </p>
+              {report.failedDates && report.failedDates.length > 0 && (
+                <div className="mt-3">
+                  <p className="text-sm font-medium text-amber-600 dark:text-amber-400 mb-2">Failed days</p>
+                  <ul className="space-y-2">
+                    {report.failedDates.map(({ date, error }) => (
+                      <li
+                        key={date}
+                        className="flex items-center justify-between gap-3 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm"
+                      >
+                        <span className="font-medium text-red-800 dark:text-red-200">{date}</span>
+                        <span className="text-red-700 dark:text-red-300 flex-1 truncate ml-2" title={error}>{error}</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSyncDate(date);
+                            handleSyncDate(date);
+                          }}
+                          disabled={syncingDate}
+                          className="shrink-0 px-3 py-1 bg-red-100 dark:bg-red-900/40 text-red-800 dark:text-red-200 rounded hover:bg-red-200 dark:hover:bg-red-900/60 text-xs font-medium disabled:opacity-50"
+                        >
+                          Retry
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={loadBackdateReport}
+                disabled={reportLoading}
+                className="mt-4 px-3 py-1.5 text-sm text-primary hover:underline disabled:opacity-50"
+              >
+                Refresh report
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Sync specific date */}
+      {status.provider && (
+        <div className="bg-bg-secondary border border-border rounded-lg p-6 mb-6">
+          <h2 className="text-lg font-semibold mb-2">Sync Specific Date</h2>
+          <p className="text-sm text-text-secondary mb-4">
+            Re-pull telematics data for a single date (YYYY-MM-DD). Use after a backdate to retry failed days.
+          </p>
+          <div className="flex flex-wrap items-center gap-3">
+            <input
+              type="date"
+              value={syncDate}
+              onChange={(e) => setSyncDate(e.target.value)}
+              className="px-3 py-2 bg-bg-primary border border-border rounded-lg text-sm focus:outline-none focus:border-primary"
+            />
+            <button
+              type="button"
+              onClick={() => handleSyncDate(syncDate)}
+              disabled={syncingDate || !syncDate}
+              className="px-5 py-2 bg-primary text-white rounded-lg hover:bg-primary-dark disabled:opacity-50 text-sm font-medium"
+            >
+              {syncingDate ? 'Syncing...' : 'Sync this date'}
+            </button>
+          </div>
+          {syncDateSuccess && (
+            <p className="mt-3 text-sm text-green-600 dark:text-green-400">{syncDateSuccess}</p>
+          )}
+          {syncDateError && (
+            <p className="mt-3 text-sm text-red-600 dark:text-red-400">{syncDateError}</p>
+          )}
         </div>
       )}
     </div>

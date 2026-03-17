@@ -105,12 +105,22 @@ async function backdateSamsaraData(options: BackdateOptions): Promise<void> {
     });
   }
 
-  // Update provider account
+  // Update provider account with run report
+  const lastBackdateReport = {
+    completedAt: new Date().toISOString(),
+    startDate,
+    endDate,
+    totalDays: dates.length,
+    successCount,
+    errorCount,
+    failedDates: errors,
+  };
   await appPrisma.telematicsProviderAccount.update({
     where: { id: providerAccount.id },
     data: {
       lastSyncAt: new Date(),
-      lastError: errors.length > 0 ? `Backdate completed with ${errors.length} errors` : null
+      lastError: errors.length > 0 ? `Backdate completed with ${errors.length} errors` : null,
+      lastBackdateReport: lastBackdateReport as any,
     }
   });
 
