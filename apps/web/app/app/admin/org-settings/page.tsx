@@ -34,15 +34,11 @@ export default function AdminOrgSettingsPage() {
       setLoading(true);
       setError(null);
       const api = await getApi();
-      const data = await api.get<RepairCustomerConfig | null>('/admin/repair-customer');
-      setConfig(data ?? null);
-      if (data) {
-        setCustomerName(data.customerName);
-        setContractStartDate(data.contractStartDate);
-      } else {
-        setCustomerName('');
-        setContractStartDate('');
-      }
+      const res = await api.get<{ config: RepairCustomerConfig | null }>('/admin/repair-customer');
+      const configData = res?.config ?? null;
+      setConfig(configData);
+      setCustomerName(configData?.customerName ?? '');
+      setContractStartDate(configData?.contractStartDate ?? '');
     } catch (err: any) {
       setError(err.message || 'Failed to load settings');
     } finally {
@@ -52,7 +48,8 @@ export default function AdminOrgSettingsPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!organization?.id || !customerName.trim() || !contractStartDate) return;
+    const name = (customerName ?? '').trim();
+    if (!organization?.id || !name || !contractStartDate) return;
 
     try {
       setSaving(true);
@@ -61,7 +58,7 @@ export default function AdminOrgSettingsPage() {
 
       const api = await getApi();
       await api.put('/admin/repair-customer', {
-        customerName: customerName.trim(),
+        customerName: name,
         contractStartDate,
       });
 
@@ -111,7 +108,7 @@ export default function AdminOrgSettingsPage() {
             <label className="block text-sm font-medium mb-2">Customer Name</label>
             <input
               type="text"
-              value={customerName}
+              value={customerName ?? ''}
               onChange={(e) => setCustomerName(e.target.value)}
               placeholder="e.g. Wolverine"
               className="w-full px-3 py-2 bg-bg-primary border border-border rounded-lg text-sm focus:outline-none focus:border-primary"
@@ -123,7 +120,7 @@ export default function AdminOrgSettingsPage() {
             <label className="block text-sm font-medium mb-2">Contract Start Date</label>
             <input
               type="date"
-              value={contractStartDate}
+              value={contractStartDate ?? ''}
               onChange={(e) => setContractStartDate(e.target.value)}
               className="w-full px-3 py-2 bg-bg-primary border border-border rounded-lg text-sm focus:outline-none focus:border-primary"
               required
@@ -135,7 +132,7 @@ export default function AdminOrgSettingsPage() {
 
           <button
             type="submit"
-            disabled={saving || !customerName.trim() || !contractStartDate}
+            disabled={saving || !(customerName ?? '').trim() || !contractStartDate}
             className="w-fit px-5 py-2 bg-primary text-white rounded-lg hover:bg-primary-dark disabled:opacity-50 text-sm font-medium"
           >
             {saving ? 'Saving...' : 'Save Settings'}
