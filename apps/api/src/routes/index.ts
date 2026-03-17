@@ -440,6 +440,12 @@ router.get(
           tracksDrivers: true,
         },
       });
+
+      // Get repair customer config (contract start date)
+      const repairConfig = await appPrisma.repairCustomerConfig.findUnique({
+        where: { klOrgId: clerkOrgId },
+        select: { contractStartDate: true },
+      });
       
       // Get telematics provider
       const providerAccount = await appPrisma.telematicsProviderAccount.findUnique({
@@ -453,6 +459,9 @@ router.get(
       res.json({
         tracksDrivers: settings?.tracksDrivers ?? true,
         telematicsProvider: providerAccount?.provider || null, // MOTIVE, SAMSARA, or null
+        contractStartDate: repairConfig?.contractStartDate
+          ? repairConfig.contractStartDate.toISOString().split('T')[0]
+          : null,
       });
     } catch (error) {
       console.error('Error fetching org settings:', error);

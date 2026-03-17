@@ -60,6 +60,12 @@ export const AdminSyncSchema = z.object({
   provider: z.enum(['SAMSARA', 'MOTIVE']).optional(),
 });
 
+/** POST /admin/telematics/backdate */
+export const BackdateTelematicsSchema = z.object({
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'startDate must be YYYY-MM-DD').optional(),
+  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'endDate must be YYYY-MM-DD').optional(),
+});
+
 /** POST /admin/link-org */
 export const LinkOrgSchema = z.object({
   clerkOrgId: z.string().min(1),

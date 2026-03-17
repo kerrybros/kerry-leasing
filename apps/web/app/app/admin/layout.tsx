@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
 const adminTabs = [
+  { label: 'Org Settings', href: '/app/admin/org-settings' },
   { label: 'Service Plan', href: '/app/admin/service-plan' },
   { label: 'Telematics', href: '/app/admin/telematics' },
 ];

@@ -24,8 +24,11 @@ export default function AdminTelematicsPage() {
   const [apiKey, setApiKey] = useState('');
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [contractStartDate, setContractStartDate] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
   const [syncSuccess, setSyncSuccess] = useState<string | null>(null);
+  const [backdateSuccess, setBackdateSuccess] = useState<string | null>(null);
+  const [backdating, setBackdating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -38,11 +41,12 @@ export default function AdminTelematicsPage() {
     try {
       setLoading(true);
       const api = await getApi();
-      const settings = await api.get<{ telematicsProvider: Provider | null }>('/org/settings');
+      const settings = await api.get<{ telematicsProvider: Provider | null; contractStartDate: string | null }>('/org/settings');
       if (settings.telematicsProvider) {
         setProvider(settings.telematicsProvider);
         setStatus(prev => ({ ...prev, provider: settings.telematicsProvider }));
       }
+      setContractStartDate(settings.contractStartDate ?? null);
     } catch (err: any) {
       // Settings endpoint may return 404 if not configured yet — that's fine
     } finally {
@@ -90,12 +94,12 @@ export default function AdminTelematicsPage() {
 
       const api = await getApi();
       const result = await api.post<{
-        results: Array<{ orgId: string; success: boolean; error?: string; durationMs?: number }>;
-      }>('/telematics/admin/telematics/sync', { clerkOrgIds: [organization.id] });
+        results: Array<{ clerkOrgId: string; success: boolean; error?: string }>;
+      }>('/telematics/admin/telematics/sync', {});
 
-      const r = result.results[0];
+      const r = result.results?.find((x) => x.clerkOrgId === organization.id) ?? result.results?.[0];
       if (r?.success) {
-        setSyncSuccess(`Sync completed successfully.`);
+        setSyncSuccess('Sync completed successfully.');
       } else {
         setError(r?.error || 'Sync failed');
       }
@@ -103,6 +107,28 @@ export default function AdminTelematicsPage() {
       setError(err.message || 'Sync failed');
     } finally {
       setSyncing(false);
+    }
+  };
+
+  const handleBackdate = async () => {
+    if (!organization?.id) return;
+
+    try {
+      setBackdating(true);
+      setError(null);
+      setBackdateSuccess(null);
+
+      const api = await getApi();
+      await api.post<{ started: boolean; startDate: string; endDate: string; message?: string }>(
+        '/telematics/admin/telematics/backdate',
+        {}
+      );
+
+      setBackdateSuccess('Backdate started. This runs in the background and may take several minutes.');
+    } catch (err: any) {
+      setError(err.message || 'Failed to start backdate');
+    } finally {
+      setBackdating(false);
     }
   };
 
@@ -147,9 +173,9 @@ export default function AdminTelematicsPage() {
         </div>
       )}
 
-      {syncSuccess && (
+      {(syncSuccess || backdateSuccess) && (
         <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg text-green-800">
-          {syncSuccess}
+          {syncSuccess || backdateSuccess}
         </div>
       )}
 
@@ -207,12 +233,12 @@ export default function AdminTelematicsPage() {
         </div>
       </form>
 
-      {/* Manual Sync */}
+      {/* Sync Yesterday */}
       {status.provider && (
-        <div className="bg-bg-secondary border border-border rounded-lg p-6">
-          <h2 className="text-lg font-semibold mb-2">Manual Sync</h2>
+        <div className="bg-bg-secondary border border-border rounded-lg p-6 mb-6">
+          <h2 className="text-lg font-semibold mb-2">Sync Yesterday</h2>
           <p className="text-sm text-text-secondary mb-4">
-            Trigger an immediate data sync for this organization. Syncs run automatically each day.
+            Pulls the previous day&apos;s data from the API. Syncs run automatically each day.
           </p>
           <button
             type="button"
@@ -223,7 +249,36 @@ export default function AdminTelematicsPage() {
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
-            {syncing ? 'Syncing...' : 'Run Sync Now'}
+            {syncing ? 'Syncing...' : 'Sync Yesterday'}
+          </button>
+        </div>
+      )}
+
+      {/* Backdate Historical Data */}
+      {status.provider && (
+        <div className="bg-bg-secondary border border-border rounded-lg p-6">
+          <h2 className="text-lg font-semibold mb-2">Backdate Historical Data</h2>
+          <p className="text-sm text-text-secondary mb-4">
+            Pull telematics data from the contract start date through yesterday. Run this after onboarding
+            to backfill historical data before building the service plan fleet.
+            {contractStartDate && (
+              <span className="block mt-2 font-medium text-text-primary">
+                Start date: {contractStartDate}
+              </span>
+            )}
+          </p>
+          {!contractStartDate && (
+            <p className="text-sm text-amber-600 dark:text-amber-400 mb-4">
+              Set the contract start date in Org Settings first.
+            </p>
+          )}
+          <button
+            type="button"
+            onClick={handleBackdate}
+            disabled={backdating || !contractStartDate}
+            className="px-5 py-2 bg-primary text-white rounded-lg hover:bg-primary-dark disabled:opacity-50 text-sm font-medium flex items-center gap-2"
+          >
+            {backdating ? 'Starting...' : 'Start Backdate'}
           </button>
         </div>
       )}

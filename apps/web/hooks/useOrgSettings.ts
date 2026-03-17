@@ -7,11 +7,13 @@ import type { ApiClient } from './useApiClient';
 export type OrgSettings = {
   tracksDrivers: boolean;
   telematicsProvider: 'MOTIVE' | 'SAMSARA' | null;
+  contractStartDate: string | null;
 };
 
 const defaultOrgSettings: OrgSettings = {
   tracksDrivers: true,
   telematicsProvider: null,
+  contractStartDate: null,
 };
 
 /**

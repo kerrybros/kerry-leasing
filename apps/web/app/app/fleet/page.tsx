@@ -254,6 +254,9 @@ export default function FleetOverviewPage() {
     if (!settings.tracksDrivers && viewMode === 'driver') {
       setViewMode('unit');
     }
+    if (settings.contractStartDate) {
+      setStartDate(settings.contractStartDate);
+    }
     return settings;
   };
 

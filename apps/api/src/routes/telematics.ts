@@ -26,10 +26,13 @@ import {
   ConfigureTelematicsSchema,
   VehicleMapSchema,
   AdminSyncSchema,
+  BackdateTelematicsSchema,
   PaginationSchema,
   parseBody,
   parseQuery,
 } from '../lib/validate.js';
+import { backdateMotiveData } from '../telematics/motive/backdate.js';
+import { backdateSamsaraData } from '../telematics/samsara/backdate.js';
 
 const router = Router();
 const TEN_HOURS_MS = 10 * 60 * 60 * 1000;
@@ -258,6 +261,95 @@ router.post(
       res.status(500).json({
         error: 'Internal Server Error',
         message: 'Failed to trigger sync',
+      });
+    }
+  }
+);
+
+/**
+ * POST /admin/telematics/backdate
+ *
+ * Start a background backdate of telematics data from startDate to endDate for the current org.
+ * Defaults: startDate = contract start date from RepairCustomerConfig, endDate = yesterday.
+ * Fire-and-forget: returns immediately; job runs in background.
+ * Internal/admin only; requires org context.
+ */
+router.post(
+  '/admin/telematics/backdate',
+  clerkAuthMiddleware,
+  requireOrg,
+  requireRole(['internal']),
+  async (req: AuthRequest, res) => {
+    try {
+      const body = parseBody(BackdateTelematicsSchema, req, res);
+      if (!body) return;
+      const orgId = req.auth!.orgId!;
+      const appClient = getAppPrisma();
+
+      const repairConfig = await appClient.repairCustomerConfig.findUnique({
+        where: { klOrgId: orgId },
+        select: { contractStartDate: true },
+      });
+      const contractStartStr = repairConfig?.contractStartDate
+        ? repairConfig.contractStartDate.toISOString().split('T')[0]
+        : null;
+
+      const startDate = body.startDate ?? contractStartStr;
+      const endDate = body.endDate ?? getYesterday();
+
+      if (!startDate) {
+        return res.status(409).json({
+          error: 'Conflict',
+          message: 'No contract start date configured. Set it in Org Settings or pass startDate in the request.',
+        });
+      }
+      if (startDate > endDate) {
+        return res.status(400).json({
+          error: 'Bad Request',
+          message: 'startDate must be on or before endDate',
+        });
+      }
+
+      const providerAccount = await appClient.telematicsProviderAccount.findUnique({
+        where: { clerkOrgId: orgId },
+        select: { provider: true, status: true },
+      });
+      if (!providerAccount || providerAccount.status !== TelematicsProviderStatus.ACTIVE) {
+        return res.status(400).json({
+          error: 'Bad Request',
+          message: 'No active telematics provider configured for this organization.',
+        });
+      }
+
+      const provider = providerAccount.provider;
+
+      setImmediate(() => {
+        (async () => {
+          try {
+            if (provider === TelematicsProvider.MOTIVE) {
+              await backdateMotiveData({ clerkOrgId: orgId, startDate, endDate });
+            } else {
+              await backdateSamsaraData({ clerkOrgId: orgId, startDate, endDate });
+            }
+            console.log(`[Telematics] Backdate finished for org ${orgId} (${startDate} → ${endDate})`);
+          } catch (err: any) {
+            console.error(`[Telematics] Backdate failed for org ${orgId}:`, err.message);
+          }
+        })();
+      });
+
+      res.json({
+        started: true,
+        startDate,
+        endDate,
+        provider,
+        message: 'Backdate started. This runs in the background and may take several minutes.',
+      });
+    } catch (error) {
+      console.error('Error starting backdate:', error);
+      res.status(500).json({
+        error: 'Internal Server Error',
+        message: 'Failed to start backdate',
       });
     }
   }
