@@ -64,7 +64,7 @@ export default function AdminTelematicsPage() {
         ? { apiKey: apiKey.trim() }
         : { apiToken: apiKey.trim() };
 
-      await api.post('/admin/telematics/configure', {
+      await api.post('/telematics/admin/telematics/configure', {
         clerkOrgId: organization.id,
         provider,
         credentials,
@@ -91,7 +91,7 @@ export default function AdminTelematicsPage() {
       const api = await getApi();
       const result = await api.post<{
         results: Array<{ orgId: string; success: boolean; error?: string; durationMs?: number }>;
-      }>('/admin/telematics/sync', { clerkOrgIds: [organization.id] });
+      }>('/telematics/admin/telematics/sync', { clerkOrgIds: [organization.id] });
 
       const r = result.results[0];
       if (r?.success) {
