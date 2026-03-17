@@ -118,13 +118,18 @@ export async function syncFuelEnergyReports(
           });
           result.newCount++;
         } else {
-          // Compare typed columns directly — no rawResponse JSON parsing needed
+          // Compare typed columns; use tolerance for floats to avoid false "updated" from rounding
+          const eqFloat = (a: number | null | undefined, b: number | null | undefined, tol = 0.001) =>
+            (a == null && b == null) || (a != null && b != null && Math.abs(a - b) <= tol);
+          const eqBigInt = (a: bigint | number | null | undefined, b: bigint | number | null | undefined) =>
+            (a == null && b == null) || (a != null && b != null && BigInt(a) === BigInt(b));
+
           const hasChanged =
-            existing.distanceTraveledMeters !== data.distanceTraveledMeters ||
-            existing.fuelConsumedMl !== data.fuelConsumedMl ||
-            existing.engineRunTimeDurationMs !== data.engineRunTimeDurationMs ||
-            existing.engineIdleTimeDurationMs !== data.engineIdleTimeDurationMs ||
-            existing.efficiencyMpge !== data.efficiencyMpge;
+            !eqFloat(existing.distanceTraveledMeters, data.distanceTraveledMeters) ||
+            !eqFloat(existing.fuelConsumedMl, data.fuelConsumedMl) ||
+            !eqBigInt(existing.engineRunTimeDurationMs, data.engineRunTimeDurationMs) ||
+            !eqBigInt(existing.engineIdleTimeDurationMs, data.engineIdleTimeDurationMs) ||
+            !eqFloat(existing.efficiencyMpge, data.efficiencyMpge);
 
           if (hasChanged) {
             await appPrisma.samsaraRawData.update({ where: { id: existing.id }, data });
