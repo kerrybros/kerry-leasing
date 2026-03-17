@@ -414,17 +414,57 @@ router.post(
         });
       }
       const syncDate = body.date;
-      let result: { success: boolean; error?: string };
+      let result: {
+        success: boolean;
+        error?: string;
+        details?: {
+          durationSeconds: number;
+          breakdown: { endpoint: string; newCount: number; updatedCount: number; unchangedCount: number }[];
+        };
+      };
       if (account.provider === TelematicsProvider.MOTIVE) {
         const apiKey = readCredentials(account.credentialsJson).apiKey as string;
         const r = await syncMotiveOrgForDate(orgId, apiKey, syncDate, false);
-        result = { success: r.success, error: r.success ? undefined : r.error };
+        result = {
+          success: r.success,
+          error: r.success ? undefined : r.error,
+          details: r.success
+            ? {
+                durationSeconds: Math.round(r.duration / 1000),
+                breakdown: r.results.map((res) => ({
+                  endpoint: res.endpoint,
+                  newCount: res.newCount,
+                  updatedCount: res.updatedCount,
+                  unchangedCount: res.unchangedCount,
+                })),
+              }
+            : undefined,
+        };
       } else {
         const apiToken = readCredentials(account.credentialsJson).apiToken as string;
         const r = await syncSamsaraOrgForDate(orgId, apiToken, syncDate, false);
-        result = { success: r.success, error: r.success ? undefined : r.error };
+        result = {
+          success: r.success,
+          error: r.success ? undefined : r.error,
+          details: r.success
+            ? {
+                durationSeconds: Math.round(r.duration / 1000),
+                breakdown: r.results.map((res) => ({
+                  endpoint: res.endpoint,
+                  newCount: res.newCount,
+                  updatedCount: res.updatedCount,
+                  unchangedCount: res.unchangedCount,
+                })),
+              }
+            : undefined,
+        };
       }
-      res.json({ success: result.success, date: syncDate, error: result.error });
+      res.json({
+        success: result.success,
+        date: syncDate,
+        error: result.error,
+        details: result.details,
+      });
     } catch (error: any) {
       console.error('Error syncing date:', error);
       res.status(500).json({

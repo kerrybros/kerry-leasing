@@ -45,6 +45,10 @@ export default function AdminTelematicsPage() {
   const [syncingDate, setSyncingDate] = useState(false);
   const [syncDateSuccess, setSyncDateSuccess] = useState<string | null>(null);
   const [syncDateError, setSyncDateError] = useState<string | null>(null);
+  const [syncDateDetails, setSyncDateDetails] = useState<{
+    durationSeconds: number;
+    breakdown: { endpoint: string; newCount: number; updatedCount: number; unchangedCount: number }[];
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -172,14 +176,21 @@ export default function AdminTelematicsPage() {
       setSyncingDate(true);
       setSyncDateError(null);
       setSyncDateSuccess(null);
+      setSyncDateDetails(null);
       setError(null);
       const api = await getApi();
-      const result = await api.post<{ success: boolean; date: string; error?: string }>(
-        '/telematics/admin/telematics/sync-date',
-        { date }
-      );
+      const result = await api.post<{
+        success: boolean;
+        date: string;
+        error?: string;
+        details?: {
+          durationSeconds: number;
+          breakdown: { endpoint: string; newCount: number; updatedCount: number; unchangedCount: number }[];
+        };
+      }>('/telematics/admin/telematics/sync-date', { date });
       if (result.success) {
         setSyncDateSuccess(`Synced ${date} successfully.`);
+        setSyncDateDetails(result.details ?? null);
       } else {
         setSyncDateError(result.error || 'Sync failed');
       }
@@ -421,7 +432,30 @@ export default function AdminTelematicsPage() {
             </button>
           </div>
           {syncDateSuccess && (
-            <p className="mt-3 text-sm text-green-600 dark:text-green-400">{syncDateSuccess}</p>
+            <div className="mt-3">
+              <p className="text-sm text-green-600 dark:text-green-400">{syncDateSuccess}</p>
+              {syncDateDetails && (
+                <div className="mt-2 text-sm text-text-secondary">
+                  <p className="font-medium text-text-primary">What synced:</p>
+                  <ul className="mt-1 list-disc list-inside space-y-0.5">
+                    {syncDateDetails.breakdown.map((row) => {
+                      const label = row.endpoint.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+                      const parts = [
+                        row.newCount > 0 && `${row.newCount} new`,
+                        row.updatedCount > 0 && `${row.updatedCount} updated`,
+                        row.unchangedCount > 0 && `${row.unchangedCount} unchanged`,
+                      ].filter(Boolean);
+                      return (
+                        <li key={row.endpoint}>
+                          {label}: {parts.length ? parts.join(', ') : 'no changes'}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  <p className="mt-1 text-xs text-text-secondary">Completed in {syncDateDetails.durationSeconds}s</p>
+                </div>
+              )}
+            </div>
           )}
           {syncDateError && (
             <p className="mt-3 text-sm text-red-600 dark:text-red-400">{syncDateError}</p>
