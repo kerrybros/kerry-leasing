@@ -6,6 +6,7 @@
 import { appPrisma } from '../../lib/prisma.js';
 import { syncFuelEnergyReports } from './sync/syncFuelEnergyReports.js';
 import { getYesterday, getTwoDaysAgo, SyncResult } from './types.js';
+import { readCredentials } from '../../lib/credentials.js';
 
 /** Same shape as Motive for consistent logging and cron handling */
 interface OrgSyncResult {
@@ -41,8 +42,8 @@ export async function syncSamsaraOrgForDate(
     const fuelResult = await syncFuelEnergyReports(clerkOrgId, apiToken, date, verify);
     orgResult.results.push(fuelResult);
     console.log(
-      `  ✓ Fuel-energy: ${fuelResult.newCount} new, ${fuelResult.updatedCount} updated, ` +
-      `${fuelResult.errorCount} errors`
+      `  ✓ Fuel-energy: ${fuelResult.newCount} new records added, ${fuelResult.unchangedCount} preexisting records unchanged, ${fuelResult.updatedCount} updated (overwritten)` +
+      (fuelResult.errorCount > 0 ? `, ${fuelResult.errorCount} errors` : '')
     );
 
     orgResult.success = fuelResult.errorCount === 0;
@@ -98,7 +99,7 @@ export async function syncSamsaraDaily(): Promise<{
   // Process each org
   for (const account of providerAccounts) {
     try {
-      const apiToken = (account.credentialsJson as any).apiToken;
+      const apiToken = readCredentials(account.credentialsJson).apiToken as string;
 
       // 1. Sync yesterday's data (primary)
       const yesterdayResult = await syncSamsaraOrgForDate(
@@ -118,7 +119,7 @@ export async function syncSamsaraDaily(): Promise<{
       const yesterdayFuel = yesterdayResult.results[0];
       const yesterdaySummary =
         yesterdayFuel?.recordCount != null
-          ? `${yesterdayFuel.recordCount} units, ${yesterdayFuel.newCount} new, ${yesterdayFuel.updatedCount} updated, ${yesterdayFuel.unchangedCount} unchanged`
+          ? `${yesterdayFuel.newCount} new records added, ${yesterdayFuel.unchangedCount} preexisting records unchanged, ${yesterdayFuel.updatedCount} updated (overwritten)`
           : 'no data';
       console.log(`  📅 Yesterday (${yesterday}): ${yesterdaySummary}`);
       if ((yesterdayFuel?.errorCount ?? 0) > 0) {
@@ -137,18 +138,15 @@ export async function syncSamsaraDaily(): Promise<{
       const verifyFuel = verificationResult.results[0];
       const verifySummary =
         verifyFuel?.recordCount != null
-          ? `${verifyFuel.recordCount} units, ${verifyFuel.newCount} new, ${verifyFuel.updatedCount} updated`
+          ? `${verifyFuel.newCount} new records added, ${verifyFuel.unchangedCount} preexisting records unchanged, ${verifyFuel.updatedCount} updated (overwritten)`
           : 'no data';
-      const noChanges =
-        verifyFuel && verifyFuel.newCount === 0 && verifyFuel.updatedCount === 0
-          ? ' — no changes'
-          : '';
-      console.log(`  🔍 Verification (${twoDaysAgo}): ${verifySummary}${noChanges}`);
+      console.log(`  🔍 Verification (${twoDaysAgo}): ${verifySummary}`);
 
-      // Update provider account (same pattern as Motive)
+      // Update provider account — reset to ACTIVE on success (matches Motive recovery behavior)
       await appPrisma.telematicsProviderAccount.update({
         where: { id: account.id },
         data: {
+          status: 'ACTIVE',
           lastSyncAt: new Date(),
           lastError: yesterdayResult.error ?? null
         }

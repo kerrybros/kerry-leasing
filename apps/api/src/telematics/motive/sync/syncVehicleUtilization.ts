@@ -75,11 +75,13 @@ export async function syncVehicleUtilization(
           });
           result.newCount++;
         } else {
-          // Check if data changed (compare key fields)
+          // Check if data changed (compare key fields; include all utilization metrics)
           const hasChanged =
             existing.utilizationPercentage !== recordData.utilizationPercentage ||
             existing.idleTime !== recordData.idleTime ||
+            existing.idleFuel !== recordData.idleFuel ||
             existing.drivingTime !== recordData.drivingTime ||
+            existing.drivingFuel !== recordData.drivingFuel ||
             existing.totalFuel !== recordData.totalFuel ||
             existing.totalDistance !== recordData.totalDistance;
 

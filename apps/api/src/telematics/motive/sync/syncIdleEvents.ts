@@ -95,11 +95,12 @@ export async function syncIdleEvents(
           });
           result.newCount++;
         } else {
-          // Check if data changed (compare key fields)
+          // Check if data changed (compare key fields; include start/end for retroactive corrections)
           const hasChanged =
+            existing.startTime !== recordData.startTime ||
+            existing.endTime !== recordData.endTime ||
             existing.vehFuelStart !== recordData.vehFuelStart ||
             existing.vehFuelEnd !== recordData.vehFuelEnd ||
-            existing.endTime !== recordData.endTime ||
             existing.endType !== recordData.endType;
 
           if (hasChanged) {

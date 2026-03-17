@@ -1,10 +1,12 @@
 /**
  * DAILY CRON JOB FOR MOTIVE SYNC
- * Runs daily at 6 AM EST to sync yesterday + verify 2 days ago
- * 
+ * Telematics only — app DB only, no repair data read or written.
+ * Syncs yesterday (full day) + verifies 2 days ago for all active Motive orgs.
+ * Schedule: e.g. 6 AM EST daily (0 11 * * * in UTC, or use your scheduler).
+ *
  * Usage:
+ *   pnpm sync-motive
  *   node dist/cron/sync-motive-daily.js
- *   OR
  *   tsx src/cron/sync-motive-daily.ts
  */
 

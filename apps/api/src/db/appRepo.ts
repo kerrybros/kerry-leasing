@@ -7,34 +7,10 @@
  * - Normalized telematics metrics (future)
  * 
  * This database CAN be modified and uses normal migrations.
+ * Uses the shared app Prisma client from lib/prisma.js (single connection pool).
  */
 
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
-const { PrismaClient: AppPrismaClient } = require('../generated/app-client/index.js');
-
-// Initialize app database client
-let appClient: any | null = null;
-
-export function getAppClient(): any {
-  if (!appClient) {
-    const appDbUrl = process.env.APP_DATABASE_URL;
-    
-    if (!appDbUrl) {
-      throw new Error('APP_DATABASE_URL is not configured');
-    }
-
-    appClient = new AppPrismaClient({
-      datasources: {
-        db: {
-          url: appDbUrl,
-        },
-      },
-    });
-  }
-  
-  return appClient;
-}
+import { getAppPrisma } from '../lib/prisma.js';
 
 /**
  * Get customer ID for a Clerk organization
@@ -45,7 +21,7 @@ export async function getCustomerIdForOrg(
   clerkOrgId: string
 ): Promise<string | null> {
   try {
-    const client = getAppClient();
+    const client = getAppPrisma();
     
     const mapping = await client.customerOrgMap.findUnique({
       where: {
@@ -71,7 +47,7 @@ export async function getRepairCustomerConfig(klOrgId: string): Promise<{
   customerName: string;
   contractStartDate: Date;
 } | null> {
-  const client = getAppClient();
+  const client = getAppPrisma();
 
   const config = await client.repairCustomerConfig.findUnique({
     where: { klOrgId },
@@ -90,7 +66,7 @@ export async function upsertRepairCustomerConfig(input: {
   customerName: string;
   contractStartDate: Date;
 }) {
-  const client = getAppClient();
+  const client = getAppPrisma();
 
   return await client.repairCustomerConfig.upsert({
     where: { klOrgId: input.klOrgId },
@@ -117,7 +93,7 @@ export async function linkOrgToCustomer(
   clerkOrgId: string,
   customerId: string
 ) {
-  const client = getAppClient();
+  const client = getAppPrisma();
   
   return await client.customerOrgMap.upsert({
     where: {
@@ -139,7 +115,7 @@ export async function linkOrgToCustomer(
  * @returns Array of all mappings
  */
 export async function getAllOrgMappings() {
-  const client = getAppClient();
+  const client = getAppPrisma();
   
   return await client.customerOrgMap.findMany({
     orderBy: {
@@ -154,7 +130,7 @@ export async function getAllOrgMappings() {
  */
 export async function isAppDbAvailable(): Promise<boolean> {
   try {
-    const client = getAppClient();
+    const client = getAppPrisma();
     await client.$queryRaw`SELECT 1`;
     return true;
   } catch (error) {
@@ -163,15 +139,8 @@ export async function isAppDbAvailable(): Promise<boolean> {
   }
 }
 
-/**
- * Disconnect from app database
- */
-export async function disconnectAppDb() {
-  if (appClient) {
-    await appClient.$disconnect();
-    appClient = null;
-  }
-}
+/** Re-export for callers that imported from appRepo (e.g. index.ts) */
+export { disconnectAppDb } from '../lib/prisma.js';
 
 /**
  * Get units from telematics data (when there's no repair database mapping)
@@ -179,7 +148,7 @@ export async function disconnectAppDb() {
  * @returns Array of units with basic info from telematics data
  */
 export async function getUnitsFromTelematics(clerkOrgId: string) {
-  const client = getAppClient();
+  const client = getAppPrisma();
   
   // Get distinct VINs from multiple sources
   const vinSet = new Set<string>();

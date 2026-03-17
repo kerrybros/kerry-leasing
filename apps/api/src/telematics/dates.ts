@@ -86,34 +86,69 @@ export function getESTDayBounds(date: string): { startTime: string; endTime: str
   };
 }
 
-export function getYesterday(_timezone: string = 'America/Toronto'): string {
-  const now = new Date();
-  const yesterday = new Date(now);
-  yesterday.setDate(yesterday.getDate() - 1);
-  return yesterday.toISOString().split('T')[0];
+/**
+ * Return the current calendar date in Eastern Time as YYYY-MM-DD.
+ * Uses Intl.DateTimeFormat to resolve the correct Eastern date regardless of
+ * server timezone, including across DST transitions.
+ */
+function getEasternDate(): string {
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: EST_TZ,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  return formatter.format(new Date());
 }
 
-export function getTwoDaysAgo(_timezone: string = 'America/Toronto'): string {
-  const now = new Date();
-  const twoDaysAgo = new Date(now);
-  twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
-  return twoDaysAgo.toISOString().split('T')[0];
+export function getYesterday(): string {
+  const [y, m, d] = getEasternDate().split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d - 1));
+  const yy = dt.getUTCFullYear();
+  const mm = String(dt.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(dt.getUTCDate()).padStart(2, '0');
+  return `${yy}-${mm}-${dd}`;
 }
 
-export function getThreeDaysAgo(_timezone: string = 'America/Toronto'): string {
-  const now = new Date();
-  const d = new Date(now);
-  d.setDate(d.getDate() - 3);
-  return d.toISOString().split('T')[0];
+export function getTwoDaysAgo(): string {
+  const [y, m, d] = getEasternDate().split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d - 2));
+  const yy = dt.getUTCFullYear();
+  const mm = String(dt.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(dt.getUTCDate()).padStart(2, '0');
+  return `${yy}-${mm}-${dd}`;
 }
 
+export function getThreeDaysAgo(): string {
+  const [y, m, d] = getEasternDate().split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d - 3));
+  const yy = dt.getUTCFullYear();
+  const mm = String(dt.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(dt.getUTCDate()).padStart(2, '0');
+  return `${yy}-${mm}-${dd}`;
+}
+
+/** Inclusive start and end (YYYY-MM-DD). Uses UTC date parts to avoid DST/Timezone duplicates or gaps. */
 export function getDateRange(startDate: string, endDate: string): string[] {
   const dates: string[] = [];
-  const current = new Date(startDate);
-  const end = new Date(endDate);
-  while (current <= end) {
-    dates.push(current.toISOString().split('T')[0]);
-    current.setDate(current.getDate() + 1);
+  const [sy, sm, sd] = startDate.split('-').map(Number);
+  const [ey, em, ed] = endDate.split('-').map(Number);
+  let y = sy;
+  let m = sm;
+  let d = sd;
+  const toStr = (yy: number, mm: number, dd: number) =>
+    `${yy}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
+  while (y < ey || (y === ey && m < em) || (y === ey && m === em && d <= ed)) {
+    dates.push(toStr(y, m, d));
+    d += 1;
+    if (d > new Date(y, m, 0).getDate()) {
+      d = 1;
+      m += 1;
+      if (m > 12) {
+        m = 1;
+        y += 1;
+      }
+    }
   }
   return dates;
 }

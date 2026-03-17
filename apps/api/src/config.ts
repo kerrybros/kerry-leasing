@@ -16,6 +16,7 @@ export const config = {
       'http://localhost:3000',
     ],
   },
+  cronSecret: process.env.CRON_SECRET,
 };
 
 // Validate required env vars
@@ -35,4 +36,12 @@ if (!process.env.REPAIR_DATABASE_URL) {
 if (!process.env.APP_DATABASE_URL) {
   console.warn('⚠️  APP_DATABASE_URL not set - org mapping features will not work');
   console.warn('   Tenant-scoped endpoints will return 503 until mapping is configured');
+}
+
+if (!process.env.CRON_SECRET && process.env.NODE_ENV === 'production') {
+  console.warn('⚠️  CRON_SECRET not set - cron endpoints will return 500 when called');
+}
+
+if (!process.env.CREDENTIALS_ENCRYPTION_KEY) {
+  console.warn('⚠️  CREDENTIALS_ENCRYPTION_KEY not set - telematics credentials will not be encrypted at rest');
 }

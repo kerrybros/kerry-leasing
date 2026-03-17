@@ -14,18 +14,44 @@ import {
   AuthRequest,
 } from '../middleware/auth.js';
 import { requireProvider } from '../middleware/providerValidation.js';
-import { getAppClient } from '../db/appRepo.js';
+import { getAppPrisma } from '../lib/prisma.js';
 import { getSamsaraIdleAggregatesByDate } from '../telematics/samsara/idleAggregates.js';
-import { validateCredentials } from '../telematics/providers/index.js';
 import { TelematicsProvider, TelematicsProviderStatus } from '../telematics/types.js';
 import { TtlCache } from '../lib/ttlCache.js';
 import { syncMotiveOrgForDate } from '../telematics/motive/syncService.js';
 import { syncSamsaraOrgForDate } from '../telematics/samsara/syncService.js';
 import { getYesterday } from '../telematics/dates.js';
+import { encryptCredentials, readCredentials } from '../lib/credentials.js';
+import {
+  ConfigureTelematicsSchema,
+  VehicleMapSchema,
+  AdminSyncSchema,
+  PaginationSchema,
+  parseBody,
+  parseQuery,
+} from '../lib/validate.js';
 
 const router = Router();
 const TEN_HOURS_MS = 10 * 60 * 60 * 1000;
 const telematicsCache = new TtlCache<any>(TEN_HOURS_MS, 300);
+
+/**
+ * POST /admin/telematics/clear-cache
+ *
+ * Clear in-memory telematics cache (vehicle-utilization, driver-utilization, vehicle-stats).
+ * Call this after wiping telematics data or when you need the UI to reflect fresh DB state
+ * without restarting the API. Internal/admin only.
+ */
+router.post(
+  '/admin/telematics/clear-cache',
+  clerkAuthMiddleware,
+  requireRole(['internal']),
+  (req, res) => {
+    telematicsCache.clear();
+    console.log('[Telematics] Cache cleared (all orgs)');
+    res.json({ ok: true, message: 'Telematics cache cleared' });
+  }
+);
 
 /**
  * POST /admin/telematics/configure
@@ -39,33 +65,11 @@ router.post(
   requireRole(['internal']),
   async (req: AuthRequest, res) => {
     try {
-      const { clerkOrgId, provider, credentials } = req.body;
+      const body = parseBody(ConfigureTelematicsSchema, req, res);
+      if (!body) return;
+      const { clerkOrgId, provider, credentials } = body;
 
-      // Validate inputs
-      if (!clerkOrgId || !provider || !credentials) {
-        return res.status(400).json({
-          error: 'Bad Request',
-          message: 'clerkOrgId, provider, and credentials are required',
-        });
-      }
-
-      // Validate provider enum
-      if (!Object.values(TelematicsProvider).includes(provider)) {
-        return res.status(400).json({
-          error: 'Bad Request',
-          message: `Invalid provider. Must be one of: ${Object.values(TelematicsProvider).join(', ')}`,
-        });
-      }
-
-      // Validate credentials structure
-      if (!validateCredentials(provider, credentials)) {
-        return res.status(400).json({
-          error: 'Bad Request',
-          message: 'Invalid credentials format for provider',
-        });
-      }
-
-      const appClient = getAppClient();
+      const appClient = getAppPrisma();
 
       // Check if org already has a provider configured
       const existing = await appClient.telematicsProviderAccount.findUnique({
@@ -79,17 +83,27 @@ router.post(
         });
       }
 
+      // Encrypt credentials before storing
+      let storedCredentials: unknown;
+      try {
+        storedCredentials = encryptCredentials(credentials as Record<string, unknown>);
+      } catch {
+        // Encryption key not configured — store plaintext with a warning
+        console.warn('[Telematics] CREDENTIALS_ENCRYPTION_KEY not set; storing credentials as plaintext');
+        storedCredentials = credentials;
+      }
+
       // Upsert provider account
       const account = await appClient.telematicsProviderAccount.upsert({
         where: { clerkOrgId },
         create: {
           clerkOrgId,
           provider,
-          credentialsJson: credentials,
+          credentialsJson: storedCredentials,
           status: TelematicsProviderStatus.ACTIVE,
         },
         update: {
-          credentialsJson: credentials,
+          credentialsJson: storedCredentials,
           status: TelematicsProviderStatus.ACTIVE,
           lastError: null,
         },
@@ -127,16 +141,11 @@ router.post(
   requireRole(['internal']),
   async (req: AuthRequest, res) => {
     try {
-      const { clerkOrgId, provider, providerVehicleId, vin, providerVehicleName } = req.body;
+      const body = parseBody(VehicleMapSchema, req, res);
+      if (!body) return;
+      const { clerkOrgId, provider, providerVehicleId, vin, providerVehicleName } = body;
 
-      if (!clerkOrgId || !provider || !providerVehicleId || !vin) {
-        return res.status(400).json({
-          error: 'Bad Request',
-          message: 'clerkOrgId, provider, providerVehicleId, and vin are required',
-        });
-      }
-
-      const appClient = getAppClient();
+      const appClient = getAppPrisma();
 
       const mapping = await appClient.telematicsVehicleMap.upsert({
         where: {
@@ -189,98 +198,60 @@ router.post(
   requireRole(['internal']),
   async (req: AuthRequest, res) => {
     try {
-      const { date, provider } = req.body;
+      const body = parseBody(AdminSyncSchema, req, res);
+      if (!body) return;
+      const { date, provider } = body;
       const syncDate = date || getYesterday();
 
-      // Validate date format if provided
-      if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-        return res.status(400).json({
-          error: 'Bad Request',
-          message: 'Date must be in YYYY-MM-DD format',
-        });
-      }
-
-      // Run sync asynchronously
       console.log(`Manual sync triggered for ${syncDate} by ${req.auth?.userId}`);
-      
-      const appClient = getAppClient();
-      
-      // Get all active provider accounts, optionally filtered by provider
+
+      const appClient = getAppPrisma();
+
       const where: any = { status: TelematicsProviderStatus.ACTIVE };
       if (provider) {
-        if (!Object.values(TelematicsProvider).includes(provider)) {
-          return res.status(400).json({
-            error: 'Bad Request',
-            message: `Invalid provider. Must be one of: ${Object.values(TelematicsProvider).join(', ')}`,
-          });
-        }
         where.provider = provider;
       }
       
       const accounts = await appClient.telematicsProviderAccount.findMany({ where });
-      
-      console.log(`Found ${accounts.length} active accounts to sync`);
-      
-      const results: any[] = [];
-      let successCount = 0;
-      let failCount = 0;
 
-      // Sync each org with its provider-specific service
-      for (const account of accounts) {
+      console.log(`Found ${accounts.length} active accounts to sync`);
+
+      // Run syncs with concurrency cap of 5 to avoid HTTP timeout
+      const CONCURRENCY = 5;
+      const allResults: any[] = [];
+
+      async function syncAccount(account: typeof accounts[0]): Promise<void> {
         try {
           let result: any;
-          
           if (account.provider === TelematicsProvider.MOTIVE) {
-            const apiKey = (account.credentialsJson as any).apiKey;
-            result = await syncMotiveOrgForDate(
-              account.clerkOrgId,
-              apiKey,
-              syncDate,
-              false // Not verification
-            );
+            const apiKey = readCredentials(account.credentialsJson).apiKey as string;
+            result = await syncMotiveOrgForDate(account.clerkOrgId, apiKey, syncDate, false);
           } else if (account.provider === TelematicsProvider.SAMSARA) {
-            const apiToken = (account.credentialsJson as any).apiToken;
-            result = await syncSamsaraOrgForDate(
-              account.clerkOrgId,
-              apiToken,
-              syncDate,
-              false // Not verification
-            );
+            const apiToken = readCredentials(account.credentialsJson).apiToken as string;
+            result = await syncSamsaraOrgForDate(account.clerkOrgId, apiToken, syncDate, false);
           } else {
             throw new Error(`Unsupported provider: ${account.provider}`);
           }
-          
-          results.push({
-            clerkOrgId: account.clerkOrgId,
-            provider: account.provider,
-            success: result.success,
-            date: syncDate,
-          });
-          
-          if (result.success) successCount++;
-          else failCount++;
-          
+          allResults.push({ clerkOrgId: account.clerkOrgId, provider: account.provider, success: result.success, date: syncDate });
         } catch (error: any) {
-          failCount++;
-          results.push({
-            clerkOrgId: account.clerkOrgId,
-            provider: account.provider,
-            success: false,
-            error: error.message,
-            date: syncDate,
-          });
+          allResults.push({ clerkOrgId: account.clerkOrgId, provider: account.provider, success: false, error: error.message, date: syncDate });
         }
       }
+
+      // Process in chunks of CONCURRENCY
+      for (let i = 0; i < accounts.length; i += CONCURRENCY) {
+        const chunk = accounts.slice(i, i + CONCURRENCY);
+        await Promise.allSettled(chunk.map(syncAccount));
+      }
+
+      const successCount = allResults.filter((r) => r.success).length;
+      const failCount = allResults.filter((r) => !r.success).length;
 
       res.json({
         success: true,
         date: syncDate,
-        summary: {
-          total: results.length,
-          success: successCount,
-          failed: failCount,
-        },
-        results,
+        summary: { total: allResults.length, success: successCount, failed: failCount },
+        results: allResults,
       });
     } catch (error) {
       console.error('Error triggering sync:', error);
@@ -293,7 +264,7 @@ router.post(
 );
 
 // GET /telematics/motive/vehicle-utilization
-// Returns raw Motive vehicle utilization data for the org
+// Returns raw Motive vehicle utilization data for the org (totalDistance from API)
 router.get(
   '/motive/vehicle-utilization',
   clerkAuthMiddleware,
@@ -301,32 +272,40 @@ router.get(
   requireProvider(TelematicsProvider.MOTIVE),
   async (req: AuthRequest, res) => {
     try {
+      const pagination = parseQuery(PaginationSchema, req, res);
+      if (!pagination) return;
+      const { page, pageSize } = pagination;
+
       const startedAt = Date.now();
       const fetchedAt = new Date().toISOString();
       const orgId = req.auth!.orgId!;
-      const appClient = getAppClient();
+      const appClient = getAppPrisma();
 
       const cacheKey = `telematics:motive:vehicle-utilization:${orgId}`;
-      const { value: records, hit } = await telematicsCache.getOrSet(cacheKey, async () => {
+      const { value: allRecords, hit } = await telematicsCache.getOrSet(cacheKey, async () => {
         return await appClient.motiveVehicleUtilization.findMany({
           where: { clerkOrgId: orgId },
           orderBy: [{ date: 'desc' }, { vehicleId: 'asc' }],
         });
       });
 
+      const total = Array.isArray(allRecords) ? allRecords.length : 0;
+      const records = Array.isArray(allRecords)
+        ? allRecords.slice((page - 1) * pageSize, page * pageSize)
+        : [];
+
       const elapsedMs = Date.now() - startedAt;
       console.log('[Telematics] GET /telematics/motive/vehicle-utilization', {
-        fetchedAt,
-        orgId,
-        rows: Array.isArray(records) ? records.length : 0,
-        cache: hit ? 'HIT' : 'MISS',
-        elapsedMs,
+        fetchedAt, orgId, total, page, pageSize, cache: hit ? 'HIT' : 'MISS', elapsedMs,
       });
 
       res.setHeader('Cache-Control', 'private, max-age=36000');
       res.setHeader('X-Cache', hit ? 'HIT' : 'MISS');
       res.setHeader('X-Elapsed-Ms', String(elapsedMs));
-      res.json(records);
+      res.json({
+        data: records,
+        pagination: { page, pageSize, total, totalPages: Math.ceil(total / pageSize) },
+      });
     } catch (error) {
       console.error('Error fetching vehicle utilization:', error);
       res.status(500).json({
@@ -349,7 +328,7 @@ router.get(
       const startedAt = Date.now();
       const fetchedAt = new Date().toISOString();
       const orgId = req.auth!.orgId!;
-      const appClient = getAppClient();
+      const appClient = getAppPrisma();
 
       const cacheKey = `telematics:motive:driver-utilization:${orgId}`;
       const { value: records, hit } = await telematicsCache.getOrSet(cacheKey, async () => {
@@ -368,16 +347,29 @@ router.get(
           select: { driverId: true, date: true, startKilometers: true, endKilometers: true },
         });
 
-        // Aggregate miles per (driverId, date): sum (endKm - startKm), convert km -> miles
+        // Aggregate miles per (driverId, date) from driving periods.
+        //
+        // VERIFICATION NOTE: The Motive client sends X-Metric-Units: false, which should
+        // cause the API to return Imperial (miles) units. The field is named
+        // "start_kilometers" / "end_kilometers" in the Motive response JSON — this is just
+        // the key name and does NOT necessarily mean the values are in km.
+        //
+        // If X-Metric-Units: false is honoured by the driving_periods endpoint, the values
+        // are already MILES and KM_TO_MILES should be 1.0 (no conversion needed).
+        // If the endpoint ignores the header and always returns km, the conversion is correct.
+        //
+        // TODO: Confirm with a live API test: fetch a driving period and compare the
+        // (end - start) difference against a known trip distance in miles. If the conversion
+        // produces numbers ~37.9% too small, set KM_TO_MILES = 1.0.
         const KM_TO_MILES = 0.62137119223733;
         const milesByDriverDate = new Map<string, number>();
         for (const p of periods) {
           const start = p.startKilometers ?? 0;
           const end = p.endKilometers ?? 0;
-          const km = end > start ? end - start : 0;
-          if (km <= 0) continue;
+          const rawDelta = end > start ? end - start : 0;
+          if (rawDelta <= 0) continue;
           const key = `${p.driverId}:${p.date}`;
-          milesByDriverDate.set(key, (milesByDriverDate.get(key) ?? 0) + km * KM_TO_MILES);
+          milesByDriverDate.set(key, (milesByDriverDate.get(key) ?? 0) + rawDelta * KM_TO_MILES);
         }
 
         return utilization.map((r: any) => ({
@@ -419,10 +411,14 @@ router.get(
   requireProvider(TelematicsProvider.SAMSARA),
   async (req: AuthRequest, res) => {
     try {
+      const pagination = parseQuery(PaginationSchema, req, res);
+      if (!pagination) return;
+      const { page, pageSize } = pagination;
+
       const startedAt = Date.now();
       const fetchedAt = new Date().toISOString();
       const orgId = req.auth!.orgId!;
-      const appClient = getAppClient();
+      const appClient = getAppPrisma();
 
       const cacheKey = `telematics:samsara:vehicle-stats:${orgId}`;
       const { value: rawRecords, hit } = await telematicsCache.getOrSet(cacheKey, async () => {
@@ -436,37 +432,59 @@ router.get(
       const dates = [...new Set(rawRecords.map((r: any) => r.date))] as string[];
       const idleByDate = await getSamsaraIdleAggregatesByDate(appClient, orgId, dates);
 
-      // Transform Samsara data to match Motive's VehicleUtilization format; use vehicle.name for display
+      // Transform Samsara data to unified VehicleUtilization shape.
+      // Convert from raw source units: meters→miles, ml→gallons, ms→seconds.
       const transformedRecords = rawRecords.map((record: any) => {
-        const converted = record.rawResponse?.convertedMetrics || {};
         const idle = idleByDate.get(record.date)?.get(record.vehicleId);
         const idleFuelGallons = idle ? idle.idleFuelMl / 3785.41 : null;
+
+        const totalDistanceMiles = record.distanceTraveledMeters != null
+          ? record.distanceTraveledMeters / 1609.34
+          : null;
+        const totalFuelGallons = record.fuelConsumedMl != null
+          ? record.fuelConsumedMl / 3785.41
+          : null;
+        const engineMs = record.engineRunTimeDurationMs != null
+          ? Number(record.engineRunTimeDurationMs)
+          : null;
+        const idleMs = record.engineIdleTimeDurationMs != null
+          ? Number(record.engineIdleTimeDurationMs)
+          : null;
+        const idleSeconds = idleMs != null ? Math.round(idleMs / 1000) : null;
+        const drivingSeconds = engineMs != null && idleMs != null
+          ? Math.max(0, Math.round((engineMs - idleMs) / 1000))
+          : engineMs != null
+            ? Math.round(engineMs / 1000)
+            : null;
+
         return {
           vehicleId: parseInt(record.vehicleId) || 0,
           vehicleNumber: record.vehicleName || null,
           vin: record.vin,
           date: record.date,
-          utilizationPercentage: null,
-          totalDistance: converted.milesDriven || null,
-          idleTime: converted.idleMinutes ? converted.idleMinutes * 60 : null,
-          totalFuel: converted.fuelGallons || null,
+          totalDistance: totalDistanceMiles,
+          idleTime: idleSeconds,
+          drivingTime: drivingSeconds,
+          totalFuel: totalFuelGallons,
           idleFuel: idleFuelGallons,
         };
       });
 
+      const total = transformedRecords.length;
+      const pagedRecords = transformedRecords.slice((page - 1) * pageSize, page * pageSize);
+
       const elapsedMs = Date.now() - startedAt;
       console.log('[Telematics] GET /telematics/samsara/vehicle-stats', {
-        fetchedAt,
-        orgId,
-        rows: transformedRecords.length,
-        cache: hit ? 'HIT' : 'MISS',
-        elapsedMs,
+        fetchedAt, orgId, total, page, pageSize, cache: hit ? 'HIT' : 'MISS', elapsedMs,
       });
 
       res.setHeader('Cache-Control', 'private, max-age=36000');
       res.setHeader('X-Cache', hit ? 'HIT' : 'MISS');
       res.setHeader('X-Elapsed-Ms', String(elapsedMs));
-      res.json(transformedRecords);
+      res.json({
+        data: pagedRecords,
+        pagination: { page, pageSize, total, totalPages: Math.ceil(total / pageSize) },
+      });
     } catch (error) {
       console.error('Error fetching Samsara vehicle stats:', error);
       res.status(500).json({

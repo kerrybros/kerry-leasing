@@ -10,6 +10,7 @@ import { fileURLToPath } from 'url';
 import { appPrisma } from '../../lib/prisma.js';
 import { syncMotiveOrgForDate } from './syncService.js';
 import { getDateRange } from './types.js';
+import { readCredentials } from '../../lib/credentials.js';
 
 interface BackdateOptions {
   clerkOrgId: string;
@@ -41,7 +42,7 @@ async function backdateMotiveData(options: BackdateOptions): Promise<void> {
     throw new Error(`Motive provider account for ${clerkOrgId} is not active (status: ${providerAccount.status})`);
   }
 
-  const apiKey = (providerAccount.credentialsJson as any).apiKey;
+  const apiKey = readCredentials(providerAccount.credentialsJson).apiKey as string;
 
   if (!apiKey) {
     throw new Error(`No API key found in credentials for ${clerkOrgId}`);

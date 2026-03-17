@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import rateLimit from 'express-rate-limit';
 import { config } from './config.js';
 import routes from './routes/index.js';
 import { disconnectRepairDb, isRepairDbAvailable } from './db/repairRepo.js';
@@ -23,6 +24,32 @@ app.use((req, res, next) => {
   console.log(`${req.method} ${req.path}`);
   next();
 });
+
+// Rate limiting — applied globally before routes
+// General API limit: 200 req / 5 min per IP
+const globalLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 200,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too Many Requests', message: 'Rate limit exceeded. Please slow down.' },
+  skip: () => config.nodeEnv === 'development',
+});
+
+// Tighter limit for auth-protected data endpoints: 60 req / 1 min per IP
+const dataLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too Many Requests', message: 'Rate limit exceeded. Please slow down.' },
+  skip: () => config.nodeEnv === 'development',
+});
+
+app.use(globalLimiter);
+app.use('/telematics', dataLimiter);
+app.use('/repairs', dataLimiter);
+app.use('/fleet', dataLimiter);
 
 // Mount routes
 app.use('/', routes);
@@ -87,6 +114,13 @@ async function startServer() {
       console.warn('⚠️  APP_DATABASE_URL not configured');
       console.warn('   Org mapping features will not work');
       console.warn('   Run: pnpm prisma:app:migrate to set up app database');
+    }
+
+    // In production, require CRON_SECRET so cron endpoints can authenticate
+    if (config.nodeEnv === 'production' && !config.cronSecret) {
+      console.error('\n❌ CRON_SECRET is not set. Cron endpoints will return 500.');
+      console.error('   Set CRON_SECRET in production to run sync-motive / sync-samsara.\n');
+      process.exit(1);
     }
 
     console.log('');

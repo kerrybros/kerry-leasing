@@ -10,6 +10,12 @@ import { syncIdleEvents } from './sync/syncIdleEvents.js';
 import { syncDrivingPeriods } from './sync/syncDrivingPeriods.js';
 import { syncGeofences } from './sync/syncGeofences.js';
 import { getYesterday, getTwoDaysAgo, SyncResult } from './types.js';
+import { readCredentials } from '../../lib/credentials.js';
+
+// Track last geofence sync time per org in memory.
+// Geofences are static config data — syncing once per 24h is sufficient.
+const geofenceLastSyncAt = new Map<string, number>();
+const GEOFENCE_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 interface OrgSyncResult {
   clerkOrgId: string;
@@ -44,24 +50,31 @@ export async function syncMotiveOrgForDate(
     // Sync all transactional endpoints
     const vehicleUtilResult = await syncVehicleUtilization(clerkOrgId, apiKey, date, verify);
     orgResult.results.push(vehicleUtilResult);
-    console.log(`  ✓ Vehicle utilization: ${vehicleUtilResult.newCount} new, ${vehicleUtilResult.updatedCount} updated`);
+    console.log(`  ✓ Vehicle utilization: ${vehicleUtilResult.newCount} new records added, ${vehicleUtilResult.unchangedCount} preexisting records unchanged, ${vehicleUtilResult.updatedCount} updated (overwritten)`);
 
     const driverUtilResult = await syncDriverUtilization(clerkOrgId, apiKey, date, verify);
     orgResult.results.push(driverUtilResult);
-    console.log(`  ✓ Driver utilization: ${driverUtilResult.newCount} new, ${driverUtilResult.updatedCount} updated`);
+    console.log(`  ✓ Driver utilization: ${driverUtilResult.newCount} new records added, ${driverUtilResult.unchangedCount} preexisting records unchanged, ${driverUtilResult.updatedCount} updated (overwritten)`);
 
     const idleEventsResult = await syncIdleEvents(clerkOrgId, apiKey, date, verify);
     orgResult.results.push(idleEventsResult);
-    console.log(`  ✓ Idle events: ${idleEventsResult.newCount} new, ${idleEventsResult.updatedCount} updated`);
+    console.log(`  ✓ Idle events: ${idleEventsResult.newCount} new records added, ${idleEventsResult.unchangedCount} preexisting records unchanged, ${idleEventsResult.updatedCount} updated (overwritten)`);
 
     const drivingPeriodsResult = await syncDrivingPeriods(clerkOrgId, apiKey, date, verify);
     orgResult.results.push(drivingPeriodsResult);
-    console.log(`  ✓ Driving periods: ${drivingPeriodsResult.newCount} new, ${drivingPeriodsResult.updatedCount} updated`);
+    console.log(`  ✓ Driving periods: ${drivingPeriodsResult.newCount} new records added, ${drivingPeriodsResult.unchangedCount} preexisting records unchanged, ${drivingPeriodsResult.updatedCount} updated (overwritten)`);
 
-    // Sync geofences daily (no verification)
-    const geofencesResult = await syncGeofences(clerkOrgId, apiKey);
-    orgResult.results.push(geofencesResult);
-    console.log(`  ✓ Geofences: ${geofencesResult.newCount} new, ${geofencesResult.updatedCount} updated`);
+    // Sync geofences at most once per 24h — they are static config data
+    const lastGeofenceSync = geofenceLastSyncAt.get(clerkOrgId) ?? 0;
+    const geofenceStale = Date.now() - lastGeofenceSync > GEOFENCE_SYNC_INTERVAL_MS;
+    if (geofenceStale) {
+      const geofencesResult = await syncGeofences(clerkOrgId, apiKey);
+      orgResult.results.push(geofencesResult);
+      geofenceLastSyncAt.set(clerkOrgId, Date.now());
+      console.log(`  ✓ Geofences: ${geofencesResult.newCount} new, ${geofencesResult.unchangedCount} unchanged, ${geofencesResult.updatedCount} updated`);
+    } else {
+      console.log(`  ⏭  Geofences: skipped (synced within 24h)`);
+    }
 
     orgResult.duration = Date.now() - startTime;
     console.log(`✅ Completed sync for ${clerkOrgId} in ${Math.round(orgResult.duration / 1000)}s`);
@@ -114,7 +127,7 @@ export async function syncMotiveDaily(): Promise<{
   // Process each org
   for (const account of providerAccounts) {
     try {
-      const apiKey = (account.credentialsJson as any).apiKey;
+      const apiKey = readCredentials(account.credentialsJson).apiKey as string;
 
       // 1. Sync yesterday's data (primary)
       const yesterdayResult = await syncMotiveOrgForDate(
@@ -140,12 +153,13 @@ export async function syncMotiveDaily(): Promise<{
       );
       results.push(verificationResult);
 
-      // Update provider account
+      // Update provider account (clear error and restore ACTIVE so org recovers after transient failures)
       await appPrisma.telematicsProviderAccount.update({
         where: { id: account.id },
         data: {
           lastSyncAt: new Date(),
-          lastError: yesterdayResult.error || null
+          lastError: yesterdayResult.error || null,
+          status: 'ACTIVE'
         }
       });
 

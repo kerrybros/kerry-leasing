@@ -12,7 +12,7 @@ async function main() {
 
   try {
     // Check if the table exists by attempting a query
-    const allSettings = await (appPrisma as any).organizationSettings.findMany({
+    const allSettings = await appPrisma.organizationSettings.findMany({
       select: {
         clerkOrgId: true,
         tracksDrivers: true,
@@ -34,7 +34,7 @@ async function main() {
     console.log('✅ Organization Settings Found:\n');
     
     const orgNames: Record<string, string> = {
-      'org_2ZBQsLlFpgzE9CvpkGR4SYWdRJi': 'Wolverine',
+      'org_39B7lu1b8YKds8IOtzrk6LpKnLW': 'Wolverine',
       'org_39RQY3qNO861ScQb0ZLFSUIFZkN': 'Atlas',
     };
 
@@ -49,7 +49,7 @@ async function main() {
     });
 
     // Verify expected configuration
-    const wolverine = allSettings.find((s: any) => s.clerkOrgId === 'org_2ZBQsLlFpgzE9CvpkGR4SYWdRJi');
+    const wolverine = allSettings.find((s: any) => s.clerkOrgId === 'org_39B7lu1b8YKds8IOtzrk6LpKnLW');
     const atlas = allSettings.find((s: any) => s.clerkOrgId === 'org_39RQY3qNO861ScQb0ZLFSUIFZkN');
 
     console.log('🔎 Configuration Check:');

@@ -16,13 +16,11 @@ import { clerkAuthMiddleware, requireOrg, AuthRequest } from '../middleware/auth
 import { getAppPrisma, getRepairPrisma } from '../lib/prisma.js';
 import { REPAIR_SHOP_ORG_ID } from '../config/repairShop.js';
 import { TtlCache } from '../lib/ttlCache.js';
+import { RepairsQuerySchema, PaginationSchema, parseQuery } from '../lib/validate.js';
 
 const router = Router();
-const IS_DEV = process.env.NODE_ENV === 'development';
 const TEN_HOURS_MS = 10 * 60 * 60 * 1000;
-// In dev, use a very short TTL (e.g. 1 second) or 0 to effectively disable long-term caching
-const CACHE_TTL = 0; // DISABLED FOR DEBUGGING
-const repairsCache = new TtlCache<any>(CACHE_TTL, 500);
+const repairsCache = new TtlCache<any>(TEN_HOURS_MS, 500);
 
 function isYmd(value: unknown): value is string {
   return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value);
@@ -70,12 +68,9 @@ router.get('/', clerkAuthMiddleware, requireOrg, async (req: AuthRequest, res) =
       });
     }
 
-    // Get all included service plan units for this org to filter repairs
+    // Get all service plan units for this org to filter repairs (all plan units are shown)
     const includedUnits = await appPrisma.servicePlanUnit.findMany({
-      where: {
-        clerkOrgId: klOrgId,
-        isIncluded: true,
-      },
+      where: { clerkOrgId: klOrgId },
       select: { repairUnitNumber: true },
     });
 
@@ -83,29 +78,13 @@ router.get('/', clerkAuthMiddleware, requireOrg, async (req: AuthRequest, res) =
       .map((u) => u.repairUnitNumber)
       .filter((n): n is string => !!n);
 
-    console.log('[Repairs] Filtering:', {
-      klOrgId,
-      totalIncludedUnits: allowedUnitNumbers.length,
-      has221E: allowedUnitNumbers.includes('221-E'),
-      sample: allowedUnitNumbers.slice(0, 5)
-    });
-
-    const requestedFrom = req.query.from;
-    const requestedTo = req.query.to;
-
-    if (requestedFrom && !isYmd(requestedFrom)) {
-      return res.status(400).json({
-        error: 'BadRequest',
-        message: 'Query param "from" must be YYYY-MM-DD',
-      });
-    }
-
-    if (requestedTo && !isYmd(requestedTo)) {
-      return res.status(400).json({
-        error: 'BadRequest',
-        message: 'Query param "to" must be YYYY-MM-DD',
-      });
-    }
+    const query = parseQuery(RepairsQuerySchema, req, res);
+    if (!query) return;
+    const pagination = parseQuery(PaginationSchema, req, res);
+    if (!pagination) return;
+    const { page, pageSize } = pagination;
+    const requestedFrom = query.from;
+    const requestedTo = query.to;
 
     const contractStartYmd = toYmd(config.contractStartDate) || '1970-01-01';
     
@@ -320,6 +299,10 @@ router.get('/', clerkAuthMiddleware, requireOrg, async (req: AuthRequest, res) =
 
     unitList.sort((a, b) => a.unitNumber.localeCompare(b.unitNumber));
 
+    // Apply pagination to the aggregated unit list
+    const totalUnits = unitList.length;
+    const pagedUnitList = unitList.slice((page - 1) * pageSize, page * pageSize);
+
     const elapsedMs = Date.now() - startedAt;
     console.log('[Repairs] GET /repairs', {
       fetchedAt,
@@ -346,23 +329,26 @@ router.get('/', clerkAuthMiddleware, requireOrg, async (req: AuthRequest, res) =
         customerName: config.customerName,
         contractStartDate: contractStartYmd,
       },
-      period: {
-        from: effectiveFromYmd,
-        to: toYmdValue,
+      period: { from: effectiveFromYmd, to: toYmdValue },
+      pagination: {
+        page,
+        pageSize,
+        total: totalUnits,
+        totalPages: Math.ceil(totalUnits / pageSize),
       },
       summary: {
-        unitCount: unitList.length,
+        unitCount: totalUnits,
         invoiceCount,
         lineRowCount,
         total: Number(grandTotal.toFixed(2)),
         tax: Number(grandTax.toFixed(2)),
       },
-      units: unitList,
+      units: pagedUnitList,
     });
   } catch (error) {
     console.error('[Repairs] Error:', error);
     res.status(500).json({
-      error: 'InternalServerError',
+      error: 'Internal Server Error',
       message: 'Failed to fetch repair data',
     });
   }

@@ -44,12 +44,14 @@ export async function clerkAuthMiddleware(
       secretKey: config.clerk.secretKey,
     });
 
-    console.log('Token verified. Claims:', {
-      sub: verified.sub,
-      org_id: verified.org_id,
-      org_role: verified.org_role,
-      org_slug: verified.org_slug,
-    });
+    if (config.nodeEnv === 'development') {
+      console.log('Token verified. Claims:', {
+        sub: verified.sub,
+        org_id: verified.org_id,
+        org_role: verified.org_role,
+        org_slug: verified.org_slug,
+      });
+    }
 
     if (!verified || !verified.sub) {
       return res.status(401).json({
@@ -73,7 +75,9 @@ export async function clerkAuthMiddleware(
     if (!orgId) {
       const headerOrgId = req.headers['x-organization-id'] as string | undefined;
       if (headerOrgId) {
-        console.log('Using org_id from header:', headerOrgId);
+        if (config.nodeEnv === 'development') {
+          console.log('Using org_id from header:', headerOrgId);
+        }
         orgId = headerOrgId;
       }
     }
@@ -94,17 +98,18 @@ export async function clerkAuthMiddleware(
           // Clerk can return either "admin" or "org:admin" depending on context
           const clerkRole = currentOrgMembership.role;
           role = (clerkRole === 'org:admin' || clerkRole === 'admin') ? 'internal' : 'external';
-          
-          console.log(`User role in org ${orgId}: ${clerkRole} → ${role}`);
-        } else if (req.headers['x-organization-id']) {
-          // DEV MODE: If using header fallback and no membership found, grant internal role for testing
+          if (config.nodeEnv === 'development') {
+            console.log(`User role in org ${orgId}: ${clerkRole} → ${role}`);
+          }
+        } else if (req.headers['x-organization-id'] && config.nodeEnv !== 'production') {
+          // DEV/STAGING ONLY: header fallback + no membership found → grant internal for testing
           console.log('⚠️  DEV MODE: Granting internal role via header fallback');
           role = 'internal';
         }
       } catch (err) {
         console.error('Error fetching org memberships:', err);
-        // DEV MODE: On error, if using header fallback, grant internal role
-        if (req.headers['x-organization-id']) {
+        // DEV/STAGING ONLY: Clerk API error + header fallback → grant internal for testing
+        if (req.headers['x-organization-id'] && config.nodeEnv !== 'production') {
           console.log('⚠️  DEV MODE: Granting internal role due to membership fetch error');
           role = 'internal';
         }

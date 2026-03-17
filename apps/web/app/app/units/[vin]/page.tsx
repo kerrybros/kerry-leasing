@@ -1,9 +1,10 @@
 'use client';
 
-import { useAuth, useOrganization } from '@clerk/nextjs';
+import { useOrganization } from '@clerk/nextjs';
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { createApiClient, ApiError } from '@/lib/api';
+import { ApiError } from '@/lib/api';
+import { useApiClient } from '@/hooks/useApiClient';
 import { KpiCard } from '@/components/KpiCard';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
@@ -31,11 +32,11 @@ interface VehicleUtilization {
   vehicleNumber: string | null;
   vin: string | null;
   date: string;
-  utilizationPercentage: number | null;
-  totalDistance: number | null;
-  idleTime: number | null;
-  totalFuel: number | null;
-  idleFuel: number | null;
+  totalDistance: number | null;  // miles
+  idleTime: number | null;       // seconds
+  drivingTime: number | null;    // seconds
+  totalFuel: number | null;      // gallons
+  idleFuel: number | null;       // gallons
 }
 
 interface MonthlyMetrics {
@@ -51,7 +52,7 @@ interface MonthlyMetrics {
 export default function UnitDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const { getToken } = useAuth();
+  const { getApi } = useApiClient();
   const { organization } = useOrganization();
   const vin = params.vin as string;
 
@@ -66,14 +67,7 @@ export default function UnitDetailPage() {
     setLoading(true);
     setError(null);
     try {
-      const token = await getToken();
-      
-      const headers: Record<string, string> = {};
-      if (organization?.id) {
-        headers['x-organization-id'] = organization.id;
-      }
-      
-      const api = createApiClient(token, headers);
+      const api = await getApi();
 
       // Load unit data from fleet endpoint (includes repair + telematics)
       const unitData = await api.get<{
@@ -154,7 +148,7 @@ export default function UnitDetailPage() {
     } finally {
       setLoading(false);
     }
-  }, [getToken, organization?.id, organization?.name, vin]);
+  }, [getApi, organization?.id, organization?.name, vin]);
 
   useEffect(() => {
     if (organization) {

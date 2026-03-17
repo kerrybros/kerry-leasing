@@ -7,7 +7,7 @@
 
 import { Response, NextFunction } from 'express';
 import { AuthRequest } from './auth.js';
-import { getAppClient } from '../db/appRepo.js';
+import { getAppPrisma } from '../lib/prisma.js';
 import { TelematicsProvider } from '../telematics/types.js';
 
 /**
@@ -28,7 +28,7 @@ export function requireProvider(expectedProvider: TelematicsProvider) {
         });
       }
 
-      const appClient = getAppClient();
+      const appClient = getAppPrisma();
 
       // Check org's configured provider
       const providerAccount = await appClient.telematicsProviderAccount.findUnique({

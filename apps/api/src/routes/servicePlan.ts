@@ -12,6 +12,9 @@ import { Router } from 'express';
 import { AuthRequest } from '../middleware/auth.js';
 import { getAppPrisma, getRepairPrisma } from '../lib/prisma.js';
 import { REPAIR_SHOP_ORG_ID } from '../config/repairShop.js';
+import { ServicePlanMatchType } from '../generated/app-client/index.js';
+import { MatchUnitSchema, PaginationSchema, parseBody, parseQuery } from '../lib/validate.js';
+import { createId } from '@paralleldrive/cuid2';
 
 const router = Router();
 
@@ -24,15 +27,8 @@ router.post('/sync', async (req: AuthRequest, res) => {
   try {
     const clerkOrgId = req.auth!.orgId!; // Get from auth middleware
     
-    console.log('[ServicePlan] Getting Prisma clients...');
     const appPrisma = getAppPrisma();
-    console.log('[ServicePlan] appPrisma:', typeof appPrisma, appPrisma ? 'OK' : 'UNDEFINED');
-    
     const repairPrisma = getRepairPrisma();
-    console.log('[ServicePlan] repairPrisma:', typeof repairPrisma, repairPrisma ? 'OK' : 'UNDEFINED');
-    console.log('[ServicePlan] repairPrisma.customer_units:', typeof repairPrisma?.customer_units);
-    
-    console.log(`[ServicePlan] Syncing repair units for org: ${clerkOrgId}`);
     
     // Load repair customer config for this KL org
     const repairConfig = await appPrisma.repairCustomerConfig.findUnique({
@@ -55,29 +51,18 @@ router.post('/sync', async (req: AuthRequest, res) => {
     const CUSTOMER_NAME = repairConfig.customerName;
     const startDate = repairConfig.contractStartDate;
 
-    // 0. Track existing units to preserve user preferences (isIncluded)
-    console.log('[ServicePlan] Loading existing service plan units...');
+    // 0. Load existing service plan units for merge
     const existingUnits = await appPrisma.servicePlanUnit.findMany({
       where: { clerkOrgId },
-      select: {
-        repairUnitId: true,
-        telematicsVin: true,
-        isIncluded: true,
-      },
+      select: { repairUnitId: true, telematicsVin: true },
     });
     
     const existingRepairIds = new Set(existingUnits.map(u => u.repairUnitId));
     const existingTelematicsVins = new Set(
       existingUnits.filter(u => u.telematicsVin).map(u => u.telematicsVin!)
     );
-    const existingInclusionState = new Map(
-      existingUnits.map(u => [u.repairUnitId, u.isIncluded])
-    );
-    
-    console.log(`[ServicePlan] Found ${existingUnits.length} existing units to merge with`)
     
     // 1. Fetch revenue_details for this customer since contract start to find ACTIVE units
-    console.log('[ServicePlan] Fetching active units from revenue data...');
     const allRevenue = await repairPrisma.revenue_details.findMany({
       where: {
         organization_id: REPAIR_SHOP_ORG_ID,
@@ -193,20 +178,14 @@ router.post('/sync', async (req: AuthRequest, res) => {
       const telematicsMatch = hasVin && telematicsVins.has(repairVin);
       const isNew = !existingRepairIds.has(unit.unit_id);
       
-      // Preserve isIncluded state from existing unit, default to true for new units
-      const isIncluded = existingInclusionState.has(unit.unit_id)
-        ? existingInclusionState.get(unit.unit_id)!
-        : true; // New units default to included
-      
       const data = {
         repairUnitNumber: unit.number,
         repairVin,
         repairCustomerId: unit.cust_id,
         telematicsVin: telematicsMatch ? repairVin : null,
-        matchType: telematicsMatch ? 'AUTO' : 'UNMATCHED',
+        matchType: telematicsMatch ? ServicePlanMatchType.AUTO : ServicePlanMatchType.UNMATCHED,
         matchConfidence: telematicsMatch ? 1.0 : null,
         lastSyncedAt: new Date(),
-        isIncluded, // Preserve or set default
       };
       
       await appPrisma.servicePlanUnit.upsert({
@@ -231,27 +210,21 @@ router.post('/sync', async (req: AuthRequest, res) => {
       else unmatched++;
     }
     
-    // 4. Create entries for telematics-only units (units with telemetrics but no repair data)
+    // 4. Create entries for telematics-only units (units with telematics but no repair data)
+    // Use a stable cuid as repairUnitId so VIN changes don't orphan the record.
     for (const vin of newTelematicsOnlyVins) {
       const vehicle = telematicsVehicles.find(v => v.vin === vin);
-      const syntheticId = `telematics-${vin}`;
-      
-      // Preserve isIncluded state for existing telematics-only units, default to true for new
-      const isIncluded = existingInclusionState.has(syntheticId)
-        ? existingInclusionState.get(syntheticId)!
-        : true; // Default to included for new telematics-only units
-      
       await appPrisma.servicePlanUnit.create({
         data: {
           clerkOrgId,
-          repairUnitId: syntheticId, // Synthetic ID for telematics-only
+          repairUnitId: createId(),
           repairUnitNumber: vehicle?.vehicleNumber || null,
-          repairVin: null, // No repair VIN
+          repairVin: null,
           repairCustomerId: null,
           telematicsVin: vin,
-          matchType: 'UNMATCHED', // Has telematics but no repair match
+          isTelematicsOnly: true,
+          matchType: ServicePlanMatchType.UNMATCHED,
           matchConfidence: null,
-          isIncluded, // Preserve or set default
           lastSyncedAt: new Date(),
         },
       });
@@ -283,7 +256,7 @@ router.post('/sync', async (req: AuthRequest, res) => {
     
   } catch (error) {
     console.error('[ServicePlan] Sync error:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'Internal Server Error', message: error.message });
   }
 });
 
@@ -294,16 +267,20 @@ router.post('/sync', async (req: AuthRequest, res) => {
 router.get('/units', async (req: AuthRequest, res) => {
   try {
     const clerkOrgId = req.auth!.orgId!;
+    const pagination = parseQuery(PaginationSchema, req, res);
+    if (!pagination) return;
+    const { page, pageSize } = pagination;
     const appPrisma = getAppPrisma();
-    
-    const units = await appPrisma.servicePlanUnit.findMany({
-      where: { clerkOrgId },
-      orderBy: [
-        { isIncluded: 'desc' },
-        { matchType: 'asc' },
-        { repairUnitNumber: 'asc' },
-      ],
-    });
+
+    const [units, totalCount] = await Promise.all([
+      appPrisma.servicePlanUnit.findMany({
+        where: { clerkOrgId },
+        orderBy: [{ matchType: 'asc' }, { repairUnitNumber: 'asc' }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      appPrisma.servicePlanUnit.count({ where: { clerkOrgId } }),
+    ]);
     
     // Enrich with telematics data for matched units
     // Check what provider this org uses
@@ -371,33 +348,33 @@ router.get('/units', async (req: AuthRequest, res) => {
       })
     );
     
-    // Calculate breakdown by source
-    // Units from repair DB have normal repairUnitId (from customer_units.unit_id)
-    // Units from telematics-only have synthetic ID starting with "telematics-"
-    const fromRepairCount = units.filter(u => !u.repairUnitId.startsWith('telematics-')).length;
-    const fromTelematicsOnlyCount = units.filter(u => u.repairUnitId.startsWith('telematics-')).length;
-    
+    // Calculate breakdown by source using the isTelematicsOnly flag
+    const fromRepairCount = units.filter(u => !u.isTelematicsOnly).length;
+    const fromTelematicsOnlyCount = units.filter(u => u.isTelematicsOnly).length;
+
     // Count units WITH telematics data (matched repair units + telematics-only units)
     const withTelematicsData = units.filter(u => u.telematicsVin !== null).length;
-    
-    const unmatchedFromRepair = units.filter(u => 
-      !u.repairUnitId.startsWith('telematics-') && u.matchType === 'UNMATCHED'
+
+    const unmatchedFromRepair = units.filter(u =>
+      !u.isTelematicsOnly && u.matchType === 'UNMATCHED'
     ).length;
-    const unmatchedFromTelematics = units.filter(u => 
-      u.repairUnitId.startsWith('telematics-')
-    ).length;
+    const unmatchedFromTelematics = fromTelematicsOnlyCount;
     
     res.json({
       units: enrichedUnits,
+      pagination: {
+        page,
+        pageSize,
+        total: totalCount,
+        totalPages: Math.ceil(totalCount / pageSize),
+      },
       summary: {
-        total: units.length,
+        total: totalCount,
         matched: units.filter(u => u.matchType !== 'UNMATCHED').length,
         unmatched: units.filter(u => u.matchType === 'UNMATCHED').length,
-        included: units.filter(u => u.isIncluded).length,
-        excluded: units.filter(u => !u.isIncluded).length,
         fromRepair: fromRepairCount,
         fromTelematicsOnly: fromTelematicsOnlyCount,
-        withTelematicsData, // NEW: Total units that have telematics data
+        withTelematicsData: withTelematicsData,
         unmatchedFromRepair,
         unmatchedFromTelematics,
       },
@@ -405,7 +382,7 @@ router.get('/units', async (req: AuthRequest, res) => {
     
   } catch (error) {
     console.error('[ServicePlan] List error:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'Internal Server Error', message: error.message });
   }
 });
 
@@ -419,12 +396,10 @@ router.put('/units/:unitId/match', async (req: AuthRequest, res) => {
     const userId = req.auth!.userId;
     const appPrisma = getAppPrisma();
     const { unitId } = req.params;
-    const { telematicsVin } = req.body;
-    
-    if (!telematicsVin) {
-      return res.status(400).json({ error: 'telematicsVin is required' });
-    }
-    
+    const body = parseBody(MatchUnitSchema, req, res);
+    if (!body) return;
+    const { telematicsVin } = body;
+
     // Check what provider this org uses
     const providerAccount = await appPrisma.telematicsProviderAccount.findUnique({
       where: { clerkOrgId },
@@ -453,7 +428,7 @@ router.put('/units/:unitId/match', async (req: AuthRequest, res) => {
     }
     
     if (!telematicsVehicleExists) {
-      return res.status(404).json({ error: 'Telematics VIN not found' });
+      return res.status(404).json({ error: 'Not Found', message: 'Telematics VIN not found' });
     }
     
     // Update the match
@@ -466,7 +441,7 @@ router.put('/units/:unitId/match', async (req: AuthRequest, res) => {
       },
       data: {
         telematicsVin,
-        matchType: 'MANUAL',
+        matchType: ServicePlanMatchType.MANUAL,
         matchedBy: userId,
         matchedAt: new Date(),
       },
@@ -476,7 +451,7 @@ router.put('/units/:unitId/match', async (req: AuthRequest, res) => {
     
   } catch (error) {
     console.error('[ServicePlan] Match error:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'Internal Server Error', message: error.message });
   }
 });
 
@@ -499,7 +474,7 @@ router.delete('/units/:unitId/match', async (req: AuthRequest, res) => {
       },
       data: {
         telematicsVin: null,
-        matchType: 'UNMATCHED',
+        matchType: ServicePlanMatchType.UNMATCHED,
         matchedBy: null,
         matchedAt: null,
       },
@@ -509,43 +484,7 @@ router.delete('/units/:unitId/match', async (req: AuthRequest, res) => {
     
   } catch (error) {
     console.error('[ServicePlan] Unmatch error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-/**
- * PUT /admin/service-plan/units/:unitId/inclusion
- * Set whether a unit is included in the service plan (visible in fleet view)
- */
-router.put('/units/:unitId/inclusion', async (req: AuthRequest, res) => {
-  try {
-    const clerkOrgId = req.auth!.orgId!;
-    const appPrisma = getAppPrisma();
-    const { unitId } = req.params;
-    const { isIncluded, notes } = req.body;
-    
-    if (typeof isIncluded !== 'boolean') {
-      return res.status(400).json({ error: 'isIncluded must be a boolean' });
-    }
-    
-    const updated = await appPrisma.servicePlanUnit.update({
-      where: {
-        clerkOrgId_repairUnitId: {
-          clerkOrgId,
-          repairUnitId: unitId,
-        },
-      },
-      data: {
-        isIncluded,
-        notes: notes !== undefined ? notes : undefined,
-      },
-    });
-    
-    res.json({ success: true, unit: updated });
-    
-  } catch (error) {
-    console.error('[ServicePlan] Inclusion error:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'Internal Server Error', message: error.message });
   }
 });
 
@@ -642,7 +581,7 @@ router.get('/available-vins', async (req: AuthRequest, res) => {
     
   } catch (error) {
     console.error('[ServicePlan] Available VINs error:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'Internal Server Error', message: error.message });
   }
 });
 

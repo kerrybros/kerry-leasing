@@ -1,9 +1,10 @@
 /**
  * DAILY CRON JOB FOR SAMSARA SYNC
+ * Telematics only — app DB only, no repair data read or written.
  * Syncs yesterday (full EST day) + verifies 2 days ago for all active Samsara orgs.
  * Schedule: e.g. 6 AM EST daily (0 11 * * * in UTC, or use your scheduler).
  *
- * One-time backfill (e.g. Feb 1–11): pnpm backdate-samsara-feb -- --start=2026-02-01 --end=2026-02-11
+ * One-time backfill: pnpm backdate-samsara -- --org=org_xxxxx --start=YYYY-MM-DD --end=YYYY-MM-DD
  *
  * Usage:
  *   pnpm sync-samsara

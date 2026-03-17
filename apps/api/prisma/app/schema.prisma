@@ -75,35 +75,24 @@ model TelematicsProviderAccount {
 // SAMSARA Raw Data (source of truth)
 // Stores complete Samsara API responses with typed schema
 model SamsaraRawData {
-  id                  String    @id @default(cuid())
-  clerkOrgId          String    @map("clerk_org_id")
-  vehicleId           String    @map("vehicle_id") // Samsara vehicle ID
-  vin                 String?
-  vehicleName         String?   @map("vehicle_name")
-  date                String    // YYYY-MM-DD
-  startTime           String?   @map("start_time") // ISO 8601
-  endTime             String?   @map("end_time")   // ISO 8601
-  
-  // Odometer (meters)
-  odometerStart       Float?    @map("odometer_start")
-  odometerEnd         Float?    @map("odometer_end")
-  
-  // Fuel (milliliters)
-  fuelConsumedStart   Float?    @map("fuel_consumed_start")
-  fuelConsumedEnd     Float?    @map("fuel_consumed_end")
-  
-  // Idle (milliseconds)
-  idleDurationStart   Float?    @map("idle_duration_start")
-  idleDurationEnd     Float?    @map("idle_duration_end")
-  
-  // Engine hours (milliseconds)
-  engineHoursStart    Float?    @map("engine_hours_start")
-  engineHoursEnd      Float?    @map("engine_hours_end")
-  
-  // Full raw response for reference
-  rawResponse         Json      @map("raw_response")
-  processedAt         DateTime? @map("processed_at")
-  createdAt           DateTime  @default(now()) @map("created_at")
+  id                       String    @id @default(cuid())
+  clerkOrgId               String    @map("clerk_org_id")
+  vehicleId                String    @map("vehicle_id") // Samsara vehicle ID (matches assetId in idling events)
+  vin                      String?
+  vehicleName              String?   @map("vehicle_name")
+  date                     String    // YYYY-MM-DD
+
+  // Raw fields from Samsara Fuel Energy Reports API — stored in source units
+  distanceTraveledMeters   Float?    @map("distance_traveled_meters")   // raw meters
+  fuelConsumedMl           Float?    @map("fuel_consumed_ml")            // raw milliliters
+  engineRunTimeDurationMs  BigInt?   @map("engine_run_time_duration_ms") // raw milliseconds
+  engineIdleTimeDurationMs BigInt?   @map("engine_idle_time_duration_ms")// raw milliseconds
+  efficiencyMpge           Float?    @map("efficiency_mpge")             // miles per gallon equivalent
+
+  // Full raw API response as audit trail
+  rawResponse              Json      @map("raw_response")
+  processedAt              DateTime? @map("processed_at")
+  createdAt                DateTime  @default(now()) @map("created_at")
 
   @@unique([clerkOrgId, vehicleId, date])
   @@index([clerkOrgId])
@@ -136,39 +125,9 @@ model SamsaraIdlingEvent {
 
 // MOTIVE Raw Data (source of truth)
 // Stores complete Motive API responses with typed schema
-model MotiveRawData {
-  id                    String    @id @default(cuid())
-  clerkOrgId            String    @map("clerk_org_id")
-  vehicleId             String    @map("vehicle_id") // Motive vehicle ID
-  vin                   String?
-  vehicleNumber         String?   @map("vehicle_number")
-  vehicleName           String?   @map("vehicle_name")
-  date                  String    // YYYY-MM-DD
-  
-  // IFTA Mileage data
-  iftaTotalMiles        Float?    @map("ifta_total_miles")
-  iftaStartDate         String?   @map("ifta_start_date")
-  iftaEndDate           String?   @map("ifta_end_date")
-  
-  // Utilization data
-  totalEngineDuration   Float?    @map("total_engine_duration") // seconds
-  totalIdleDuration     Float?    @map("total_idle_duration")   // seconds
-  totalDrivingDuration  Float?    @map("total_driving_duration") // seconds
-  
-  // Full raw responses for reference
-  iftaRawResponse       Json?     @map("ifta_raw_response")
-  utilizationRawResponse Json?    @map("utilization_raw_response")
-  processedAt           DateTime? @map("processed_at")
-  createdAt             DateTime  @default(now()) @map("created_at")
-
-  @@unique([clerkOrgId, vehicleId, date])
-  @@index([clerkOrgId])
-  @@index([vehicleId])
-  @@index([vin])
-  @@index([date])
-  @@index([clerkOrgId, date])
-  @@map("motive_raw_data")
-}
+// MotiveRawData removed — table dropped in 20260320_drop_motive_raw_data migration.
+// All Motive data is stored in MotiveVehicleUtilization, MotiveDriverUtilization,
+// MotiveDrivingPeriod, MotiveIdleEvent, and MotiveGeofence.
 
 // Vehicle Mapping: Links provider vehicle IDs to VINs
 // Used when provider doesn't return VIN or returns incorrect VIN
@@ -277,8 +236,8 @@ model MotiveIdleEvent {
   clerkOrgId        String    @map("clerk_org_id")
   motiveEventId     BigInt    @map("motive_event_id") // Motive's event ID
   
-  // Driver info
-  driverId          Int       @map("driver_id")
+  // Driver info (optional — some events have no driver assigned)
+  driverId          Int?      @map("driver_id")
   driverFirstName   String?   @map("driver_first_name")
   driverLastName    String?   @map("driver_last_name")
   driverUsername    String?   @map("driver_username")
@@ -344,7 +303,7 @@ model MotiveIdleEvent {
 model MotiveDriverUtilization {
   id                String    @id @default(cuid())
   clerkOrgId        String    @map("clerk_org_id")
-  driverId          Int       @map("driver_id") // Motive driver ID
+  driverId          Int?      @map("driver_id") // Motive driver ID (null when API returns rollup with no driver)
   driverFirstName   String?   @map("driver_first_name")
   driverLastName    String?   @map("driver_last_name")
   driverUsername    String?   @map("driver_username")
@@ -377,7 +336,7 @@ model MotiveDriverUtilization {
 }
 
 // MOTIVE Vehicle Utilization (per day, per vehicle)
-// Source: GET /v2/vehicle_utilization
+// Source: GET /v1/vehicle_utilization
 // Stores daily utilization metrics for each vehicle
 // NOTE: Data may be updated retroactively - requires lookback verification
 model MotiveVehicleUtilization {
@@ -478,9 +437,12 @@ model ServicePlanUnit {
   telematicsVin     String?   @map("telematics_vin")      // Matched telematics VIN
   matchType         ServicePlanMatchType @default(UNMATCHED) @map("match_type")
   matchConfidence   Float?    @map("match_confidence")    // 0.0 to 1.0 for auto-matches
-  
+
+  // True when unit came from telematics only (no repair DB record)
+  // repairUnitId is a stable cuid in this case, NOT a repair DB ID
+  isTelematicsOnly  Boolean   @default(false) @map("is_telematics_only")
+
   // Service plan configuration
-  isIncluded        Boolean   @default(true) @map("is_included") // Show in fleet view
   notes             String?
   
   // Audit trail
@@ -493,7 +455,6 @@ model ServicePlanUnit {
   
   @@unique([clerkOrgId, repairUnitId])
   @@index([clerkOrgId])
-  @@index([isIncluded])
   @@index([matchType])
   @@index([repairVin])
   @@index([telematicsVin])

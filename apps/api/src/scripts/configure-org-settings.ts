@@ -31,10 +31,10 @@ async function main() {
 
   try {
     // Wolverine: tracks drivers (Motive with HOS/ELD)
-    const wolverineSettings = await (appPrisma as any).organizationSettings.upsert({
-      where: { clerkOrgId: 'org_2ZBQsLlFpgzE9CvpkGR4SYWdRJi' },
+    const wolverineSettings = await appPrisma.organizationSettings.upsert({
+      where: { clerkOrgId: 'org_39B7lu1b8YKds8IOtzrk6LpKnLW' },
       create: {
-        clerkOrgId: 'org_2ZBQsLlFpgzE9CvpkGR4SYWdRJi',
+        clerkOrgId: 'org_39B7lu1b8YKds8IOtzrk6LpKnLW',
         tracksDrivers: true,
       },
       update: {
@@ -45,7 +45,7 @@ async function main() {
     console.log('✅ Wolverine: tracksDrivers = true');
 
     // Atlas: does NOT track drivers (Samsara without driver assignment)
-    const atlasSettings = await (appPrisma as any).organizationSettings.upsert({
+    const atlasSettings = await appPrisma.organizationSettings.upsert({
       where: { clerkOrgId: 'org_39RQY3qNO861ScQb0ZLFSUIFZkN' },
       create: {
         clerkOrgId: 'org_39RQY3qNO861ScQb0ZLFSUIFZkN',

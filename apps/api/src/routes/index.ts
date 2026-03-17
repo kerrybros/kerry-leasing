@@ -14,6 +14,7 @@ import cronRoutes from './cron.js';
 import servicePlanRoutes from './servicePlan.js';
 import fleetRoutes from './fleet.js';
 import repairsRoutes from './repairs.js';
+import { LinkOrgSchema, RepairCustomerSchema, parseBody } from '../lib/validate.js';
 
 const router = Router();
 
@@ -196,14 +197,9 @@ router.post(
   requireRole(['internal']),
   async (req: AuthRequest, res) => {
     try {
-      const { clerkOrgId, customerId } = req.body;
-      
-      if (!clerkOrgId || !customerId) {
-        return res.status(400).json({
-          error: 'Bad Request',
-          message: 'clerkOrgId and customerId are required',
-        });
-      }
+      const body = parseBody(LinkOrgSchema, req, res);
+      if (!body) return;
+      const { clerkOrgId, customerId } = body;
 
       const mapping = await appRepo.linkOrgToCustomer(clerkOrgId, customerId);
       
@@ -267,21 +263,9 @@ router.put(
   async (req: AuthRequest, res) => {
     try {
       const klOrgId = req.auth!.orgId!;
-      const { customerName, contractStartDate } = req.body || {};
-
-      if (!customerName || typeof customerName !== 'string') {
-        return res.status(400).json({
-          error: 'Bad Request',
-          message: 'customerName (string) is required',
-        });
-      }
-
-      if (!contractStartDate || typeof contractStartDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(contractStartDate)) {
-        return res.status(400).json({
-          error: 'Bad Request',
-          message: 'contractStartDate (string) is required in YYYY-MM-DD format',
-        });
-      }
+      const body = parseBody(RepairCustomerSchema, req, res);
+      if (!body) return;
+      const { customerName, contractStartDate } = body;
 
       const appPrisma = getAppPrisma();
       const saved = await appPrisma.repairCustomerConfig.upsert({
@@ -450,7 +434,7 @@ router.get(
       const appPrisma = getAppPrisma();
       
       // Get organization settings (tracksDrivers)
-      const settings = await (appPrisma as any).organizationSettings.findUnique({
+      const settings = await appPrisma.organizationSettings.findUnique({
         where: { clerkOrgId },
         select: {
           tracksDrivers: true,
@@ -458,7 +442,7 @@ router.get(
       });
       
       // Get telematics provider
-      const providerAccount = await (appPrisma as any).telematicsProviderAccount.findUnique({
+      const providerAccount = await appPrisma.telematicsProviderAccount.findUnique({
         where: { clerkOrgId },
         select: {
           provider: true,
@@ -472,10 +456,9 @@ router.get(
       });
     } catch (error) {
       console.error('Error fetching org settings:', error);
-      // On error (e.g., table doesn't exist yet), default to true
-      res.json({
-        tracksDrivers: true,
-        telematicsProvider: null,
+      res.status(503).json({
+        error: 'Service Unavailable',
+        message: 'Failed to load organization settings. Please try again later.',
       });
     }
   }

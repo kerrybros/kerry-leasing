@@ -223,7 +223,7 @@ Pull historical data from a start date to present:
 ```bash
 # Example: Pull Wolverine's data from May 1, 2025 to present
 cd apps/api
-pnpm backdate -- --org=org_wolverine --start=2025-05-01 --end=2026-02-02
+pnpm backdate -- --org=org_xxxxx --start=2025-05-01 --end=2026-02-02
 ```
 
 **What it does:**

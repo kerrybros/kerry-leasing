@@ -10,6 +10,7 @@ import { fileURLToPath } from 'url';
 import { appPrisma } from '../../lib/prisma.js';
 import { syncSamsaraOrgForDate } from './syncService.js';
 import { getDateRange } from './types.js';
+import { readCredentials } from '../../lib/credentials.js';
 
 interface BackdateOptions {
   clerkOrgId: string;
@@ -41,7 +42,8 @@ async function backdateSamsaraData(options: BackdateOptions): Promise<void> {
     throw new Error(`Samsara provider account for ${clerkOrgId} is not active (status: ${providerAccount.status})`);
   }
 
-  const apiToken = (providerAccount.credentialsJson as any).apiToken;
+  const creds = readCredentials(providerAccount.credentialsJson);
+  const apiToken = creds.apiToken as string;
 
   if (!apiToken) {
     throw new Error(`No API token found in credentials for ${clerkOrgId}`);
@@ -69,7 +71,7 @@ async function backdateSamsaraData(options: BackdateOptions): Promise<void> {
       if (result.success) {
         const r = result.results[0];
         console.log(
-          `  ✓ ${date} complete - ${r?.newCount ?? 0} new, ${r?.updatedCount ?? 0} updated ` +
+          `  ✓ ${date} complete - ${r?.newCount ?? 0} new records added, ${r?.unchangedCount ?? 0} preexisting records unchanged, ${r?.updatedCount ?? 0} updated (overwritten) ` +
           `in ${Math.round(result.duration / 1000)}s`
         );
         successCount++;

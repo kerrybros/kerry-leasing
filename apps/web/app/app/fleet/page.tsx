@@ -1,9 +1,11 @@
 'use client';
 
-import { useAuth, useOrganization } from '@clerk/nextjs';
+import { useOrganization } from '@clerk/nextjs';
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { createApiClient, ApiError } from '@/lib/api';
+import { ApiError } from '@/lib/api';
+import { useApiClient } from '@/hooks/useApiClient';
+import { useOrgSettings } from '@/hooks/useOrgSettings';
 import { DateRangePicker } from '@/components/DateRangePicker';
 import { MultiSelect } from '@/components/MultiSelect';
 import { Skeleton } from '@/components/Skeleton';
@@ -64,388 +66,18 @@ const formatLongDate = (dateStr: string) => {
   return `${month} ${day}${suffix(day)} ${year}`;
 };
 
-// Repair Breakdown Component
-type RepairLineSummary = {
-  description: string;
-  component: string | null;
-  system: string | null;
-  total: number;
-  tax: number;
-  count: number;
-};
-
-type RepairInvoiceSummary = {
-  invoiceNumber: string;
-  invoiceDate: string; // YYYY-MM-DD
-  orderNumber: string | null;
-  shop: string | null;
-  total: number;
-  tax: number;
-  lineCount: number;
-  lines: RepairLineSummary[];
-};
-
-type RepairUnitSummary = {
-  unitNumber: string;
-  invoiceCount: number;
-  total: number;
-  tax: number;
-  invoices: RepairInvoiceSummary[];
-};
-
-// Repair Modal Component
-function RepairDetailsModal({ 
-  invoice, 
-  onClose 
-}: { 
-  invoice: any; 
-  onClose: () => void; 
-}) {
-  if (!invoice) return null;
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={onClose}>
-      <div 
-        className="bg-bg-card rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col border border-border"
-        onClick={e => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="p-4 border-b border-border flex justify-between items-center bg-bg-tertiary">
-          <div>
-            <h3 className="text-lg font-bold text-text-primary">
-              Repair Details
-            </h3>
-            <div className="text-sm text-text-secondary mt-1">
-              Unit: <span className="font-semibold text-text-primary">{invoice.unitNumber}</span> • Repair Completed Date: {new Date(invoice.invoiceDate).toLocaleDateString()}
-            </div>
-          </div>
-          <button 
-            onClick={onClose}
-            className="p-2 hover:bg-bg-hover rounded-lg transition-colors text-text-secondary hover:text-text-primary"
-          >
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-
-        {/* Content */}
-        <div className="p-6 overflow-y-auto">
-          {/* Service Lines */}
-          <h4 className="text-sm font-bold text-text-secondary uppercase tracking-wider mb-3">Service Lines</h4>
-          <div className="space-y-3">
-            {invoice.lines
-              .filter((line: any) => line.description && line.description !== '(No description)')
-              .map((line: any, idx: number) => (
-              <div 
-                key={idx}
-                className="p-4 bg-bg-secondary rounded-lg border border-border flex flex-col gap-1"
-              >
-                <div className="font-semibold text-text-primary">{line.description}</div>
-                <div className="text-sm text-text-secondary">
-                  {line.component || 'N/A'} / {line.system || 'N/A'}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div className="p-4 border-t border-border bg-bg-tertiary flex justify-end">
-          <button 
-            onClick={onClose}
-            className="btn btn-primary"
-          >
-            Close
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function RepairBreakdown({
-  units,
-  loading,
-  error,
-  startDate,
-  endDate,
-}: {
-  units: RepairUnitSummary[];
-  loading: boolean;
-  error: string | null;
-  startDate: string;
-  endDate: string;
-}) {
-  const [selectedInvoice, setSelectedInvoice] = useState<any>(null);
-  const [selectedMatrixUnit, setSelectedMatrixUnit] = useState<string | null>(null);
-  const [unitSearchQuery, setUnitSearchQuery] = useState('');
-
-  // Date-range filter (applies to both fleet + unit modes)
-  const dateFilteredUnits = useMemo(() => {
-    return units
-      .map(u => {
-        // Filter invoices strictly by date range
-        // Ensure string comparison is valid (YYYY-MM-DD)
-        const invoices = u.invoices.filter(inv => {
-          if (!inv.invoiceDate) return false;
-          return inv.invoiceDate >= startDate && inv.invoiceDate <= endDate;
-        });
-        
-        const total = invoices.reduce((sum, inv) => sum + inv.total, 0);
-        const tax = invoices.reduce((sum, inv) => sum + inv.tax, 0);
-        return {
-          ...u,
-          invoices,
-          invoiceCount: invoices.length,
-          total: Number(total.toFixed(2)),
-          tax: Number(tax.toFixed(2)),
-        };
-      })
-      .filter(u => u.invoices.length > 0);
-  }, [units, startDate, endDate]);
-
-  // Unit search filter (applies to the list view)
-  const filteredUnits = useMemo(() => {
-    const q = unitSearchQuery.trim().toLowerCase();
-    if (!q) return dateFilteredUnits;
-    return dateFilteredUnits.filter(u => u.unitNumber.toLowerCase().includes(q));
-  }, [dateFilteredUnits, unitSearchQuery]);
-
-  // Flattened invoice list across all units, sorted by date desc
-  const invoices = useMemo(() => {
-    let source = filteredUnits;
-    
-    // Filter by selected matrix unit if set
-    if (selectedMatrixUnit) {
-      source = filteredUnits.filter(u => u.unitNumber === selectedMatrixUnit);
-    }
-
-    return source
-      .flatMap(u =>
-        u.invoices.map(inv => ({
-          unitNumber: u.unitNumber,
-          ...inv,
-        }))
-      )
-      .sort((a, b) => b.invoiceDate.localeCompare(a.invoiceDate));
-  }, [filteredUnits, selectedMatrixUnit]);
-
-  // 3. Jobs Count (Pivot Table Data)
-  const jobsData = useMemo(() => {
-    // Process units
-    const data: { unitNumber: string; count: number }[] = [];
-    let grandTotal = 0;
-
-    // Use dateFilteredUnits (ignore search query) for the jobs table
-    dateFilteredUnits.forEach(u => {
-      const orders = new Set<string>();
-      
-      u.invoices.forEach(inv => {
-        // Use orderNumber or invoiceNumber as unique job identifier
-        const jobId = inv.orderNumber || inv.invoiceNumber;
-        orders.add(jobId);
-      });
-
-      const count = orders.size;
-      grandTotal += count;
-
-      if (count > 0) {
-        data.push({
-          unitNumber: u.unitNumber,
-          count: count
-        });
-      }
-    });
-
-    // Sort by unit number
-    data.sort((a, b) => a.unitNumber.localeCompare(b.unitNumber, undefined, { numeric: true }));
-
-    return { rows: data, grandTotal };
-  }, [dateFilteredUnits]);
-
-  // Handle matrix cell/row click to filter invoices
-  const handleMatrixClick = (unitNumber: string) => {
-    if (selectedMatrixUnit === unitNumber) {
-      setSelectedMatrixUnit(null); // Deselect
-    } else {
-      setSelectedMatrixUnit(unitNumber);
-    }
-  };
-
-  if (loading) {
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-        <div className="card">
-          <Skeleton style={{ height: 44, borderRadius: 8 }} />
-        </div>
-        {Array.from({ length: 3 }).map((_, i) => (
-          <div key={i} className="card">
-            <Skeleton style={{ height: 22, width: '40%', borderRadius: 8, marginBottom: 12 }} />
-            <Skeleton style={{ height: 14, width: '25%', borderRadius: 8, marginBottom: 18 }} />
-            <Skeleton style={{ height: 220, borderRadius: 8 }} />
-          </div>
-        ))}
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex flex-col gap-6">
-      {error && (
-        <div className="card" style={{ borderColor: 'var(--error)' }}>
-          <div style={{ color: 'var(--error)', fontWeight: 700, marginBottom: 4 }}>Failed to load repair data</div>
-          <div style={{ color: 'var(--text-secondary)' }}>{error}</div>
-        </div>
-      )}
-
-      {/* Filter Section Removed - Search moved to table header */}
-
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-[750px]">
-        {/* LEFT: Jobs Done Matrix */}
-        <div className="lg:col-span-4 xl:col-span-3 flex flex-col h-full bg-bg-card border border-border rounded shadow-sm overflow-hidden">
-          {/* Header Section (Fixed) */}
-          <div style={{ ...chartStyles.bar, flexDirection: 'column', alignItems: 'stretch', gap: '0.5rem', paddingBottom: '1rem', flexShrink: 0 }}>
-            <div className="flex justify-center items-center w-full">
-              Number of Jobs Done
-            </div>
-            {/* Spacer to align with the search bar in the right column */}
-            <div className="flex gap-2 w-full opacity-0 pointer-events-none" aria-hidden="true">
-               <div className="flex-1 px-3 py-1.5 rounded text-sm border border-transparent">
-                  &nbsp;
-               </div>
-            </div>
-            {/* Column Headers */}
-            <div className="grid grid-cols-[1fr_80px] w-full mt-2 pt-2 border-t border-white/20">
-              <div className="text-white font-semibold text-sm uppercase tracking-wider pl-4">Unit</div>
-              <div className="text-white font-semibold text-sm uppercase tracking-wider text-center pr-4">Count</div>
-            </div>
-          </div>
-          
-          {/* Scrollable Body */}
-          <div className="flex-1 overflow-y-auto bg-bg-card">
-             {jobsData.rows.length === 0 ? (
-               <div className="text-center p-4 text-text-secondary">No data</div>
-             ) : (
-               <div className="flex flex-col">
-                 {jobsData.rows.map((row) => (
-                   <div 
-                     key={row.unitNumber} 
-                     onClick={() => handleMatrixClick(row.unitNumber)}
-                     className="grid grid-cols-[1fr_80px] py-3 border-b border-border hover:bg-bg-hover cursor-pointer transition-colors"
-                     style={{ 
-                       background: selectedMatrixUnit === row.unitNumber ? 'var(--bg-hover)' : undefined,
-                       borderLeft: selectedMatrixUnit === row.unitNumber ? '4px solid var(--primary)' : '4px solid transparent'
-                     }}
-                   >
-                     <div className="pl-4 font-bold text-text-primary">{row.unitNumber}</div>
-                     <div className="pr-4 font-bold text-text-primary text-center">{row.count}</div>
-                   </div>
-                 ))}
-               </div>
-             )}
-          </div>
-
-          {/* Footer (Fixed) */}
-          <div className="bg-primary-dark text-white font-bold grid grid-cols-[1fr_80px] py-3 border-t border-white/10 flex-shrink-0 z-10">
-             <div className="pl-4">Total</div>
-             <div className="pr-4 text-center">{jobsData.grandTotal}</div>
-          </div>
-        </div>
-
-        {/* RIGHT: Invoices List */}
-        <div className="lg:col-span-8 xl:col-span-9 flex flex-col h-full bg-bg-card border border-border rounded shadow-sm overflow-hidden">
-          {/* Header Section (Fixed) */}
-          <div style={{ ...chartStyles.bar, flexDirection: 'column', alignItems: 'stretch', gap: '0.5rem', paddingBottom: '1rem', flexShrink: 0 }}>
-            <div className="flex justify-between items-center w-full">
-              <span>{selectedMatrixUnit ? `Repairs: Unit ${selectedMatrixUnit}` : 'All Repairs'}</span>
-              <div className="text-sm font-normal opacity-80">
-                {invoices.length} repairs
-              </div>
-            </div>
-            
-            <div className="flex gap-2 w-full">
-              <input
-                type="text"
-                placeholder="Search Unit..."
-                value={unitSearchQuery}
-                onChange={(e) => setUnitSearchQuery(e.target.value)}
-                onClick={(e) => e.stopPropagation()}
-                className="flex-1 px-3 py-1.5 rounded text-sm text-text-primary bg-bg-card border-none focus:ring-2 focus:ring-primary outline-none"
-                style={{ color: 'var(--text-primary)' }}
-              />
-              {selectedMatrixUnit && (
-                <button 
-                  onClick={() => setSelectedMatrixUnit(null)}
-                  className="text-xs bg-white/20 hover:bg-white/30 text-white px-3 py-1.5 rounded transition-colors"
-                >
-                  Clear Filter
-                </button>
-              )}
-            </div>
-
-            {/* Column Headers */}
-            <div className="grid grid-cols-[200px_100px_1fr_160px] w-full mt-2 pt-2 border-t border-white/20 px-4 gap-4">
-              <div className="text-white font-semibold text-sm uppercase tracking-wider">Repair Completed Date</div>
-              <div className="text-white font-semibold text-sm uppercase tracking-wider">Unit</div>
-              <div className="text-white font-semibold text-sm uppercase tracking-wider"></div>
-              <div className="text-white font-semibold text-sm uppercase tracking-wider text-right">Action</div>
-            </div>
-          </div>
-
-          {/* Scrollable Body */}
-          <div className="flex-1 overflow-y-auto bg-bg-card">
-            {invoices.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-secondary)' }}>
-                {units.length === 0 ? 'No repair data available' : 'No invoices found for selected filters'}
-              </div>
-            ) : (
-              <div className="flex flex-col">
-                {invoices.map((inv) => (
-                  <div 
-                    key={`${inv.unitNumber}-${inv.invoiceNumber}-${inv.invoiceDate}`}
-                    className="grid grid-cols-[200px_100px_1fr_160px] py-3 px-4 border-b border-border items-center hover:bg-bg-hover transition-colors gap-4"
-                  >
-                    <div className="text-sm text-text-primary">{new Date(inv.invoiceDate).toLocaleDateString()}</div>
-                    <div className="text-sm font-bold text-text-primary">{inv.unitNumber}</div>
-                    <div></div>
-                    <div className="text-right">
-                      <button 
-                        className="btn btn-primary text-xs py-1 px-3"
-                        onClick={() => setSelectedInvoice(inv)}
-                      >
-                        View Repair Details
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {selectedInvoice && (
-        <RepairDetailsModal 
-          invoice={selectedInvoice} 
-          onClose={() => setSelectedInvoice(null)} 
-        />
-      )}
-    </div>
-  );
-}
-
+import { RepairBreakdown, type RepairUnitSummary } from './RepairBreakdown';
 
 interface VehicleUtilization {
   vehicleId: number;
   vehicleNumber: string | null;
   vin: string | null;
   date: string;
-  utilizationPercentage: number | null;
   totalDistance: number | null;
-  idleTime: number | null;
-  totalFuel: number | null;
-  idleFuel: number | null;
+  idleTime: number | null;      // seconds
+  drivingTime: number | null;   // seconds
+  totalFuel: number | null;     // gallons
+  idleFuel: number | null;      // gallons
 }
 
 interface DriverUtilization {
@@ -498,21 +130,14 @@ const getMonthName = (monthIndex: number) => {
 
 export default function FleetOverviewPage() {
   const router = useRouter();
-  const { getToken } = useAuth();
+  const { getApi } = useApiClient();
   const { organization, isLoaded: orgLoaded } = useOrganization();
   
   const [activeTab, setActiveTab] = useState<'telematics' | 'repairs'>('telematics');
   const [viewMode, setViewMode] = useState<'unit' | 'driver'>('unit');
   const [selectedId, setSelectedId] = useState<string | number | null>(null); // VIN (string) or DriverID (number)
   
-  // Organization settings (feature flags)
-  const [orgSettings, setOrgSettings] = useState<{
-    tracksDrivers: boolean;
-    telematicsProvider: 'MOTIVE' | 'SAMSARA' | null;
-  }>({
-    tracksDrivers: true,
-    telematicsProvider: null,
-  });
+  const { orgSettings, orgSettingsError, loadOrgSettings, clearOrgSettingsError } = useOrgSettings(getApi);
   
   // Telematics View State
   const [telematicsView, setTelematicsView] = useState<'trends' | 'breakdown'>('trends');
@@ -538,7 +163,6 @@ export default function FleetOverviewPage() {
   const [selectedMonths, setSelectedMonths] = useState<string[]>([]);
   const [selectedYears, setSelectedYears] = useState<string[]>([]);
   const [selectedUnits, setSelectedUnits] = useState<string[]>([]);
-  const [unitSearchQuery, setUnitSearchQuery] = useState('');
 
   const [repairEndDate, setRepairEndDate] = useState(() => {
     // Default to the contract start date + 1 year, or today if that's in the past
@@ -612,11 +236,9 @@ export default function FleetOverviewPage() {
 
     // Load settings first, then load data
     const loadDataSequentially = async () => {
-      const settings = await loadOrgSettings(); // Get settings synchronously
-      
-      // Only load if not already loaded for this org
+      const settings = await loadOrgSettingsAndApply();
       if (!telematicsLoaded && !telematicsInFlightRef.current) {
-        loadTelematicsData({ provider: settings.telematicsProvider }); // Pass provider directly
+        loadTelematicsData({ provider: settings.telematicsProvider });
       }
       if (!repairsLoaded && !repairsInFlightRef.current) {
         loadRepairData();
@@ -627,40 +249,12 @@ export default function FleetOverviewPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [organization?.id, telematicsLoaded, repairsLoaded]);
 
-  const loadOrgSettings = async (): Promise<{
-    tracksDrivers: boolean;
-    telematicsProvider: 'MOTIVE' | 'SAMSARA' | null;
-  }> => {
-    try {
-      const token = await getToken();
-      const headers: Record<string, string> = {};
-      if (organization?.id) {
-        headers['x-organization-id'] = organization.id;
-      }
-      
-      const api = createApiClient(token, headers);
-      const settings = await api.get<{
-        tracksDrivers: boolean;
-        telematicsProvider: 'MOTIVE' | 'SAMSARA' | null;
-      }>('/org/settings');
-      setOrgSettings(settings);
-      
-      // If org doesn't track drivers, force unit view
-      if (!settings.tracksDrivers && viewMode === 'driver') {
-        setViewMode('unit');
-      }
-      
-      return settings; // Return settings for immediate use
-    } catch (err) {
-      console.error('[OrgSettings] Failed to load settings:', err);
-      // Default to true on error (backward compatible)
-      const defaultSettings = {
-        tracksDrivers: true,
-        telematicsProvider: null as 'MOTIVE' | 'SAMSARA' | null,
-      };
-      setOrgSettings(defaultSettings);
-      return defaultSettings;
+  const loadOrgSettingsAndApply = async () => {
+    const settings = await loadOrgSettings();
+    if (!settings.tracksDrivers && viewMode === 'driver') {
+      setViewMode('unit');
     }
+    return settings;
   };
 
   // Reset selection when switching view modes
@@ -678,13 +272,7 @@ export default function FleetOverviewPage() {
     try {
       const t0 = performance.now();
       const fetchedAt = new Date().toISOString();
-      const token = await getToken();
-      const headers: Record<string, string> = {};
-      if (organization?.id) {
-        headers['x-organization-id'] = organization.id;
-      }
-      
-      const api = createApiClient(token, headers);
+      const api = await getApi();
       
       // Load all included units from the fleet endpoint
       // This returns only units marked as included in the service plan
@@ -782,13 +370,7 @@ export default function FleetOverviewPage() {
     try {
       const t0 = performance.now();
       const fetchedAt = new Date().toISOString();
-      const token = await getToken();
-      const headers: Record<string, string> = {};
-      if (organization?.id) {
-        headers['x-organization-id'] = organization.id;
-      }
-      
-      const api = createApiClient(token, headers);
+      const api = await getApi();
 
       const repairs = await api.get<{
         customer?: {
@@ -903,6 +485,7 @@ export default function FleetOverviewPage() {
       unitNumber: string;
       totalMiles: number;
       totalIdleTime: number;
+      totalDrivingTime: number;
       totalFuel: number;
       totalIdleFuel: number;
       days: number;
@@ -916,6 +499,7 @@ export default function FleetOverviewPage() {
         unitNumber: record.vehicleNumber || record.vin.slice(-6),
         totalMiles: 0,
         totalIdleTime: 0,
+        totalDrivingTime: 0,
         totalFuel: 0,
         totalIdleFuel: 0,
         days: 0,
@@ -923,6 +507,7 @@ export default function FleetOverviewPage() {
 
       existing.totalMiles += record.totalDistance || 0;
       existing.totalIdleTime += record.idleTime || 0;
+      existing.totalDrivingTime += record.drivingTime || 0;
       existing.totalFuel += record.totalFuel || 0;
       existing.totalIdleFuel += record.idleFuel || 0;
       existing.days += 1;
@@ -930,15 +515,19 @@ export default function FleetOverviewPage() {
       grouped.set(record.vin, existing);
     });
 
-    return Array.from(grouped.values()).map(unit => ({
-      vin: unit.vin,
-      unitNumber: unit.unitNumber,
-      totalMiles: unit.totalMiles,
-      avgMpg: unit.totalFuel > 0 ? (unit.totalMiles / unit.totalFuel).toFixed(2) : '0.00',
-      idlePercentage: unit.totalIdleTime > 0 ? ((unit.totalIdleTime / (unit.days * 86400)) * 100).toFixed(2) : '0.00',
-      idleFuel: Math.round(unit.totalIdleFuel),
-      idleTimeMinutes: Math.round(unit.totalIdleTime / 60),
-    }));
+    return Array.from(grouped.values()).map(unit => {
+      const engineOnTime = unit.totalIdleTime + unit.totalDrivingTime;
+      const idlePct = engineOnTime > 0 ? (unit.totalIdleTime / engineOnTime) * 100 : 0;
+      return {
+        vin: unit.vin,
+        unitNumber: unit.unitNumber,
+        totalMiles: unit.totalMiles,
+        avgMpg: unit.totalFuel > 0 ? (unit.totalMiles / unit.totalFuel).toFixed(2) : '0.00',
+        idlePercentage: idlePct.toFixed(2),
+        idleFuel: Math.round(unit.totalIdleFuel),
+        idleTimeMinutes: Math.round(unit.totalIdleTime / 60),
+      };
+    });
   }, [filteredVehicleData]);
 
   const driverMetrics = useMemo((): DriverMetrics[] => {
@@ -947,6 +536,7 @@ export default function FleetOverviewPage() {
       driverName: string;
       totalMiles: number;
       totalIdleTime: number;
+      totalDrivingTime: number;
       totalFuel: number;
       totalIdleFuel: number;
       days: number;
@@ -960,6 +550,7 @@ export default function FleetOverviewPage() {
         driverName: `${record.driverFirstName || ''} ${record.driverLastName || ''}`.trim() || `Driver ${record.driverId}`,
         totalMiles: 0,
         totalIdleTime: 0,
+        totalDrivingTime: 0,
         totalFuel: 0,
         totalIdleFuel: 0,
         days: 0,
@@ -968,6 +559,7 @@ export default function FleetOverviewPage() {
       const fuel = (record.drivingFuel || 0) + (record.idleFuel || 0);
       
       existing.totalIdleTime += record.idleTime || 0;
+      existing.totalDrivingTime += record.drivingTime || 0;
       existing.totalFuel += fuel;
       existing.totalIdleFuel += record.idleFuel || 0;
       existing.totalMiles += record.totalDistance || 0; 
@@ -976,15 +568,19 @@ export default function FleetOverviewPage() {
       grouped.set(record.driverId, existing);
     });
 
-    return Array.from(grouped.values()).map(driver => ({
-      driverId: driver.driverId,
-      driverName: driver.driverName,
-      totalMiles: driver.totalMiles,
-      avgMpg: driver.totalFuel > 0 && driver.totalMiles > 0 ? (driver.totalMiles / driver.totalFuel).toFixed(2) : '0.00',
-      idlePercentage: driver.totalIdleTime > 0 ? ((driver.totalIdleTime / (driver.days * 86400)) * 100).toFixed(2) : '0.00',
-      idleFuel: Math.round(driver.totalIdleFuel),
-      idleTimeMinutes: Math.round(driver.totalIdleTime / 60),
-    }));
+    return Array.from(grouped.values()).map(driver => {
+      const engineOnTime = driver.totalIdleTime + driver.totalDrivingTime;
+      const idlePct = engineOnTime > 0 ? (driver.totalIdleTime / engineOnTime) * 100 : 0;
+      return {
+        driverId: driver.driverId,
+        driverName: driver.driverName,
+        totalMiles: driver.totalMiles,
+        avgMpg: driver.totalFuel > 0 && driver.totalMiles > 0 ? (driver.totalMiles / driver.totalFuel).toFixed(2) : '0.00',
+        idlePercentage: idlePct.toFixed(2),
+        idleFuel: Math.round(driver.totalIdleFuel),
+        idleTimeMinutes: Math.round(driver.totalIdleTime / 60),
+      };
+    });
   }, [filteredDriverData]);
 
   // 2. Chart Data (Monthly aggregation, optionally filtered by selectedId)
@@ -993,6 +589,7 @@ export default function FleetOverviewPage() {
     const monthlyMap = new Map<string, {
       totalMiles: number;
       totalIdleTime: number;
+      totalDrivingTime: number;
       totalFuel: number;
       totalIdleFuel: number;
       days: number;
@@ -1020,15 +617,18 @@ export default function FleetOverviewPage() {
       const existing = monthlyMap.get(monthKey) || {
         totalMiles: 0,
         totalIdleTime: 0,
+        totalDrivingTime: 0,
         totalFuel: 0,
         totalIdleFuel: 0,
         days: 0,
       };
 
       const miles = record.totalDistance || 0;
-      // Handle different field names for fuel/idle between unit/driver types
       const idleTime = record.idleTime || 0;
       const idleFuel = record.idleFuel || 0;
+      const drivingTime = viewMode === 'unit'
+        ? (record as VehicleUtilization).drivingTime || 0
+        : (record as DriverUtilization).drivingTime || 0;
       
       let fuel = 0;
       if (viewMode === 'unit') {
@@ -1039,12 +639,18 @@ export default function FleetOverviewPage() {
 
       existing.totalMiles += miles;
       existing.totalIdleTime += idleTime;
+      existing.totalDrivingTime += drivingTime;
       existing.totalFuel += fuel;
       existing.totalIdleFuel += idleFuel;
       existing.days += 1;
 
       monthlyMap.set(monthKey, existing);
     });
+
+    const idlePctFromData = (data: { totalIdleTime: number; totalDrivingTime: number }) => {
+      const engineOn = data.totalIdleTime + data.totalDrivingTime;
+      return engineOn > 0 ? (data.totalIdleTime / engineOn) * 100 : 0;
+    };
 
     // Convert map to array for Charts (only months with data in range)
     const chartData = Array.from(monthlyMap.entries())
@@ -1054,7 +660,6 @@ export default function FleetOverviewPage() {
         const date = new Date(parseInt(year), parseInt(month) - 1);
         const monthName = date.toLocaleString('default', { month: 'short' });
         
-        // Show year if range spans multiple years
         const startYear = new Date(startDate).getFullYear();
         const endYear = new Date(endDate).getFullYear();
         const label = startYear !== endYear ? `${monthName} '${year.slice(2)}` : monthName;
@@ -1064,7 +669,7 @@ export default function FleetOverviewPage() {
           monthKey,
           totalMiles: Math.round(data.totalMiles),
           avgMpg: data.totalFuel > 0 ? parseFloat((data.totalMiles / data.totalFuel).toFixed(2)) : 0,
-          idlePercentage: data.totalIdleTime > 0 ? parseFloat(((data.totalIdleTime / (data.days * 86400)) * 100).toFixed(2)) : 0,
+          idlePercentage: parseFloat(idlePctFromData(data).toFixed(2)),
           idleFuel: Math.round(data.totalIdleFuel),
           idleTimeMinutes: Math.round(data.totalIdleTime / 60),
         };
@@ -1082,12 +687,11 @@ export default function FleetOverviewPage() {
           monthKey,
           totalMiles: Math.round(data.totalMiles),
           avgMpg: data.totalFuel > 0 ? parseFloat((data.totalMiles / data.totalFuel).toFixed(2)) : 0,
-          idlePercentage: data.totalIdleTime > 0 ? parseFloat(((data.totalIdleTime / (data.days * 86400)) * 100).toFixed(2)) : 0,
+          idlePercentage: parseFloat(idlePctFromData(data).toFixed(2)),
           idleFuel: Math.round(data.totalIdleFuel),
           idleTimeMinutes: Math.round(data.totalIdleTime / 60),
         };
       } else {
-        // Empty month
         return {
           month: getMonthName(i),
           monthKey,
@@ -1125,16 +729,17 @@ export default function FleetOverviewPage() {
     let totalMiles = 0;
     let totalFuel = 0;
     let totalIdleTime = 0;
+    let totalDrivingTime = 0;
     let totalIdleFuel = 0;
-    let totalDays = 0;
 
     data.forEach(r => {
-      // Only include records from selectedTableYear
       if (r.date.startsWith(String(selectedTableYear))) {
         totalMiles += r.totalDistance || 0;
         totalIdleTime += r.idleTime || 0;
+        totalDrivingTime += viewMode === 'unit'
+          ? (r as VehicleUtilization).drivingTime || 0
+          : (r as DriverUtilization).drivingTime || 0;
         totalIdleFuel += r.idleFuel || 0;
-        totalDays += 1;
         
         if (viewMode === 'unit') {
           totalFuel += (r as VehicleUtilization).totalFuel || 0;
@@ -1144,12 +749,15 @@ export default function FleetOverviewPage() {
       }
     });
 
+    const engineOnTime = totalIdleTime + totalDrivingTime;
+    const idlePct = engineOnTime > 0 ? (totalIdleTime / engineOnTime) * 100 : 0;
+
     return {
       totalMiles,
       totalIdleFuel,
       totalIdleTime: Math.round(totalIdleTime / 60),
       avgMpg: totalFuel > 0 ? (totalMiles / totalFuel).toFixed(2) : '0.00',
-      idlePercentage: totalDays > 0 ? ((totalIdleTime / (totalDays * 86400)) * 100).toFixed(2) : '0.00'
+      idlePercentage: idlePct.toFixed(2)
     };
   }, [filteredVehicleData, filteredDriverData, viewMode, selectedTableYear]);
 
@@ -1244,6 +852,20 @@ export default function FleetOverviewPage() {
           />
         </div>
       </div>
+
+      {orgSettingsError && (
+        <div className="mb-4 px-4 py-3 rounded-lg bg-amber-500/15 border border-amber-500/40 text-amber-800 dark:text-amber-200 text-sm flex items-center justify-between gap-4">
+          <span>Settings could not be loaded: {orgSettingsError} Showing default options.</span>
+          <button
+            type="button"
+            onClick={clearOrgSettingsError}
+            className="shrink-0 px-2 py-1 rounded hover:bg-amber-500/20 transition-colors"
+            aria-label="Dismiss"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       <div className="tabs flex justify-between items-end">
         <div className="flex gap-2">

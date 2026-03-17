@@ -1,8 +1,8 @@
 'use client';
 
-import { useAuth, useOrganization } from '@clerk/nextjs';
+import { useOrganization } from '@clerk/nextjs';
 import { useCallback, useEffect, useState } from 'react';
-import { createApiClient } from '@/lib/api';
+import { useApiClient } from '@/hooks/useApiClient';
 
 interface ServicePlanUnit {
   id: string;
@@ -12,7 +12,6 @@ interface ServicePlanUnit {
   telematicsVin: string | null;
   matchType: 'AUTO' | 'MANUAL' | 'UNMATCHED';
   matchConfidence: number | null;
-  isIncluded: boolean;
   notes: string | null;
   telematicsData?: {
     vehicleNumber: string;
@@ -25,15 +24,13 @@ interface UnitsSummary {
   total: number;
   matched: number;
   unmatched: number;
-  included: number;
-  excluded: number;
   fromRepair: number;
   fromTelematicsOnly: number;
   withTelematicsData: number;
 }
 
 export default function AdminServicePlanPage() {
-  const { getToken } = useAuth();
+  const { getApi } = useApiClient();
   const { organization } = useOrganization();
   const [units, setUnits] = useState<ServicePlanUnit[]>([]);
   const [summary, setSummary] = useState<UnitsSummary | null>(null);
@@ -42,20 +39,14 @@ export default function AdminServicePlanPage() {
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [syncSuccess, setSyncSuccess] = useState<string | null>(null);
-  const [filter, setFilter] = useState<'all' | 'included' | 'excluded' | 'unmatched'>('all');
+  const [filter, setFilter] = useState<'all' | 'unmatched'>('all');
 
   const loadUnits = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
 
-      const token = await getToken();
-      const headers: Record<string, string> = {};
-      if (organization?.id) {
-        headers['x-organization-id'] = organization.id;
-      }
-      const api = createApiClient(token, headers);
-
+      const api = await getApi();
       const data = await api.get<{ units: ServicePlanUnit[]; summary: UnitsSummary }>('/admin/service-plan/units');
 
       setUnits(data.units);
@@ -70,7 +61,7 @@ export default function AdminServicePlanPage() {
     } finally {
       setLoading(false);
     }
-  }, [getToken, organization?.id]);
+  }, [getApi]);
 
   const syncUnits = async () => {
     try {
@@ -78,13 +69,7 @@ export default function AdminServicePlanPage() {
       setError(null);
       setSyncSuccess(null);
 
-      const token = await getToken();
-      const headers: Record<string, string> = {};
-      if (organization?.id) {
-        headers['x-organization-id'] = organization.id;
-      }
-      const api = createApiClient(token, headers);
-
+      const api = await getApi();
       const data = await api.post<{
         success: boolean;
         synced: number;
@@ -117,40 +102,6 @@ export default function AdminServicePlanPage() {
     }
   };
 
-  const toggleInclusion = async (unitId: string, currentIsIncluded: boolean) => {
-    try {
-      const token = await getToken();
-      const headers: Record<string, string> = {};
-      if (organization?.id) {
-        headers['x-organization-id'] = organization.id;
-      }
-      const api = createApiClient(token, headers);
-
-      await api.put(`/admin/service-plan/units/${unitId}/inclusion`, {
-        isIncluded: !currentIsIncluded
-      });
-
-      // Update local state
-      setUnits(prev =>
-        prev.map(u =>
-          u.repairUnitId === unitId ? { ...u, isIncluded: !currentIsIncluded } : u
-        )
-      );
-
-      // Update summary
-      if (summary) {
-        setSummary({
-          ...summary,
-          included: currentIsIncluded ? summary.included - 1 : summary.included + 1,
-          excluded: currentIsIncluded ? summary.excluded + 1 : summary.excluded - 1,
-        });
-      }
-    } catch (err: any) {
-      setError(err.message || 'Failed to update unit');
-      console.error('Error updating unit:', err);
-    }
-  };
-
   useEffect(() => {
     if (organization?.id) {
       loadUnits();
@@ -158,8 +109,6 @@ export default function AdminServicePlanPage() {
   }, [organization?.id, loadUnits]);
 
   const filteredUnits = units.filter(unit => {
-    if (filter === 'included') return unit.isIncluded;
-    if (filter === 'excluded') return !unit.isIncluded;
     if (filter === 'unmatched') return unit.matchType === 'UNMATCHED';
     return true;
   });
@@ -207,14 +156,6 @@ export default function AdminServicePlanPage() {
             <div className="text-sm text-text-secondary">Total Units</div>
           </div>
           <div className="bg-bg-secondary border border-border rounded-lg p-4">
-            <div className="text-2xl font-bold text-green-600">{summary.included}</div>
-            <div className="text-sm text-text-secondary">Included</div>
-          </div>
-          <div className="bg-bg-secondary border border-border rounded-lg p-4">
-            <div className="text-2xl font-bold text-yellow-600">{summary.excluded}</div>
-            <div className="text-sm text-text-secondary">Excluded</div>
-          </div>
-          <div className="bg-bg-secondary border border-border rounded-lg p-4">
             <div className="text-2xl font-bold text-blue-600">{summary.matched}</div>
             <div className="text-sm text-text-secondary">Matched</div>
           </div>
@@ -247,26 +188,6 @@ export default function AdminServicePlanPage() {
               All ({units.length})
             </button>
             <button
-              onClick={() => setFilter('included')}
-              className={`px-3 py-1 rounded ${
-                filter === 'included'
-                  ? 'bg-primary text-white'
-                  : 'bg-bg-tertiary text-text-primary hover:bg-bg-hover'
-              }`}
-            >
-              Included ({summary?.included || 0})
-            </button>
-            <button
-              onClick={() => setFilter('excluded')}
-              className={`px-3 py-1 rounded ${
-                filter === 'excluded'
-                  ? 'bg-primary text-white'
-                  : 'bg-bg-tertiary text-text-primary hover:bg-bg-hover'
-              }`}
-            >
-              Excluded ({summary?.excluded || 0})
-            </button>
-            <button
               onClick={() => setFilter('unmatched')}
               className={`px-3 py-1 rounded ${
                 filter === 'unmatched'
@@ -294,14 +215,12 @@ export default function AdminServicePlanPage() {
                 <th className="px-4 py-3 text-left text-sm font-semibold">Repair VIN</th>
                 <th className="px-4 py-3 text-left text-sm font-semibold">Telematics VIN</th>
                 <th className="px-4 py-3 text-left text-sm font-semibold">Match Status</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold">Included</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {filteredUnits.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-text-secondary">
+                  <td colSpan={4} className="px-4 py-8 text-center text-text-secondary">
                     No units found. Click &quot;Sync Units&quot; to import from repair database.
                   </td>
                 </tr>
@@ -329,29 +248,6 @@ export default function AdminServicePlanPage() {
                       >
                         {unit.matchType}
                       </span>
-                    </td>
-                    <td className="px-4 py-3 text-sm">
-                      <span
-                        className={`px-2 py-1 rounded text-xs font-medium ${
-                          unit.isIncluded
-                            ? 'bg-green-100 text-green-800'
-                            : 'bg-gray-100 text-gray-800'
-                        }`}
-                      >
-                        {unit.isIncluded ? 'Yes' : 'No'}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-sm">
-                      <button
-                        onClick={() => toggleInclusion(unit.repairUnitId, unit.isIncluded)}
-                        className={`px-3 py-1 rounded text-xs ${
-                          unit.isIncluded
-                            ? 'bg-red-100 text-red-800 hover:bg-red-200'
-                            : 'bg-green-100 text-green-800 hover:bg-green-200'
-                        }`}
-                      >
-                        {unit.isIncluded ? 'Exclude' : 'Include'}
-                      </button>
                     </td>
                   </tr>
                 ))

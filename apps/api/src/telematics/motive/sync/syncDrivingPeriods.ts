@@ -92,12 +92,15 @@ export async function syncDrivingPeriods(
           });
           result.newCount++;
         } else {
-          // Check if data changed (compare key fields)
+          // Check if data changed (compare key fields; include start/end and distance for retroactive corrections)
           const hasChanged =
+            existing.startTime !== recordData.startTime ||
             existing.endTime !== recordData.endTime ||
             existing.duration !== recordData.duration ||
             existing.status !== recordData.status ||
+            existing.startKilometers !== recordData.startKilometers ||
             existing.endKilometers !== recordData.endKilometers ||
+            existing.distance !== recordData.distance ||
             existing.destination !== recordData.destination;
 
           if (hasChanged) {

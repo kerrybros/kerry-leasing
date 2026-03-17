@@ -6,28 +6,50 @@
 // =====================================================
 // VEHICLE UTILIZATION
 // =====================================================
+/** Normalized record shape used by sync (same for v1 and v2) */
+export interface MotiveVehicleUtilizationRecord {
+  vehicle: {
+    id: number;
+    number?: string;
+    vin?: string;
+  };
+  last_located_at?: string | null;
+  utilization?: number | null;
+  idle_time?: number | null;
+  idle_fuel?: number | null;
+  driving_time?: number | null;
+  driving_fuel?: number | null;
+  total_fuel?: number | null;
+  total_distance?: number | null;
+  message?: string | null;
+}
+
+/** v2 response (legacy; we now use v1) */
 export interface MotiveVehicleUtilizationResponse {
-  results: Array<{
-    vehicle: {
-      id: number;
-      number?: string;
-      vin?: string;
-    };
-    last_located_at?: string; // ISO 8601
-    utilization?: number; // Percentage
-    idle_time?: number; // seconds
-    idle_fuel?: number; // gallons
-    driving_time?: number; // seconds
-    driving_fuel?: number; // gallons
-    total_fuel?: number; // gallons
-    total_distance?: number; // miles
-    message?: string;
-  }>;
+  results: MotiveVehicleUtilizationRecord[];
   pagination?: {
     page: number;
     per_page: number;
     total: number;
   };
+}
+
+/** v1 API returns vehicle_idle_rollups; items may be nested as vehicle_idle_rollup */
+export interface MotiveVehicleUtilizationV1Rollup {
+  vehicle?: {
+    id: number;
+    number?: string;
+    vin?: string;
+  };
+  utilization?: number | string;
+  idle_time?: number;
+  idle_fuel?: number | string;
+  driving_time?: number;
+  driving_fuel?: number | string;
+  total_fuel?: number | string;
+  total_distance?: number | string;
+  last_located_at?: string;
+  message?: string;
 }
 
 // =====================================================

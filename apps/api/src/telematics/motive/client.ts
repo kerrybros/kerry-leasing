@@ -70,8 +70,8 @@ export class MotiveClient {
         const response = await this.client.get(endpoint, {
           params: {
             ...params,
-            page,
-            per_page: 100 // Max results per page
+            page_no: page, // Motive API uses page_no (not page)
+            per_page: 100  // Max results per page (Motive max is 100)
           }
         });
 
@@ -111,9 +111,9 @@ export class MotiveClient {
           }
         }
 
-        // Check pagination
+        // Check pagination (Motive returns page_no, per_page, total)
         if (data.pagination) {
-          const { page: currentPage, per_page, total } = data.pagination;
+          const { page_no: currentPage, per_page, total } = data.pagination;
           const totalPages = Math.ceil(total / per_page);
           hasMore = currentPage < totalPages;
           page++;
@@ -146,7 +146,7 @@ export class MotiveClient {
     const response = await this.client.get(endpoint, {
       params: {
         ...params,
-        page,
+        page_no: page,
         per_page: 100
       }
     });
@@ -161,7 +161,7 @@ export class MotiveClient {
     try {
       // Try to fetch geofences (lightweight endpoint)
       await this.client.get('/v1/geofences', {
-        params: { page: 1, per_page: 1 }
+        params: { page_no: 1, per_page: 1 }
       });
       return true;
     } catch (error) {

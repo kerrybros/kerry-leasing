@@ -31,8 +31,8 @@ function toYmd(date: unknown): string | null {
 /**
  * GET /fleet/units
  * 
- * Get all included units with combined telematics and repair data
- * Only returns units marked as isIncluded: true in ServicePlanUnit
+ * Get all service plan units with combined telematics and repair data.
+ * Any unit in the service plan is shown in fleet/reports (no isIncluded filter).
  * Tenant-scoped to authenticated org
  */
 router.get('/units', clerkAuthMiddleware, requireOrg, async (req: AuthRequest, res) => {
@@ -41,12 +41,9 @@ router.get('/units', clerkAuthMiddleware, requireOrg, async (req: AuthRequest, r
     const appPrisma = getAppPrisma();
     const repairPrisma = getRepairPrisma();
 
-    // 1. Get all included service plan units for this org
+    // 1. Get all service plan units for this org (all are shown in reports)
     const servicePlanUnits = await appPrisma.servicePlanUnit.findMany({
-      where: {
-        clerkOrgId,
-        isIncluded: true, // Only included units
-      },
+      where: { clerkOrgId },
       orderBy: { repairUnitNumber: 'asc' },
     });
 
@@ -272,7 +269,6 @@ router.get('/units/:identifier', clerkAuthMiddleware, requireOrg, async (req: Au
     const servicePlanUnit = await appPrisma.servicePlanUnit.findFirst({
       where: {
         clerkOrgId,
-        isIncluded: true,
         OR: [
           { telematicsVin: identifier },
           { repairVin: identifier },
@@ -284,7 +280,7 @@ router.get('/units/:identifier', clerkAuthMiddleware, requireOrg, async (req: Au
     if (!servicePlanUnit) {
       return res.status(404).json({
         error: 'Not Found',
-        message: 'Unit not found or not included in service plan',
+        message: 'Unit not found in service plan',
       });
     }
 

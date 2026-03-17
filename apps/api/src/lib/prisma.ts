@@ -3,6 +3,7 @@
  * Centralized Prisma client initialization for both databases
  */
 
+import type { PrismaClient as AppPrismaClientType } from '../generated/app-client/index.js';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 
@@ -16,9 +17,9 @@ const RepairPrismaClient = repairModule.PrismaClient;
 // =====================================================
 // APP DATABASE (READ-WRITE)
 // =====================================================
-let appClientInstance: any | null = null;
+let appClientInstance: AppPrismaClientType | null = null;
 
-export function getAppPrisma(): any {
+export function getAppPrisma(): AppPrismaClientType {
   if (!appClientInstance) {
     const appDbUrl = process.env.APP_DATABASE_URL;
     
@@ -38,8 +39,15 @@ export function getAppPrisma(): any {
   return appClientInstance;
 }
 
+export async function disconnectAppDb() {
+  if (appClientInstance) {
+    await appClientInstance.$disconnect();
+    appClientInstance = null;
+  }
+}
+
 // Lazy-initialized singleton
-export const appPrisma: any = new Proxy({} as any, {
+export const appPrisma = new Proxy({} as AppPrismaClientType, {
   get(_target, prop) {
     const client = getAppPrisma();
     const value = client[prop];

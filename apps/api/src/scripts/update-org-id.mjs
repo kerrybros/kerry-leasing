@@ -1,14 +1,14 @@
 /**
  * Update Clerk Org ID for Telematics Data
- * 
- * Run this script after creating the production Wolverine organization in Clerk
- * to update all existing telematics data to use the correct org ID.
- * 
+ *
+ * Migrates all telematics records (Motive, Samsara, provider accounts, etc.)
+ * from one clerkOrgId to another. Use when an org is recreated in Clerk.
+ *
  * Usage:
  *   pnpm tsx src/scripts/update-org-id.mjs <oldOrgId> <newOrgId>
- * 
+ *
  * Example:
- *   pnpm tsx src/scripts/update-org-id.mjs org_2slAi3SqvSCzvqCJE3i2YtWQCsO org_2XXXXXXXXXXXX
+ *   pnpm tsx src/scripts/update-org-id.mjs org_OLD_ID org_NEW_ID
  */
 
 import 'dotenv/config';
@@ -139,7 +139,7 @@ if (args.length !== 2) {
   console.log('Usage:');
   console.log('  pnpm tsx src/scripts/update-org-id.mjs <oldOrgId> <newOrgId>\n');
   console.log('Example:');
-  console.log('  pnpm tsx src/scripts/update-org-id.mjs org_2slAi3SqvSCzvqCJE3i2YtWQCsO org_2XXXXXXXXXXXX\n');
+  console.log('  pnpm tsx src/scripts/update-org-id.mjs org_OLD_ID org_NEW_ID\n');
   process.exit(1);
 }
 
