@@ -129,7 +129,7 @@ export function parseBody<T>(
  * Returns the parsed value on success, or sends a 400 response and returns null.
  */
 export function parseQuery<T>(
-  schema: ZodSchema<T>,
+  schema: z.ZodType<T, z.ZodTypeDef, unknown>,
   req: Request,
   res: Response
 ): T | null {

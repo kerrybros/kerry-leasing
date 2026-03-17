@@ -84,7 +84,7 @@ router.post(
       }
 
       // Encrypt credentials before storing
-      let storedCredentials: unknown;
+      let storedCredentials: string | Record<string, unknown>;
       try {
         storedCredentials = encryptCredentials(credentials as Record<string, unknown>);
       } catch {
@@ -99,11 +99,11 @@ router.post(
         create: {
           clerkOrgId,
           provider,
-          credentialsJson: storedCredentials,
+          credentialsJson: storedCredentials as never,
           status: TelematicsProviderStatus.ACTIVE,
         },
         update: {
-          credentialsJson: storedCredentials,
+          credentialsJson: storedCredentials as never,
           status: TelematicsProviderStatus.ACTIVE,
           lastError: null,
         },
