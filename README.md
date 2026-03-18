@@ -51,6 +51,10 @@ APP_DATABASE_URL="postgresql://user:password@localhost:5432/kerry_leasing_app"
 # Clerk
 CLERK_SECRET_KEY=sk_test_your_key
 CLERK_PUBLISHABLE_KEY=pk_test_your_key
+
+# Telematics credential encryption (required)
+# 64-char hex string (32 bytes), same value in API + cron jobs
+CREDENTIALS_ENCRYPTION_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 ```
 
 ### Frontend (`apps/web/.env.local`)
@@ -244,7 +248,7 @@ Create a Render Cron Job:
 - **Type**: Cron Job
 - **Command**: `pnpm sync-motive`
 - **Schedule**: `0 6 * * *` (6 AM EST daily)
-- **Environment**: Same as API service (must include `APP_DATABASE_URL`)
+- **Environment**: Same as API service (must include `APP_DATABASE_URL` and `CREDENTIALS_ENCRYPTION_KEY`)
 
 **Option B: HTTP Endpoint + External Scheduler**
 
@@ -262,6 +266,23 @@ curl -X POST https://your-api.onrender.com/api/cron/sync-motive \
    CRON_SECRET=your-secure-random-string-here
    ```
 3. Configure external scheduler (Render Cron, EasyCron, etc.) to hit endpoint daily
+
+#### 4. Credential Encryption (Strict)
+
+Telematics credentials are now strict-encrypted for both providers.
+
+- `CREDENTIALS_ENCRYPTION_KEY` is required in:
+  - API service environment
+  - Motive cron job environment
+  - Samsara cron job environment
+- Use the same 64-char hex value in all three places.
+- If any legacy plaintext rows exist, migrate them:
+
+```bash
+cd apps/api
+pnpm telematics:credentials:normalize --dry-run
+pnpm telematics:credentials:normalize --apply
+```
 
 ### Sync Strategy
 

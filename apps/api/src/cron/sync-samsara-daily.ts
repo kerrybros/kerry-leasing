@@ -11,7 +11,9 @@
  *   node dist/cron/sync-samsara-daily.js
  */
 
+import 'dotenv/config';
 import { syncSamsaraDaily } from '../telematics/samsara/syncService.js';
+import { assertCredentialsEncryptionKeyConfigured } from '../lib/credentials.js';
 
 async function main() {
   console.log(`\n${'='.repeat(60)}`);
@@ -24,6 +26,7 @@ async function main() {
     if (!process.env.APP_DATABASE_URL) {
       throw new Error('APP_DATABASE_URL environment variable is required');
     }
+    assertCredentialsEncryptionKeyConfigured();
 
     // Run daily sync
     const result = await syncSamsaraDaily();

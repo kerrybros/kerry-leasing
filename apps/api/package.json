@@ -23,6 +23,7 @@
     "backdate": "tsx src/telematics/motive/backdate.ts",
     "backdate-samsara": "tsx src/telematics/samsara/backdate.ts",
     "backdate-motive-by-month": "tsx src/scripts/backdate-motive-by-month.ts",
+    "telematics:credentials:normalize": "tsx src/scripts/normalize-telematics-credentials.ts",
     "wipe-motive-org": "tsx src/scripts/wipe-motive-org.ts",
     "update-org-id": "tsx src/scripts/update-org-id.mjs",
     "deploy:build": "pnpm prisma:generate && pnpm build"

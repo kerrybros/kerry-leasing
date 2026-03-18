@@ -87,14 +87,16 @@ router.post(
         });
       }
 
-      // Encrypt credentials before storing
-      let storedCredentials: string | Record<string, unknown>;
+      // Strict mode: credentials must always be encrypted at rest
+      let storedCredentials: string;
       try {
         storedCredentials = encryptCredentials(credentials as Record<string, unknown>);
-      } catch {
-        // Encryption key not configured — store plaintext with a warning
-        console.warn('[Telematics] CREDENTIALS_ENCRYPTION_KEY not set; storing credentials as plaintext');
-        storedCredentials = credentials;
+      } catch (encryptionError: any) {
+        console.error('[Telematics] Credential encryption failed:', encryptionError?.message);
+        return res.status(500).json({
+          error: 'Internal Server Error',
+          message: 'Credential encryption is not configured correctly. Set CREDENTIALS_ENCRYPTION_KEY and retry.',
+        });
       }
 
       // Upsert provider account

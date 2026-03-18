@@ -15,17 +15,27 @@ import { createCipheriv, createDecipheriv, randomBytes } from 'crypto';
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 12;    // 96-bit IV recommended for GCM
 const TAG_LENGTH = 16;   // 128-bit auth tag
+const KEY_HEX_REGEX = /^[0-9a-fA-F]{64}$/;
 
-function getKey(): Buffer {
+/**
+ * Validate encryption key format and presence.
+ * Throws with an actionable message when invalid.
+ */
+export function assertCredentialsEncryptionKeyConfigured(): void {
   const hex = process.env.CREDENTIALS_ENCRYPTION_KEY;
   if (!hex) {
     throw new Error('CREDENTIALS_ENCRYPTION_KEY env var is not set');
   }
-  if (hex.length !== 64) {
+  if (!KEY_HEX_REGEX.test(hex)) {
     throw new Error(
-      `CREDENTIALS_ENCRYPTION_KEY must be a 64-character hex string (32 bytes). Got ${hex.length} chars.`
+      'CREDENTIALS_ENCRYPTION_KEY must be a 64-character hex string (32 bytes)'
     );
   }
+}
+
+function getKey(): Buffer {
+  assertCredentialsEncryptionKeyConfigured();
+  const hex = process.env.CREDENTIALS_ENCRYPTION_KEY!;
   return Buffer.from(hex, 'hex');
 }
 
@@ -65,8 +75,8 @@ export function decryptCredentials(stored: string): Record<string, unknown> | nu
 }
 
 /**
- * Check whether a stored credentials value is encrypted (new format)
- * or plaintext JSON (legacy format). Used during the migration period.
+ * Check whether a stored credentials value matches encrypted format.
+ * Used by runtime reads and migration scripts.
  */
 export function isEncrypted(stored: unknown): boolean {
   if (typeof stored !== 'string') return false;
@@ -76,7 +86,7 @@ export function isEncrypted(stored: unknown): boolean {
 
 /**
  * Read credentials from a provider account's credentialsJson field.
- * Handles both the legacy plaintext-object format and the new encrypted-string format.
+ * Strict mode: only encrypted-string format is accepted at runtime.
  * Throws if decryption fails so callers can surface the error cleanly.
  */
 export function readCredentials(credentialsJson: unknown): Record<string, unknown> {
@@ -87,9 +97,5 @@ export function readCredentials(credentialsJson: unknown): Record<string, unknow
     }
     return decrypted;
   }
-  // Legacy: stored as a plain JSON object
-  if (credentialsJson && typeof credentialsJson === 'object') {
-    return credentialsJson as Record<string, unknown>;
-  }
-  throw new Error('Credentials are missing or in an unrecognized format');
+  throw new Error('Credentials must be encrypted. Re-save telematics credentials in Admin > Telematics.');
 }

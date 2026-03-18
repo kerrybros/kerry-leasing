@@ -1,4 +1,5 @@
 import dotenv from 'dotenv';
+import { assertCredentialsEncryptionKeyConfigured } from './lib/credentials.js';
 
 dotenv.config();
 
@@ -42,6 +43,6 @@ if (!process.env.CRON_SECRET && process.env.NODE_ENV === 'production') {
   console.warn('⚠️  CRON_SECRET not set - cron endpoints will return 500 when called');
 }
 
-if (!process.env.CREDENTIALS_ENCRYPTION_KEY) {
-  console.warn('⚠️  CREDENTIALS_ENCRYPTION_KEY not set - telematics credentials will not be encrypted at rest');
+if ((process.env.NODE_ENV || 'development') !== 'test') {
+  assertCredentialsEncryptionKeyConfigured();
 }
