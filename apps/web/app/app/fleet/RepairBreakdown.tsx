@@ -3,6 +3,8 @@
 import { useState, useMemo } from 'react';
 import { Skeleton } from '@/components/Skeleton';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   BarChart,
   Bar,
@@ -59,20 +61,6 @@ export function isDamageInvoice(inv: RepairInvoiceSummary): boolean {
   return inv.lines.some(isDamageLine);
 }
 
-const chartBarStyle = {
-  background: 'var(--primary-dark)',
-  fontSize: '1.25rem',
-  fontWeight: '700',
-  color: '#fff',
-  padding: '0.5rem 1rem',
-  borderRadius: '4px 4px 0 0',
-  marginBottom: '0',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  textTransform: 'uppercase' as const,
-  letterSpacing: '0.05em',
-};
 
 function RepairDetailsModal({
   invoice,
@@ -136,8 +124,8 @@ function RepairDetailsModal({
               ))}
           </div>
         </div>
-        <div className="p-4 border-t border-border bg-bg-tertiary flex justify-end">
-          <button onClick={onClose} className="btn btn-primary">Close</button>
+        <div className="p-4 border-t border-border bg-muted flex justify-end">
+          <Button onClick={onClose}>Close</Button>
         </div>
       </div>
     </div>
@@ -280,16 +268,10 @@ export function RepairBreakdown({
 
   if (loading) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-        <div className="card">
-          <Skeleton style={{ height: 44, borderRadius: 8 }} />
-        </div>
+      <div className="flex flex-col gap-4">
+        <Skeleton style={{ height: 44, borderRadius: 8 }} />
         {Array.from({ length: 3 }).map((_, i) => (
-          <div key={i} className="card">
-            <Skeleton style={{ height: 22, width: '40%', borderRadius: 8, marginBottom: 12 }} />
-            <Skeleton style={{ height: 14, width: '25%', borderRadius: 8, marginBottom: 18 }} />
-            <Skeleton style={{ height: 220, borderRadius: 8 }} />
-          </div>
+          <Skeleton key={i} style={{ height: 220, borderRadius: 8 }} />
         ))}
       </div>
     );
@@ -307,16 +289,16 @@ export function RepairBreakdown({
       {/* Main two-panel layout */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-[750px]">
         {/* LEFT: Unit job count list */}
-        <div className="lg:col-span-4 xl:col-span-3 flex flex-col h-full bg-bg-card border border-border rounded shadow-sm overflow-hidden">
-          <div style={{ ...chartBarStyle, flexDirection: 'column', alignItems: 'stretch', gap: '0.5rem', paddingBottom: '1rem', flexShrink: 0 }}>
-            <div className="flex justify-center items-center w-full">Number of Jobs Done</div>
-            <div className="grid grid-cols-[1fr_70px_80px] w-full mt-2 pt-2 border-t border-white/20">
-              <div className="text-white font-semibold text-sm uppercase tracking-wider pl-4">Unit</div>
-              <div className="text-white font-semibold text-sm uppercase tracking-wider text-center">Jobs</div>
-              <div className="text-white font-semibold text-sm uppercase tracking-wider text-center pr-4">Damage</div>
+        <div className="lg:col-span-4 xl:col-span-3 flex flex-col h-full bg-card border border-border rounded shadow-sm overflow-hidden">
+          <div className="bg-primary-dark text-white flex flex-col gap-2 px-4 pt-3 pb-3 flex-shrink-0 rounded-t">
+            <div className="text-lg font-bold uppercase tracking-wider text-center">Number of Jobs Done</div>
+            <div className="grid grid-cols-[1fr_70px_80px] pt-2 border-t border-white/20">
+              <div className="text-white font-semibold text-xs uppercase tracking-wider pl-0">Unit</div>
+              <div className="text-white font-semibold text-xs uppercase tracking-wider text-center">Jobs</div>
+              <div className="text-white font-semibold text-xs uppercase tracking-wider text-center pr-0">Damage</div>
             </div>
           </div>
-          <div className="flex-1 overflow-y-auto bg-bg-card">
+          <div className="flex-1 overflow-y-auto bg-card">
             {jobsData.rows.length === 0 ? (
               <div className="text-center p-4 text-text-secondary">No data</div>
             ) : (
@@ -355,11 +337,13 @@ export function RepairBreakdown({
         </div>
 
         {/* RIGHT: Invoice list */}
-        <div className="lg:col-span-8 xl:col-span-9 flex flex-col h-full bg-bg-card border border-border rounded shadow-sm overflow-hidden">
-          <div style={{ ...chartBarStyle, flexDirection: 'column', alignItems: 'stretch', gap: '0.5rem', paddingBottom: '1rem', flexShrink: 0 }}>
+        <div className="lg:col-span-8 xl:col-span-9 flex flex-col h-full bg-card border border-border rounded shadow-sm overflow-hidden">
+          <div className="bg-primary-dark text-white flex flex-col gap-2 px-4 pt-3 pb-3 flex-shrink-0 rounded-t">
             <div className="flex justify-between items-center w-full">
-              <span>{selectedMatrixUnit ? `Repairs: Unit ${selectedMatrixUnit}` : 'All Repairs'}</span>
-              <div className="text-sm font-normal opacity-80">{invoices.length} repairs</div>
+              <span className="text-lg font-bold uppercase tracking-wider">
+                {selectedMatrixUnit ? `Repairs: Unit ${selectedMatrixUnit}` : 'All Repairs'}
+              </span>
+              <span className="text-sm font-normal opacity-80">{invoices.length} repairs</span>
             </div>
             <div className="flex gap-2 w-full">
               <input
@@ -368,8 +352,7 @@ export function RepairBreakdown({
                 value={unitSearchQuery}
                 onChange={(e) => setUnitSearchQuery(e.target.value)}
                 onClick={(e) => e.stopPropagation()}
-                className="flex-1 px-3 py-1.5 rounded text-sm text-text-primary bg-bg-card border-none focus:ring-2 focus:ring-primary outline-none"
-                style={{ color: 'var(--text-primary)' }}
+                className="flex-1 px-3 py-1.5 rounded text-sm bg-white/10 border border-white/20 text-white placeholder:text-white/60 focus:ring-1 focus:ring-white/50 outline-none"
               />
               {selectedMatrixUnit && (
                 <button
@@ -380,14 +363,14 @@ export function RepairBreakdown({
                 </button>
               )}
             </div>
-            <div className="grid grid-cols-[180px_90px_1fr_120px] w-full mt-2 pt-2 border-t border-white/20 px-4 gap-4">
-              <div className="text-white font-semibold text-sm uppercase tracking-wider">Date</div>
-              <div className="text-white font-semibold text-sm uppercase tracking-wider">Unit</div>
-              <div className="text-white font-semibold text-sm uppercase tracking-wider"></div>
-              <div className="text-white font-semibold text-sm uppercase tracking-wider text-right">Action</div>
+            <div className="grid grid-cols-[180px_90px_1fr_120px] pt-2 border-t border-white/20 gap-4">
+              <div className="text-white font-semibold text-xs uppercase tracking-wider">Date</div>
+              <div className="text-white font-semibold text-xs uppercase tracking-wider">Unit</div>
+              <div></div>
+              <div className="text-white font-semibold text-xs uppercase tracking-wider text-right">Action</div>
             </div>
           </div>
-          <div className="flex-1 overflow-y-auto bg-bg-card">
+          <div className="flex-1 overflow-y-auto bg-card">
             {invoices.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-secondary)' }}>
                 {units.length === 0 ? 'No repair data available' : 'No invoices found for selected filters'}
@@ -412,12 +395,9 @@ export function RepairBreakdown({
                     </div>
                     <div></div>
                     <div className="text-right">
-                      <button
-                        className="btn btn-primary text-xs py-1 px-3"
-                        onClick={() => setSelectedInvoice(inv)}
-                      >
+                      <Button size="sm" variant="outline" onClick={() => setSelectedInvoice(inv)}>
                         View Details
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 ))}
@@ -431,9 +411,14 @@ export function RepairBreakdown({
       {categoryBreakdown.length > 0 && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Component/System Breakdown Chart */}
-          <div className="bg-bg-card border border-border rounded shadow-sm overflow-hidden">
-            <div style={chartBarStyle}>Component / System Breakdown</div>
-            <div style={{ padding: '1rem', height: 340 }}>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                Component / System Breakdown
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+            <div style={{ height: 340 }}>
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart
                   data={categoryBreakdown}
@@ -484,7 +469,7 @@ export function RepairBreakdown({
                 </BarChart>
               </ResponsiveContainer>
             </div>
-            <div className="px-4 pb-3 flex items-center gap-4 text-xs text-text-secondary border-t border-border pt-2">
+            <div className="flex items-center gap-4 text-xs text-muted-foreground border-t border-border pt-3 mt-1">
               <span className="flex items-center gap-1">
                 <span className="inline-block w-3 h-3 rounded-sm bg-primary"></span>
                 Standard
@@ -494,12 +479,18 @@ export function RepairBreakdown({
                 Damage-flagged
               </span>
             </div>
-          </div>
+            </CardContent>
+          </Card>
 
           {/* Repair Frequency Trend */}
-          <div className="bg-bg-card border border-border rounded shadow-sm overflow-hidden">
-            <div style={chartBarStyle}>Repair Jobs per Month</div>
-            <div style={{ padding: '1rem', height: 340 }}>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                Repair Jobs per Month
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+            <div style={{ height: 340 }}>
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={repairTrend} margin={{ top: 20, right: 30, left: 10, bottom: 5 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
@@ -543,7 +534,8 @@ export function RepairBreakdown({
                 </LineChart>
               </ResponsiveContainer>
             </div>
-          </div>
+            </CardContent>
+          </Card>
         </div>
       )}
 

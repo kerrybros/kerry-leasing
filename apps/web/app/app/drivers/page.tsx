@@ -13,6 +13,16 @@ import {
 import { computeDriverScore, scoreVariant } from '@/lib/driverScore';
 import { Skeleton } from '@/components/Skeleton';
 import { EmptyState } from '@/components/EmptyState';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 
 interface DriverRow {
   driverId: number;
@@ -43,6 +53,12 @@ function downloadCsv(rows: DriverRow[], orgName: string) {
   URL.revokeObjectURL(url);
 }
 
+function scoreBadgeVariant(variant: string): 'default' | 'secondary' | 'destructive' | 'outline' {
+  if (variant === 'success') return 'default';
+  if (variant === 'warning') return 'secondary';
+  return 'destructive';
+}
+
 export default function DriversPage() {
   const router = useRouter();
   const { organization } = useOrganization();
@@ -56,11 +72,8 @@ export default function DriversPage() {
 
   const driverUtilQuery = useDriverUtilizationQuery(canShow);
   const fleetUnitsQuery = useFleetUnitsQuery();
-  const vehicleUtilQuery = useVehicleUtilizationQuery(
-    canShow ? 'MOTIVE' : undefined
-  );
+  const vehicleUtilQuery = useVehicleUtilizationQuery(canShow ? 'MOTIVE' : undefined);
 
-  // Compute fleet avg MPG for driver score normalization
   const fleetAvgMpg = useMemo(() => {
     if (!fleetUnitsQuery.data || !vehicleUtilQuery.data) return undefined;
     const includedVins = new Set(
@@ -75,16 +88,13 @@ export default function DriversPage() {
     return totalFuel > 0 ? totalMiles / totalFuel : undefined;
   }, [fleetUnitsQuery.data, vehicleUtilQuery.data]);
 
-  // Aggregate driver utilization into per-driver metrics
   const driverRows = useMemo((): DriverRow[] => {
     if (!driverUtilQuery.data) return [];
-
     const grouped = new Map<number, {
       driverId: number; driverName: string;
       totalMiles: number; totalFuel: number;
       totalIdleTime: number; totalDrivingTime: number; totalIdleFuel: number;
     }>();
-
     driverUtilQuery.data.forEach(r => {
       if (!r.driverId) return;
       const existing = grouped.get(r.driverId) || {
@@ -100,21 +110,12 @@ export default function DriversPage() {
       existing.totalIdleFuel += r.idleFuel || 0;
       grouped.set(r.driverId, existing);
     });
-
     return Array.from(grouped.values()).map(d => {
       const engineOn = d.totalIdleTime + d.totalDrivingTime;
       const idlePct = engineOn > 0 ? (d.totalIdleTime / engineOn) * 100 : 0;
       const avgMpg = d.totalFuel > 0 && d.totalMiles > 0 ? d.totalMiles / d.totalFuel : 0;
       const score = computeDriverScore({ idlePct, mpg: avgMpg, fleetAvgMpg });
-      return {
-        driverId: d.driverId,
-        driverName: d.driverName,
-        totalMiles: d.totalMiles,
-        avgMpg,
-        idlePct,
-        idleFuelGal: d.totalIdleFuel,
-        score,
-      };
+      return { driverId: d.driverId, driverName: d.driverName, totalMiles: d.totalMiles, avgMpg, idlePct, idleFuelGal: d.totalIdleFuel, score };
     }).sort((a, b) => b.score - a.score);
   }, [driverUtilQuery.data, fleetAvgMpg]);
 
@@ -122,7 +123,7 @@ export default function DriversPage() {
 
   if (orgSettingsQuery.isLoading) {
     return (
-      <div className="container">
+      <div className="container p-6">
         <Skeleton style={{ height: 300, borderRadius: 8, marginTop: 24 }} />
       </div>
     );
@@ -130,7 +131,7 @@ export default function DriversPage() {
 
   if (!canShow) {
     return (
-      <div className="container" style={{ paddingTop: '2rem' }}>
+      <div className="container p-6 pt-8">
         <EmptyState
           title="Driver Scorecard Unavailable"
           description={
@@ -143,30 +144,31 @@ export default function DriversPage() {
     );
   }
 
+  // Top 3 = best score (already sorted desc), Bottom 3 = worst score
+  const topIds = new Set(driverRows.slice(0, 3).map(r => r.driverId));
+  const bottomIds = new Set(driverRows.slice(-3).map(r => r.driverId));
+
   return (
-    <div className="container" style={{ maxWidth: '1400px' }}>
-      <div className="page-header">
+    <div className="w-full p-6">
+      {/* Page Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
-          <h1 style={{ fontSize: '2rem', fontWeight: '700', marginBottom: '0.5rem' }}>
-            Driver Scorecard
-          </h1>
-          <p style={{ color: 'var(--text-secondary)' }}>{organization?.name}</p>
+          <h1 className="text-3xl font-bold mb-1">Driver Scorecard</h1>
+          <p className="text-muted-foreground text-sm">{organization?.name}</p>
         </div>
-        <div className="page-header-controls">
-          <button
-            className="btn btn-secondary"
-            onClick={() => downloadCsv(driverRows, organization?.name || 'fleet')}
-            disabled={driverRows.length === 0}
-          >
-            Export CSV
-          </button>
-        </div>
+        <Button
+          variant="outline"
+          onClick={() => downloadCsv(driverRows, organization?.name || 'fleet')}
+          disabled={driverRows.length === 0}
+        >
+          Export CSV
+        </Button>
       </div>
 
       {isLoading ? (
-        <div className="table-container mt-4">
+        <div className="flex flex-col gap-1">
           {Array.from({ length: 6 }).map((_, i) => (
-            <Skeleton key={i} style={{ height: 40, borderRadius: 0, marginBottom: 1 }} />
+            <Skeleton key={i} style={{ height: 44, borderRadius: 4 }} />
           ))}
         </div>
       ) : driverRows.length === 0 ? (
@@ -175,46 +177,66 @@ export default function DriversPage() {
           description="No driver utilization records found. Ensure telematics data has been synced."
         />
       ) : (
-        <div className="table-container mt-4">
-          <table className="table w-full">
-            <thead style={{ background: 'var(--primary-dark)', color: 'white', position: 'sticky', top: 0, zIndex: 10 }}>
-              <tr>
-                <th style={{ color: 'white' }}>Driver</th>
-                <th style={{ color: 'white' }}>Miles</th>
-                <th style={{ color: 'white' }}>MPG</th>
-                <th style={{ color: 'white' }}>Idle %</th>
-                <th style={{ color: 'white' }}>Idle Fuel (gal)</th>
-                <th style={{ color: 'white' }}>Score</th>
-              </tr>
-            </thead>
-            <tbody>
-              {driverRows.map(row => {
+        <div className="rounded-lg border border-border overflow-hidden">
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-muted hover:bg-muted">
+                <TableHead className="text-muted-foreground font-semibold uppercase tracking-wide text-xs">#</TableHead>
+                <TableHead className="text-muted-foreground font-semibold uppercase tracking-wide text-xs">Driver</TableHead>
+                <TableHead className="text-muted-foreground font-semibold uppercase tracking-wide text-xs">Miles</TableHead>
+                <TableHead className="text-muted-foreground font-semibold uppercase tracking-wide text-xs">MPG</TableHead>
+                <TableHead className="text-muted-foreground font-semibold uppercase tracking-wide text-xs">Idle %</TableHead>
+                <TableHead className="text-muted-foreground font-semibold uppercase tracking-wide text-xs">Idle Fuel (gal)</TableHead>
+                <TableHead className="text-muted-foreground font-semibold uppercase tracking-wide text-xs">Score</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {driverRows.map((row, idx) => {
                 const variant = scoreVariant(row.score);
-                const badgeClass =
-                  variant === 'success' ? 'bg-green-100 text-green-800 border-green-200' :
-                  variant === 'warning' ? 'bg-amber-100 text-amber-800 border-amber-200' :
-                  'bg-red-100 text-red-800 border-red-200';
+                const isTop = topIds.has(row.driverId) && driverRows.length > 3;
+                const isBottom = bottomIds.has(row.driverId) && driverRows.length > 3;
                 return (
-                  <tr
+                  <TableRow
                     key={row.driverId}
-                    className="cursor-pointer hover:bg-bg-hover transition-colors"
+                    className="cursor-pointer hover:bg-accent/50 transition-colors"
+                    style={{
+                      borderLeft: isTop
+                        ? '3px solid #22c55e'
+                        : isBottom
+                        ? '3px solid #ef4444'
+                        : '3px solid transparent',
+                    }}
                     onClick={() => router.push(`/app/drivers/${row.driverId}`)}
                   >
-                    <td className="font-semibold">{row.driverName}</td>
-                    <td>{Math.round(row.totalMiles).toLocaleString()}</td>
-                    <td>{row.avgMpg.toFixed(2)}</td>
-                    <td className="font-semibold">{row.idlePct.toFixed(2)}%</td>
-                    <td>{Math.round(row.idleFuelGal).toLocaleString()}</td>
-                    <td>
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-bold border ${badgeClass}`}>
+                    <TableCell className="text-muted-foreground text-xs font-mono w-8">{idx + 1}</TableCell>
+                    <TableCell className="font-semibold">{row.driverName}</TableCell>
+                    <TableCell>{Math.round(row.totalMiles).toLocaleString()}</TableCell>
+                    <TableCell>{row.avgMpg.toFixed(2)}</TableCell>
+                    <TableCell className="font-semibold">{row.idlePct.toFixed(2)}%</TableCell>
+                    <TableCell>{Math.round(row.idleFuelGal).toLocaleString()}</TableCell>
+                    <TableCell>
+                      <Badge variant={scoreBadgeVariant(variant)} className="font-bold tabular-nums">
                         {row.score}
-                      </span>
-                    </td>
-                  </tr>
+                      </Badge>
+                    </TableCell>
+                  </TableRow>
                 );
               })}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
+        </div>
+      )}
+
+      {driverRows.length > 3 && (
+        <div className="flex items-center gap-6 mt-3 text-xs text-muted-foreground">
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block w-3 h-3 rounded-sm bg-green-500"></span>
+            Top 3 performers
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block w-3 h-3 rounded-sm bg-red-500"></span>
+            Bottom 3 performers
+          </span>
         </div>
       )}
     </div>

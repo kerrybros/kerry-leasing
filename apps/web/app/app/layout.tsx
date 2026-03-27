@@ -152,7 +152,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             />
           </div>
         </header>
-        <main className="flex-1 min-h-0">
+        <main className="flex-1 min-h-0 min-w-0 overflow-auto">
           {children}
         </main>
       </SidebarInset>

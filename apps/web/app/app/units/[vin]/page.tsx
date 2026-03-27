@@ -6,6 +6,17 @@ import { useParams, useRouter } from 'next/navigation';
 import { useUnitDetailQuery, useVehicleUtilizationQuery, useFleetUnitsQuery, useOrgSettingsQuery } from '@/hooks/useDataQueries';
 import { KpiCard } from '@/components/KpiCard';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/Skeleton';
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -44,37 +55,26 @@ interface MonthlyMetrics {
   idleTimeMinutes: number;
 }
 
-const chartStyles = {
-  bar: {
-    background: 'var(--primary-dark)',
-    fontSize: '1.25rem',
-    fontWeight: '700',
-    color: '#fff',
-    padding: '0.5rem 1rem',
-    borderRadius: '4px 4px 0 0',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    textTransform: 'uppercase' as const,
-    letterSpacing: '0.05em',
-  },
-  container: {
-    background: 'var(--bg-card)',
-    borderRadius: '0 0 4px 4px',
-    padding: '1rem',
-    border: '1px solid var(--border)',
-    borderTop: 'none',
-    height: '300px',
-  }
-};
-
-const tableHeaderStyle = {
-  background: 'var(--primary-dark)',
-  color: 'white',
-  position: 'sticky' as const,
-  top: 0,
-  zIndex: 10,
-};
+function ChartCard({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+          {title}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="h-[260px] pt-0">
+        {children}
+      </CardContent>
+    </Card>
+  );
+}
 
 export default function UnitDetailPage() {
   const params = useParams();
@@ -84,7 +84,6 @@ export default function UnitDetailPage() {
 
   const [activeTab, setActiveTab] = useState<'overview' | 'repairs' | 'telematics'>('overview');
 
-  // Queries
   const unitQuery = useUnitDetailQuery(vin);
   const orgSettingsQuery = useOrgSettingsQuery();
   const fleetUnitsQuery = useFleetUnitsQuery();
@@ -94,7 +93,6 @@ export default function UnitDetailPage() {
   const error = (unitQuery.error as Error | null)?.message ?? null;
   const unitData = unitQuery.data;
 
-  // Build unit info
   const unit = useMemo(() => {
     if (!unitData) return null;
     return {
@@ -113,16 +111,13 @@ export default function UnitDetailPage() {
   const telematicsData = useMemo(() => unitData?.telematics.history ?? [], [unitData]);
   const repairLines: RepairLine[] = useMemo(() => unitData?.repairs.history ?? [], [unitData]);
 
-  // --- Damage detection ---
   const damageLineIds = useMemo(() => {
     const ids = new Set<string>();
-    repairLines.forEach(l => {
-      if (isDamageRepairLine(l)) ids.add(l.revenue_detail_id);
-    });
+    repairLines.forEach(l => { if (isDamageRepairLine(l)) ids.add(l.revenue_detail_id); });
     return ids;
   }, [repairLines]);
+  void damageLineIds;
 
-  // Group repair lines by repair order to count jobs
   const repairJobs = useMemo(() => {
     const map = new Map<string, RepairLine[]>();
     repairLines.forEach(l => {
@@ -136,13 +131,10 @@ export default function UnitDetailPage() {
 
   const damageJobCount = useMemo(() => {
     let count = 0;
-    repairJobs.forEach(lines => {
-      if (lines.some(l => isDamageRepairLine(l))) count++;
-    });
+    repairJobs.forEach(lines => { if (lines.some(l => isDamageRepairLine(l))) count++; });
     return count;
   }, [repairJobs]);
 
-  // Component/system breakdown for this unit
   const repairCategoryBreakdown = useMemo(() => {
     const map = new Map<string, { count: number; isDamage: boolean }>();
     repairLines.forEach(l => {
@@ -159,7 +151,6 @@ export default function UnitDetailPage() {
       .slice(0, 10);
   }, [repairLines]);
 
-  // Deduplicated repair rows for display (one per repair order)
   const displayRepairs = useMemo(() => {
     const seen = new Set<string>();
     return repairLines
@@ -172,7 +163,6 @@ export default function UnitDetailPage() {
       .sort((a, b) => b.invoice_date.localeCompare(a.invoice_date));
   }, [repairLines]);
 
-  // --- Overview Summary (Last 30 Days) ---
   const overviewSummary = useMemo(() => {
     const today = new Date();
     const cutOff = new Date();
@@ -187,7 +177,6 @@ export default function UnitDetailPage() {
     return { totalMiles, avgMpg, idleHours };
   }, [telematicsData]);
 
-  // --- Monthly Metrics for Telematics Tab ---
   const monthlyMetrics = useMemo((): MonthlyMetrics[] => {
     const monthlyMap = new Map<string, {
       totalMiles: number; totalIdleTime: number; totalFuel: number;
@@ -238,7 +227,6 @@ export default function UnitDetailPage() {
     ? ((totals.totalIdleTime * 60) / (telematicsData.length * 86400) * 100).toFixed(2)
     : '0.00';
 
-  // --- vs. Fleet Average ---
   const fleetAvg = useMemo(() => {
     if (!fleetUnitsQuery.data || !vehicleUtilQuery.data) return null;
     const includedVins = new Set(
@@ -260,32 +248,29 @@ export default function UnitDetailPage() {
     };
   }, [fleetUnitsQuery.data, vehicleUtilQuery.data, vin]);
 
-  // vs-fleet-average change indicators
   const vsFleet = useMemo(() => {
     if (!fleetAvg) return null;
     const unitMpgDiff = overviewSummary.avgMpg - fleetAvg.avgMpg;
     const unitIdlePct = parseFloat(overallIdlePercentage);
     const unitIdleDiff = unitIdlePct - fleetAvg.idlePct;
     return {
-      mpg: {
-        value: `${unitMpgDiff >= 0 ? '+' : ''}${unitMpgDiff.toFixed(2)} vs fleet avg`,
-        positive: unitMpgDiff >= 0,
-      },
-      idlePct: {
-        value: `${unitIdleDiff >= 0 ? '+' : ''}${unitIdleDiff.toFixed(2)}% vs fleet avg`,
-        positive: unitIdleDiff <= 0, // lower idle is better
-      },
+      mpg: { value: `${unitMpgDiff >= 0 ? '+' : ''}${unitMpgDiff.toFixed(2)} vs fleet avg`, positive: unitMpgDiff >= 0 },
+      idlePct: { value: `${unitIdleDiff >= 0 ? '+' : ''}${unitIdleDiff.toFixed(2)}% vs fleet avg`, positive: unitIdleDiff <= 0 },
     };
   }, [fleetAvg, overviewSummary.avgMpg, overallIdlePercentage]);
 
+  const chartTooltipStyle = {
+    contentStyle: { background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '6px' },
+  };
+
   if (loading) {
     return (
-      <div className="container">
+      <div className="container p-6">
         <div className="flex flex-col gap-4 mt-4">
           <Skeleton style={{ height: 32, width: '40%', borderRadius: 8 }} />
           <Skeleton style={{ height: 20, width: '25%', borderRadius: 8 }} />
           <div className="grid grid-cols-3 gap-4 mt-4">
-            {[1,2,3].map(i => <Skeleton key={i} style={{ height: 100, borderRadius: 8 }} />)}
+            {[1, 2, 3].map(i => <Skeleton key={i} style={{ height: 100, borderRadius: 8 }} />)}
           </div>
           <Skeleton style={{ height: 300, borderRadius: 8 }} />
         </div>
@@ -295,27 +280,26 @@ export default function UnitDetailPage() {
 
   if (error || !unit) {
     return (
-      <div className="container">
-        <button onClick={() => router.back()} className="btn btn-secondary mb-4">
+      <div className="container p-6">
+        <Button variant="outline" onClick={() => router.back()} className="mb-4">
           Back to Fleet
-        </button>
-        <div className="error">{error || 'Unit not found'}</div>
+        </Button>
+        <div className="text-destructive">{error || 'Unit not found'}</div>
       </div>
     );
   }
 
   return (
-    <div className="container">
-      <div style={{ marginBottom: '2rem' }}>
-        <button onClick={() => router.back()} className="btn btn-secondary mb-4" style={{ fontSize: '0.875rem' }}>
+    <div className="container p-6">
+      {/* Header */}
+      <div className="mb-6">
+        <Button variant="outline" size="sm" onClick={() => router.back()} className="mb-4">
           Back to Fleet
-        </button>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        </Button>
+        <div className="flex justify-between items-center">
           <div>
-            <h1 style={{ fontSize: '2rem', fontWeight: '700', marginBottom: '0.5rem' }}>
-              Unit {unit.unitNumber}
-            </h1>
-            <div style={{ display: 'flex', gap: '1rem', color: 'var(--text-secondary)' }}>
+            <h1 className="text-3xl font-bold mb-1">Unit {unit.unitNumber}</h1>
+            <div className="flex gap-3 text-muted-foreground text-sm">
               <span className="font-mono">{unit.vin}</span>
               <span>•</span>
               <span>{unit.year} {unit.make} {unit.model}</span>
@@ -324,17 +308,17 @@ export default function UnitDetailPage() {
         </div>
       </div>
 
-      <div className="tabs">
-        {(['overview', 'repairs', 'telematics'] as const).map(tab => (
-          <button key={tab} className={`tab ${activeTab === tab ? 'active' : ''}`} onClick={() => setActiveTab(tab)}>
-            {tab.charAt(0).toUpperCase() + tab.slice(1)}
-          </button>
-        ))}
-      </div>
+      {/* Tabs */}
+      <Tabs value={activeTab} onValueChange={v => setActiveTab(v as typeof activeTab)}>
+        <TabsList className="mb-6">
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="repairs">Repairs</TabsTrigger>
+          <TabsTrigger value="telematics">Telematics</TabsTrigger>
+        </TabsList>
 
-      {activeTab === 'overview' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '1.5rem' }}>
+        {/* OVERVIEW TAB */}
+        <TabsContent value="overview" className="flex flex-col gap-6">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
             <KpiCard
               label="Total Miles (30d)"
               value={telematicsData.length > 0 ? `${Math.round(overviewSummary.totalMiles).toLocaleString()} mi` : '—'}
@@ -348,10 +332,7 @@ export default function UnitDetailPage() {
               label="Idle Hours (30d)"
               value={telematicsData.length > 0 ? `${Math.round(overviewSummary.idleHours)} hrs` : '—'}
             />
-            <KpiCard
-              label="Total Repair Jobs"
-              value={repairJobs.size}
-            />
+            <KpiCard label="Total Repair Jobs" value={repairJobs.size} />
             {damageJobCount > 0 && (
               <KpiCard
                 label="Damage Jobs"
@@ -362,45 +343,47 @@ export default function UnitDetailPage() {
             )}
           </div>
 
-          <div className="card">
-            <h3 style={{ fontSize: '1.25rem', marginBottom: '1rem', fontWeight: '600' }}>Recent Repairs</h3>
-            <div className="table-container" style={{ border: 'none', borderRadius: 0 }}>
-              <table className="table">
-                <thead>
-                  <tr style={{ background: 'var(--bg-tertiary)', borderBottom: '2px solid var(--border)' }}>
-                    <th>Date</th>
-                    <th>RO #</th>
-                    <th>Invoice #</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base font-semibold">Recent Repairs</CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-muted hover:bg-muted">
+                    <TableHead className="text-muted-foreground font-semibold uppercase tracking-wide text-xs">Date</TableHead>
+                    <TableHead className="text-muted-foreground font-semibold uppercase tracking-wide text-xs">RO #</TableHead>
+                    <TableHead className="text-muted-foreground font-semibold uppercase tracking-wide text-xs">Invoice #</TableHead>
+                    <TableHead className="text-muted-foreground font-semibold uppercase tracking-wide text-xs">Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {displayRepairs.slice(0, 5).map(r => (
-                    <tr key={r.revenue_detail_id}>
-                      <td>{new Date(r.invoice_date).toLocaleDateString()}</td>
-                      <td>{r.repair_order || 'N/A'}</td>
-                      <td>{r.invoice_number || 'N/A'}</td>
-                      <td>
+                    <TableRow key={r.revenue_detail_id}>
+                      <TableCell>{new Date(r.invoice_date).toLocaleDateString()}</TableCell>
+                      <TableCell>{r.repair_order || 'N/A'}</TableCell>
+                      <TableCell>{r.invoice_number || 'N/A'}</TableCell>
+                      <TableCell>
                         <div className="flex items-center gap-1">
-                          <span className="badge badge-gray">Completed</span>
+                          <Badge variant="secondary">Completed</Badge>
                           {isDamageRepairLine(r) && <Badge variant="destructive">Damage</Badge>}
                         </div>
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   ))}
                   {displayRepairs.length === 0 && (
-                    <tr><td colSpan={4} style={{ textAlign: 'center', padding: '1rem' }}>No recent repairs</td></tr>
+                    <TableRow>
+                      <TableCell colSpan={4} className="text-center text-muted-foreground py-6">No recent repairs</TableCell>
+                    </TableRow>
                   )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </TabsContent>
 
-      {activeTab === 'repairs' && (
-        <div className="flex flex-col gap-6">
-          {/* Damage Summary Card */}
+        {/* REPAIRS TAB */}
+        <TabsContent value="repairs" className="flex flex-col gap-6">
           {damageJobCount > 0 && (
             <div className="bg-destructive/5 border border-destructive/25 rounded-lg p-4">
               <h3 className="font-semibold text-destructive mb-2">
@@ -420,189 +403,179 @@ export default function UnitDetailPage() {
             </div>
           )}
 
-          {/* Full Repair Table */}
-          <div className="table-container">
-            <table className="table">
-              <thead>
-                <tr style={{ background: 'var(--primary-dark)', color: 'white' }}>
-                  <th style={{ color: 'white' }}>Date</th>
-                  <th style={{ color: 'white' }}>Repair Order #</th>
-                  <th style={{ color: 'white' }}>Invoice #</th>
-                  <th style={{ color: 'white' }}>Category</th>
-                  <th style={{ color: 'white' }}>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {displayRepairs.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-secondary)' }}>
-                      No repair history found
-                    </td>
-                  </tr>
-                ) : (
-                  displayRepairs.map(r => (
-                    <tr key={r.revenue_detail_id}
-                      className={isDamageRepairLine(r) ? 'bg-destructive/5' : ''}>
-                      <td>{new Date(r.invoice_date).toLocaleDateString()}</td>
-                      <td>{r.repair_order || 'N/A'}</td>
-                      <td>{r.invoice_number || 'N/A'}</td>
-                      <td className="text-xs text-muted-foreground">
-                        {r.component || r.system
-                          ? `${r.component || '?'} / ${r.system || '?'}`
-                          : '—'}
-                      </td>
-                      <td>
-                        <div className="flex items-center gap-1">
-                          <span className="badge badge-gray">Completed</span>
-                          {isDamageRepairLine(r) && <Badge variant="destructive">Damage</Badge>}
-                        </div>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+          <Card>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-muted hover:bg-muted">
+                    <TableHead className="text-muted-foreground font-semibold uppercase tracking-wide text-xs">Date</TableHead>
+                    <TableHead className="text-muted-foreground font-semibold uppercase tracking-wide text-xs">Repair Order #</TableHead>
+                    <TableHead className="text-muted-foreground font-semibold uppercase tracking-wide text-xs">Invoice #</TableHead>
+                    <TableHead className="text-muted-foreground font-semibold uppercase tracking-wide text-xs">Category</TableHead>
+                    <TableHead className="text-muted-foreground font-semibold uppercase tracking-wide text-xs">Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {displayRepairs.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={5} className="text-center text-muted-foreground py-8">No repair history found</TableCell>
+                    </TableRow>
+                  ) : (
+                    displayRepairs.map(r => (
+                      <TableRow key={r.revenue_detail_id} className={isDamageRepairLine(r) ? 'bg-destructive/5' : ''}>
+                        <TableCell>{new Date(r.invoice_date).toLocaleDateString()}</TableCell>
+                        <TableCell>{r.repair_order || 'N/A'}</TableCell>
+                        <TableCell>{r.invoice_number || 'N/A'}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {r.component || r.system ? `${r.component || '?'} / ${r.system || '?'}` : '—'}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-1">
+                            <Badge variant="secondary">Completed</Badge>
+                            {isDamageRepairLine(r) && <Badge variant="destructive">Damage</Badge>}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
 
-          {/* Component/System Breakdown Chart */}
           {repairCategoryBreakdown.length > 0 && (
-            <div className="bg-bg-card border border-border rounded shadow-sm overflow-hidden">
-              <div style={chartStyles.bar}>Component / System Breakdown</div>
-              <div style={{ padding: '1rem', height: 320 }}>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                  Component / System Breakdown
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="h-[320px] pt-0">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={repairCategoryBreakdown} layout="vertical" margin={{ top: 4, right: 50, left: 8, bottom: 4 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
-                    <XAxis type="number" stroke="var(--text-secondary)" fontSize={11} tickLine={false} axisLine={false} />
-                    <YAxis type="category" dataKey="category" width={200} stroke="var(--text-secondary)" fontSize={11} tickLine={false} axisLine={false} tick={{ fill: 'var(--text-secondary)' }} />
-                    <Tooltip contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 4 }} formatter={(v: any) => [v, 'Line Items']} />
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" horizontal={false} />
+                    <XAxis type="number" stroke="hsl(var(--muted-foreground))" fontSize={11} tickLine={false} axisLine={false} />
+                    <YAxis type="category" dataKey="category" width={200} stroke="hsl(var(--muted-foreground))" fontSize={11} tickLine={false} axisLine={false} tick={{ fill: 'hsl(var(--muted-foreground))' }} />
+                    <Tooltip {...chartTooltipStyle} formatter={(v: unknown) => [v as string, 'Line Items'] as [string, string]} />
                     <Bar dataKey="count" radius={[0, 3, 3, 0]} isAnimationActive={false} fill="#d9a528">
-                      <LabelList dataKey="count" position="right" style={{ fill: 'var(--text-secondary)', fontSize: 11 }} />
+                      <LabelList dataKey="count" position="right" style={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }} />
                     </Bar>
                   </BarChart>
                 </ResponsiveContainer>
-              </div>
-            </div>
+              </CardContent>
+            </Card>
           )}
-        </div>
-      )}
+        </TabsContent>
 
-      {activeTab === 'telematics' && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
-          {/* LEFT COLUMN - CHARTS */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-            {/* MPG Chart */}
-            <div>
-              <div style={chartStyles.bar}>MPG</div>
-              <div style={chartStyles.container}>
+        {/* TELEMATICS TAB */}
+        <TabsContent value="telematics">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* LEFT — CHARTS */}
+            <div className="flex flex-col gap-4">
+              <ChartCard title="MPG">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={monthlyMetrics}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-                    <XAxis dataKey="month" stroke="var(--text-secondary)" fontSize={12} tickLine={false} axisLine={false} />
-                    <YAxis stroke="var(--text-secondary)" fontSize={12} tickLine={false} axisLine={false} domain={['auto', 'auto']} />
-                    <Tooltip contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '4px' }} />
+                  <LineChart data={monthlyMetrics} margin={{ top: 20, right: 30, left: 10, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                    <XAxis dataKey="month" stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} />
+                    <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} domain={['auto', 'auto']} />
+                    <Tooltip {...chartTooltipStyle} />
                     <Line type="monotone" dataKey="avgMpg" stroke="#d9a528" strokeWidth={4} dot={{ fill: '#d9a528', r: 6, strokeWidth: 0 }} activeDot={{ r: 8 }}>
-                      <LabelList dataKey="avgMpg" position="top" offset={10} style={{ fill: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }} />
+                      <LabelList dataKey="avgMpg" position="top" offset={10} style={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11, fontWeight: 600 }} />
                     </Line>
                   </LineChart>
                 </ResponsiveContainer>
-              </div>
-            </div>
+              </ChartCard>
 
-            {/* Idle % Chart */}
-            <div>
-              <div style={chartStyles.bar}>Idle %</div>
-              <div style={chartStyles.container}>
+              <ChartCard title="Idle %">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={monthlyMetrics}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-                    <XAxis dataKey="month" stroke="var(--text-secondary)" fontSize={12} tickLine={false} axisLine={false} />
-                    <YAxis stroke="var(--text-secondary)" fontSize={12} tickLine={false} axisLine={false} />
-                    <Tooltip contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '4px' }} />
+                  <LineChart data={monthlyMetrics} margin={{ top: 20, right: 30, left: 10, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                    <XAxis dataKey="month" stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} />
+                    <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} />
+                    <Tooltip {...chartTooltipStyle} />
                     <Line type="monotone" dataKey="idlePercentage" stroke="#d9a528" strokeWidth={4} dot={{ fill: '#d9a528', r: 6, strokeWidth: 0 }} activeDot={{ r: 8 }}>
-                      <LabelList dataKey="idlePercentage" position="top" offset={10} formatter={(v: any) => `${v}%`} style={{ fill: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }} />
+                      <LabelList dataKey="idlePercentage" position="top" offset={10} formatter={(v: unknown) => `${v}%`} style={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11, fontWeight: 600 }} />
                     </Line>
                   </LineChart>
                 </ResponsiveContainer>
-              </div>
-            </div>
+              </ChartCard>
 
-            {/* Miles Driven Chart */}
-            <div>
-              <div style={chartStyles.bar}>Miles Driven</div>
-              <div style={chartStyles.container}>
+              <ChartCard title="Miles Driven">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={monthlyMetrics}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-                    <XAxis dataKey="month" stroke="var(--text-secondary)" fontSize={12} tickLine={false} axisLine={false} />
-                    <YAxis stroke="var(--text-secondary)" fontSize={12} tickLine={false} axisLine={false} />
-                    <Tooltip contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '4px' }} />
+                  <LineChart data={monthlyMetrics} margin={{ top: 20, right: 30, left: 10, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                    <XAxis dataKey="month" stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} />
+                    <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} />
+                    <Tooltip {...chartTooltipStyle} />
                     <Line type="monotone" dataKey="totalMiles" stroke="#d9a528" strokeWidth={4} dot={{ fill: '#d9a528', r: 6, strokeWidth: 0 }} activeDot={{ r: 8 }}>
-                      <LabelList dataKey="totalMiles" position="top" offset={10} formatter={(v: any) => typeof v === 'number' && v >= 1000 ? `${(v / 1000).toFixed(0)}K` : v} style={{ fill: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }} />
+                      <LabelList dataKey="totalMiles" position="top" offset={10} formatter={(v: unknown) => typeof v === 'number' && v >= 1000 ? `${(v / 1000).toFixed(0)}K` : String(v)} style={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11, fontWeight: 600 }} />
                     </Line>
                   </LineChart>
                 </ResponsiveContainer>
-              </div>
-            </div>
-          </div>
-
-          {/* RIGHT COLUMN - TABLES + KPI CARDS */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-            {/* vs. Fleet Average KPI Cards */}
-            <div className="grid grid-cols-2 gap-3">
-              <KpiCard
-                label="Avg MPG (all time)"
-                value={totals.totalFuel > 0 ? overallAvgMpg : '—'}
-                change={vsFleet?.mpg}
-              />
-              <KpiCard
-                label="Idle % (all time)"
-                value={telematicsData.length > 0 ? `${overallIdlePercentage}%` : '—'}
-                variant={parseFloat(overallIdlePercentage) > 30 ? 'warning' : 'default'}
-                change={vsFleet?.idlePct}
-              />
+              </ChartCard>
             </div>
 
-            {/* Monthly Summary Table */}
-            <div>
-              <div style={chartStyles.bar}>Monthly Summary</div>
-              <div className="table-container" style={{ borderTopLeftRadius: 0, borderTopRightRadius: 0, borderTop: 'none' }}>
-                <table className="table">
-                  <thead style={tableHeaderStyle}>
-                    <tr>
-                      <th style={{ color: 'white' }}>Month</th>
-                      <th style={{ color: 'white' }}>MPG</th>
-                      <th style={{ color: 'white' }}>Miles</th>
-                      <th style={{ color: 'white' }}>Idle %</th>
-                      <th style={{ color: 'white' }}>Idle Fuel</th>
-                      <th style={{ color: 'white' }}>Idle (mins)</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {monthlyMetrics.map(month => (
-                      <tr key={month.monthKey}>
-                        <td style={{ fontWeight: '600' }}>{month.month}</td>
-                        <td>{month.avgMpg.toFixed(2)}</td>
-                        <td>{month.totalMiles.toLocaleString()}</td>
-                        <td style={{ fontWeight: '600' }}>{month.idlePercentage.toFixed(2)}%</td>
-                        <td>{month.idleFuel.toLocaleString()}</td>
-                        <td>{month.idleTimeMinutes.toLocaleString()}</td>
-                      </tr>
-                    ))}
-                    <tr style={{ background: 'var(--primary-dark)', color: 'white', fontWeight: '700' }}>
-                      <td style={{ color: 'white' }}>Total</td>
-                      <td style={{ color: 'white' }}>{overallAvgMpg}</td>
-                      <td style={{ color: 'white' }}>{totals.totalMiles.toLocaleString()}</td>
-                      <td style={{ color: 'white' }}>{overallIdlePercentage}%</td>
-                      <td style={{ color: 'white' }}>{totals.totalIdleFuel.toLocaleString()}</td>
-                      <td style={{ color: 'white' }}>{totals.totalIdleTime.toLocaleString()}</td>
-                    </tr>
-                  </tbody>
-                </table>
+            {/* RIGHT — KPI CARDS + MONTHLY TABLE */}
+            <div className="flex flex-col gap-4">
+              <div className="grid grid-cols-2 gap-3">
+                <KpiCard
+                  label="Avg MPG (all time)"
+                  value={totals.totalFuel > 0 ? overallAvgMpg : '—'}
+                  change={vsFleet?.mpg}
+                />
+                <KpiCard
+                  label="Idle % (all time)"
+                  value={telematicsData.length > 0 ? `${overallIdlePercentage}%` : '—'}
+                  variant={parseFloat(overallIdlePercentage) > 30 ? 'warning' : 'default'}
+                  change={vsFleet?.idlePct}
+                />
               </div>
+
+              <Card className="flex flex-col flex-1 overflow-hidden">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                    Monthly Summary
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="p-0 flex-1 overflow-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-muted hover:bg-muted">
+                        <TableHead className="text-muted-foreground font-semibold uppercase tracking-wide text-xs">Month</TableHead>
+                        <TableHead className="text-muted-foreground font-semibold uppercase tracking-wide text-xs">MPG</TableHead>
+                        <TableHead className="text-muted-foreground font-semibold uppercase tracking-wide text-xs">Miles</TableHead>
+                        <TableHead className="text-muted-foreground font-semibold uppercase tracking-wide text-xs">Idle %</TableHead>
+                        <TableHead className="text-muted-foreground font-semibold uppercase tracking-wide text-xs">Idle Fuel</TableHead>
+                        <TableHead className="text-muted-foreground font-semibold uppercase tracking-wide text-xs">Idle (min)</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {monthlyMetrics.map(month => (
+                        <TableRow key={month.monthKey}>
+                          <TableCell className="font-semibold">{month.month}</TableCell>
+                          <TableCell>{month.avgMpg.toFixed(2)}</TableCell>
+                          <TableCell>{month.totalMiles.toLocaleString()}</TableCell>
+                          <TableCell className="font-semibold">{month.idlePercentage.toFixed(2)}%</TableCell>
+                          <TableCell>{month.idleFuel.toLocaleString()}</TableCell>
+                          <TableCell>{month.idleTimeMinutes.toLocaleString()}</TableCell>
+                        </TableRow>
+                      ))}
+                      <TableRow className="bg-primary/10 font-bold border-t-2">
+                        <TableCell className="font-bold">Total</TableCell>
+                        <TableCell className="font-bold">{overallAvgMpg}</TableCell>
+                        <TableCell className="font-bold">{totals.totalMiles.toLocaleString()}</TableCell>
+                        <TableCell className="font-bold">{overallIdlePercentage}%</TableCell>
+                        <TableCell className="font-bold">{totals.totalIdleFuel.toLocaleString()}</TableCell>
+                        <TableCell className="font-bold">{totals.totalIdleTime.toLocaleString()}</TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
             </div>
           </div>
-        </div>
-      )}
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
