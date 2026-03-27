@@ -1,73 +1,67 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useUser } from '@clerk/nextjs';
+import { Sun, Moon } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 
 export function ThemeToggle() {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [mounted, setMounted] = useState(false);
+  const { user, isLoaded } = useUser();
 
   useEffect(() => {
     setMounted(true);
-    // Load theme from localStorage
-    const savedTheme = localStorage.getItem('theme') as 'dark' | 'light' | null;
-    if (savedTheme) {
-      setTheme(savedTheme);
-      document.documentElement.setAttribute('data-theme', savedTheme);
-    } else {
-      document.documentElement.setAttribute('data-theme', 'dark');
-    }
+
+    // Priority: Clerk metadata → localStorage → OS preference → dark default
+    const clerkTheme = isLoaded && user?.unsafeMetadata?.theme as string | undefined;
+    const localTheme = localStorage.getItem('theme') as 'dark' | 'light' | null;
+    const osPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+    const resolved: 'dark' | 'light' =
+      (clerkTheme === 'dark' || clerkTheme === 'light' ? clerkTheme : null) ??
+      localTheme ??
+      (osPrefersDark ? 'dark' : 'light');
+
+    applyTheme(resolved);
+    setTheme(resolved);
+  // Only run on mount — Clerk user data may not be ready yet on first render
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const toggleTheme = () => {
-    const newTheme = theme === 'dark' ? 'light' : 'dark';
-    setTheme(newTheme);
-    localStorage.setItem('theme', newTheme);
-    document.documentElement.setAttribute('data-theme', newTheme);
+  const applyTheme = (t: 'dark' | 'light') => {
+    document.documentElement.setAttribute('data-theme', t);
+    document.documentElement.classList.toggle('dark', t === 'dark');
+    localStorage.setItem('theme', t);
   };
 
-  // Don't render until mounted to avoid hydration mismatch
+  const toggleTheme = async () => {
+    const newTheme = theme === 'dark' ? 'light' : 'dark';
+    setTheme(newTheme);
+    applyTheme(newTheme);
+
+    if (user) {
+      try {
+        await user.update({ unsafeMetadata: { ...user.unsafeMetadata, theme: newTheme } });
+      } catch {
+        // Non-critical — preference is already saved in localStorage
+      }
+    }
+  };
+
   if (!mounted) {
-    return <div className="w-10 h-10" />;
+    return <div className="w-9 h-9" />;
   }
 
   return (
-    <button
+    <Button
+      variant="ghost"
+      size="icon"
       onClick={toggleTheme}
-      className="theme-toggle"
-      aria-label="Toggle theme"
-      title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+      aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+      className="text-muted-foreground hover:text-foreground"
     >
-      {theme === 'dark' ? (
-        // Sun icon for light mode
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          fill="none"
-          viewBox="0 0 24 24"
-          strokeWidth={2}
-          stroke="currentColor"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z"
-          />
-        </svg>
-      ) : (
-        // Moon icon for dark mode
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          fill="none"
-          viewBox="0 0 24 24"
-          strokeWidth={2}
-          stroke="currentColor"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z"
-          />
-        </svg>
-      )}
-    </button>
+      {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+    </Button>
   );
 }

@@ -1,4 +1,5 @@
-import React from 'react';
+import { Skeleton as ShadcnSkeleton } from '@/components/ui/skeleton';
+import { cn } from '@/lib/utils';
 
 export function Skeleton({
   className,
@@ -7,7 +8,7 @@ export function Skeleton({
   className?: string;
   style?: React.CSSProperties;
 }) {
-  return <div className={`skeleton ${className || ''}`} style={style} aria-busy="true" />;
+  return <ShadcnSkeleton className={cn('h-full w-full', className)} style={style} />;
 }
 
 export function SkeletonLines({
@@ -20,12 +21,10 @@ export function SkeletonLines({
   return (
     <div className={className} aria-busy="true">
       {Array.from({ length: lines }).map((_, i) => (
-        <div
+        <ShadcnSkeleton
           key={i}
-          className="skeleton"
+          className="h-3 rounded"
           style={{
-            height: 12,
-            borderRadius: 6,
             marginTop: i === 0 ? 0 : 10,
             width: `${Math.max(30, 90 - i * 10)}%`,
           }}
@@ -34,4 +33,3 @@ export function SkeletonLines({
     </div>
   );
 }
-

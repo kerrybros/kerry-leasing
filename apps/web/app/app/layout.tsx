@@ -1,143 +1,161 @@
 'use client';
 
+import { useEffect } from 'react';
 import { UserButton, OrganizationSwitcher, useAuth } from '@clerk/nextjs';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useState } from 'react';
+import { useApiClient } from '@/hooks/useApiClient';
+import { useOrgSettings } from '@/hooks/useOrgSettings';
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarHeader,
+  SidebarInset,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarProvider,
+  SidebarRail,
+  SidebarTrigger,
+} from '@/components/ui/sidebar';
+import { Truck, Settings, Users } from 'lucide-react';
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { has } = useAuth();
   const pathname = usePathname();
   const isAdmin = has && has({ role: 'org:admin' });
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const { getApi } = useApiClient();
+  const { orgSettings, loadOrgSettings } = useOrgSettings(getApi);
+
+  useEffect(() => {
+    loadOrgSettings();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const showDrivers =
+    orgSettings.tracksDrivers && orgSettings.telematicsProvider === 'MOTIVE';
+
+  const navItems = [
+    {
+      href: '/app/fleet',
+      label: 'Fleet',
+      icon: Truck,
+      active: !!pathname?.includes('/fleet') || !!pathname?.includes('/units'),
+    },
+    {
+      href: '/app/drivers',
+      label: 'Drivers',
+      icon: Users,
+      active: !!pathname?.includes('/drivers'),
+      hidden: !showDrivers,
+    },
+    {
+      href: '/app/admin/service-plan',
+      label: 'Admin',
+      icon: Settings,
+      active: !!pathname?.includes('/admin'),
+      hidden: !isAdmin,
+    },
+  ].filter((item) => !item.hidden);
 
   return (
-    <div className="min-h-screen">
-      <nav className="bg-bg-secondary shadow-md border-b border-border sticky top-0 z-50">
-        <div className="px-4 sm:px-6 lg:px-8 py-2">
-          <div className="flex justify-between items-center">
-            {/* Left side: Logos + Action buttons */}
-            <div className="flex items-center gap-4">
-              {/* Mobile menu button */}
-              <button
-                onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-                className="lg:hidden p-2 rounded-lg bg-bg-tertiary border border-border text-text-primary hover:bg-bg-hover transition-colors"
-                aria-label="Toggle menu"
-              >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  {mobileMenuOpen ? (
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  ) : (
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                  )}
-                </svg>
-              </button>
-
-              {/* Logos */}
-              <Link href="/app" className="no-underline">
-                <div className="flex items-center gap-2 sm:gap-4 px-2 py-0.5 bg-white rounded-lg cursor-pointer">
-                  <Image
-                    src="/logos/Kerry Leasing Logo.png"
-                    alt="Kerry Leasing"
-                    width={220}
-                    height={75}
-                    className="h-10 sm:h-12 md:h-16 w-auto object-contain"
-                  />
-                  <div className="w-px h-10 sm:h-12 md:h-16 bg-gray-200" />
-                  <Image
-                    src="/logos/Kerry Brothers Truck Repair Logo Transpaent.png"
-                    alt="Kerry Brothers Truck Repair"
-                    width={280}
-                    height={95}
-                    className="h-12 sm:h-14 md:h-20 w-auto object-contain"
-                  />
-                </div>
-              </Link>
-            </div>
-
-            {/* Desktop navigation */}
-            <div className="hidden lg:flex items-center gap-6">
-              <Link
-                href="/app/fleet"
-                className={`no-underline text-base font-medium transition-colors ${
-                  pathname?.includes('/fleet') 
-                    ? 'text-primary font-bold' 
-                    : 'text-text-primary hover:text-primary'
-                }`}
-              >
-                Fleet
-              </Link>
-
-              {isAdmin && (
-                <Link
-                  href="/app/admin/service-plan"
-                  className={`no-underline text-base font-medium transition-colors ${
-                    pathname?.includes('/admin') 
-                      ? 'text-primary font-bold' 
-                      : 'text-text-primary hover:text-primary'
-                  }`}
-                >
-                  Admin
-                </Link>
-              )}
-
-              <ThemeToggle />
-              <OrganizationSwitcher 
-                hidePersonal={true}
-                afterSelectOrganizationUrl="/app/fleet"
+    <SidebarProvider>
+      <Sidebar collapsible="icon">
+        {/* Logo */}
+        <SidebarHeader className="py-3 px-2">
+          <Link href="/app/fleet" className="no-underline block">
+            {/* Expanded logo */}
+            <div className="group-data-[collapsible=icon]:hidden flex items-center px-2 py-1.5 bg-white rounded-lg">
+              <Image
+                src="/logos/Kerry Leasing Logo.png"
+                alt="Kerry Leasing"
+                width={152}
+                height={52}
+                className="h-8 w-auto object-contain"
+                priority
               />
-              <UserButton afterSignOutUrl="/sign-in" />
             </div>
+            {/* Collapsed icon */}
+            <div className="hidden group-data-[collapsible=icon]:flex items-center justify-center w-8 h-8 bg-white rounded-md">
+              <span className="text-xs font-bold text-[#b8860b] leading-none">KL</span>
+            </div>
+          </Link>
+        </SidebarHeader>
 
-            {/* Mobile right side - just theme toggle and user */}
-            <div className="flex lg:hidden items-center gap-3">
-              <ThemeToggle />
-              <UserButton afterSignOutUrl="/sign-in" />
-            </div>
+        {/* Nav items */}
+        <SidebarContent>
+          <SidebarGroup>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {navItems.map((item) => (
+                  <SidebarMenuItem key={item.href}>
+                    <SidebarMenuButton
+                      render={<Link href={item.href} />}
+                      isActive={item.active}
+                      tooltip={item.label}
+                    >
+                      <item.icon />
+                      <span>{item.label}</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        </SidebarContent>
+
+        {/* Footer: org switcher + user controls */}
+        <SidebarFooter className="border-t border-sidebar-border pb-3">
+          {/* OrganizationSwitcher — hidden when collapsed to icon mode */}
+          <div className="group-data-[collapsible=icon]:hidden px-1 pt-1">
+            <OrganizationSwitcher
+              hidePersonal={true}
+              afterSelectOrganizationUrl="/app/fleet"
+              appearance={{
+                elements: {
+                  rootBox: 'w-full',
+                  organizationSwitcherTrigger:
+                    'w-full justify-start rounded-md px-2 py-1.5 text-sm text-sidebar-foreground hover:bg-sidebar-accent transition-colors',
+                },
+              }}
+            />
           </div>
 
-          {/* Mobile menu */}
-          {mobileMenuOpen && (
-            <div className="lg:hidden mt-4 pb-4 border-t border-border pt-4 space-y-3">
-              <Link
-                href="/app/fleet"
-                onClick={() => setMobileMenuOpen(false)}
-                className={`block px-4 py-3 rounded-lg no-underline text-base font-medium transition-colors ${
-                  pathname?.includes('/fleet')
-                    ? 'bg-primary text-white'
-                    : 'bg-bg-tertiary text-text-primary hover:bg-bg-hover'
-                }`}
-              >
-                Fleet
-              </Link>
-
-              {isAdmin && (
-                <Link
-                  href="/app/admin/service-plan"
-                  onClick={() => setMobileMenuOpen(false)}
-                  className={`block px-4 py-3 rounded-lg no-underline text-base font-medium transition-colors ${
-                    pathname?.includes('/admin')
-                      ? 'bg-primary text-white'
-                      : 'bg-bg-tertiary text-text-primary hover:bg-bg-hover'
-                  }`}
-                >
-                  Admin
-                </Link>
-              )}
-
-              <div className="px-4 pt-2">
-                <OrganizationSwitcher 
-                  hidePersonal={true}
-                  afterSelectOrganizationUrl="/app/fleet"
-                />
-              </div>
+          {/* Theme + User — always visible */}
+          <div className="flex items-center gap-1 px-1">
+            <div className="group-data-[collapsible=icon]:hidden">
+              <ThemeToggle />
             </div>
-          )}
-        </div>
-      </nav>
-      <main>{children}</main>
-    </div>
+            <UserButton afterSignOutUrl="/sign-in" />
+          </div>
+        </SidebarFooter>
+
+        <SidebarRail />
+      </Sidebar>
+
+      <SidebarInset>
+        {/* Mobile top bar with hamburger trigger */}
+        <header className="flex items-center h-12 px-4 border-b border-border bg-background lg:hidden sticky top-0 z-40">
+          <SidebarTrigger />
+          <div className="ml-3 flex items-center bg-white rounded-md px-2 py-1">
+            <Image
+              src="/logos/Kerry Leasing Logo.png"
+              alt="Kerry Leasing"
+              width={120}
+              height={40}
+              className="h-7 w-auto object-contain"
+            />
+          </div>
+        </header>
+        <main className="flex-1 min-h-0">
+          {children}
+        </main>
+      </SidebarInset>
+    </SidebarProvider>
   );
 }

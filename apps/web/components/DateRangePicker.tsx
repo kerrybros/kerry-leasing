@@ -1,6 +1,8 @@
 'use client';
 
 import { useState } from 'react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
 
 interface DateRangePickerProps {
   startDate: string;
@@ -9,7 +11,7 @@ interface DateRangePickerProps {
   onEndDateChange: (date: string) => void;
 }
 
-type Preset = 
+type Preset =
   | 'custom'
   | 'this_month'
   | 'last_7_days'
@@ -23,11 +25,13 @@ type Preset =
   | 'this_year'
   | 'last_year';
 
-export function DateRangePicker({ 
-  startDate, 
-  endDate, 
-  onStartDateChange, 
-  onEndDateChange 
+const formatDate = (d: Date) => d.toISOString().split('T')[0];
+
+export function DateRangePicker({
+  startDate,
+  endDate,
+  onStartDateChange,
+  onEndDateChange,
 }: DateRangePickerProps) {
   const [selectedPreset, setSelectedPreset] = useState<Preset>('custom');
 
@@ -39,9 +43,6 @@ export function DateRangePicker({
     let start = new Date();
     let end = new Date();
 
-    // Helper to format date as YYYY-MM-DD
-    const formatDate = (d: Date) => d.toISOString().split('T')[0];
-
     switch (preset) {
       case 'this_month':
         start = new Date(today.getFullYear(), today.getMonth(), 1);
@@ -52,12 +53,10 @@ export function DateRangePicker({
         end = today;
         break;
       case 'this_week':
-        // Assuming Sunday start
         start.setDate(today.getDate() - today.getDay());
         end = today;
         break;
       case 'last_week':
-        // Last week Sunday to Saturday
         start.setDate(today.getDate() - today.getDay() - 7);
         end = new Date(start);
         end.setDate(start.getDate() + 6);
@@ -74,24 +73,23 @@ export function DateRangePicker({
         start.setFullYear(today.getFullYear() - 1);
         end = today;
         break;
-      case 'this_quarter':
-        const currentQuarter = Math.floor(today.getMonth() / 3);
-        start = new Date(today.getFullYear(), currentQuarter * 3, 1);
+      case 'this_quarter': {
+        const q = Math.floor(today.getMonth() / 3);
+        start = new Date(today.getFullYear(), q * 3, 1);
         end = today;
         break;
-      case 'last_quarter':
-        const prevQuarter = Math.floor(today.getMonth() / 3) - 1;
-        if (prevQuarter < 0) {
+      }
+      case 'last_quarter': {
+        const pq = Math.floor(today.getMonth() / 3) - 1;
+        if (pq < 0) {
           start = new Date(today.getFullYear() - 1, 9, 1);
-          end = new Date(today.getFullYear() - 1, 11, 31); // Dec 31
-          // Correct end of last quarter:
-          // Q4 prev year: Oct 1 - Dec 31
-          end = new Date(today.getFullYear(), 0, 0); // Dec 31
+          end = new Date(today.getFullYear(), 0, 0);
         } else {
-          start = new Date(today.getFullYear(), prevQuarter * 3, 1);
-          end = new Date(today.getFullYear(), (prevQuarter + 1) * 3, 0);
+          start = new Date(today.getFullYear(), pq * 3, 1);
+          end = new Date(today.getFullYear(), (pq + 1) * 3, 0);
         }
         break;
+      }
       case 'this_year':
         start = new Date(today.getFullYear(), 0, 1);
         end = today;
@@ -113,42 +111,40 @@ export function DateRangePicker({
   };
 
   return (
-    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-4 p-3 sm:p-4 bg-bg-tertiary rounded-lg border border-border">
-      {/* Preset Select */}
-      <select
-        value={selectedPreset}
-        onChange={(e) => applyPreset(e.target.value as Preset)}
-        className="p-2 rounded-md border border-border bg-bg-card text-text-primary text-sm min-h-[44px] cursor-pointer"
-      >
-        <option value="custom">Custom Range</option>
-        <option value="this_month">This Month</option>
-        <option value="last_7_days">Last 7 Days</option>
-        <option value="this_week">This Week</option>
-        <option value="last_week">Last Week</option>
-        <option value="last_30_days">Last 30 Days</option>
-        <option value="last_month">Last Month</option>
-        <option value="last_12_months">Last 12 Months</option>
-        <option value="this_quarter">This Quarter</option>
-        <option value="last_quarter">Last Quarter</option>
-        <option value="this_year">This Year</option>
-        <option value="last_year">Last Year</option>
-      </select>
+    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 p-3 bg-card rounded-lg border border-border">
+      <Select value={selectedPreset} onValueChange={(v) => applyPreset(v as Preset)}>
+        <SelectTrigger className="w-[160px]">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="custom">Custom Range</SelectItem>
+          <SelectItem value="this_month">This Month</SelectItem>
+          <SelectItem value="last_7_days">Last 7 Days</SelectItem>
+          <SelectItem value="this_week">This Week</SelectItem>
+          <SelectItem value="last_week">Last Week</SelectItem>
+          <SelectItem value="last_30_days">Last 30 Days</SelectItem>
+          <SelectItem value="last_month">Last Month</SelectItem>
+          <SelectItem value="last_12_months">Last 12 Months</SelectItem>
+          <SelectItem value="this_quarter">This Quarter</SelectItem>
+          <SelectItem value="last_quarter">Last Quarter</SelectItem>
+          <SelectItem value="this_year">This Year</SelectItem>
+          <SelectItem value="last_year">Last Year</SelectItem>
+        </SelectContent>
+      </Select>
 
-      <div className="w-px h-8 bg-border hidden sm:block" style={{ display: 'none' }} />
-
-      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 w-full sm:w-auto">
-        <input
+      <div className="flex items-center gap-2">
+        <Input
           type="date"
           value={startDate}
           onChange={(e) => handleManualChange('start', e.target.value)}
-          className="w-full sm:w-auto p-2 rounded-md border border-border bg-bg-card text-text-primary text-sm min-h-[44px]"
+          className="w-[145px]"
         />
-        <span className="text-text-secondary hidden sm:inline">to</span>
-        <input
+        <span className="text-muted-foreground text-sm">to</span>
+        <Input
           type="date"
           value={endDate}
           onChange={(e) => handleManualChange('end', e.target.value)}
-          className="w-full sm:w-auto p-2 rounded-md border border-border bg-bg-card text-text-primary text-sm min-h-[44px]"
+          className="w-[145px]"
         />
       </div>
     </div>

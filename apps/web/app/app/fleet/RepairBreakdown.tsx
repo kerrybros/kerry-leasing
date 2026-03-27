@@ -2,6 +2,19 @@
 
 import { useState, useMemo } from 'react';
 import { Skeleton } from '@/components/Skeleton';
+import { Badge } from '@/components/ui/badge';
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  LabelList,
+} from 'recharts';
 
 // Types used by repair breakdown and modal (exported for fleet page state)
 export type RepairLineSummary = {
@@ -33,6 +46,18 @@ export type RepairUnitSummary = {
 };
 
 export type RepairInvoiceWithUnit = RepairInvoiceSummary & { unitNumber: string };
+
+// Damage detection rule per DESIGN.md
+export function isDamageLine(line: RepairLineSummary): boolean {
+  return (
+    (line.component ?? '').toLowerCase().includes('damage') ||
+    (line.system ?? '').toLowerCase().includes('damage')
+  );
+}
+
+export function isDamageInvoice(inv: RepairInvoiceSummary): boolean {
+  return inv.lines.some(isDamageLine);
+}
 
 const chartBarStyle = {
   background: 'var(--primary-dark)',
@@ -68,7 +93,11 @@ function RepairDetailsModal({
           <div>
             <h3 className="text-lg font-bold text-text-primary">Repair Details</h3>
             <div className="text-sm text-text-secondary mt-1">
-              Unit: <span className="font-semibold text-text-primary">{invoice.unitNumber}</span> • Repair Completed Date: {new Date(invoice.invoiceDate).toLocaleDateString()}
+              Unit: <span className="font-semibold text-text-primary">{invoice.unitNumber}</span>
+              {' '}• Repair Completed Date: {new Date(invoice.invoiceDate).toLocaleDateString()}
+              {isDamageInvoice(invoice) && (
+                <Badge variant="destructive" className="ml-2">Damage</Badge>
+              )}
             </div>
           </div>
           <button
@@ -88,9 +117,18 @@ function RepairDetailsModal({
               .map((line: RepairLineSummary, idx: number) => (
                 <div
                   key={idx}
-                  className="p-4 bg-bg-secondary rounded-lg border border-border flex flex-col gap-1"
+                  className={`p-4 rounded-lg border flex flex-col gap-1 ${
+                    isDamageLine(line)
+                      ? 'bg-destructive/5 border-destructive/30'
+                      : 'bg-bg-secondary border-border'
+                  }`}
                 >
-                  <div className="font-semibold text-text-primary">{line.description}</div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-text-primary">{line.description}</span>
+                    {isDamageLine(line) && (
+                      <Badge variant="destructive">Damage</Badge>
+                    )}
+                  </div>
                   <div className="text-sm text-text-secondary">
                     {line.component || 'N/A'} / {line.system || 'N/A'}
                   </div>
@@ -165,22 +203,71 @@ export function RepairBreakdown({
   }, [filteredUnits, selectedMatrixUnit]);
 
   const jobsData = useMemo(() => {
-    const data: { unitNumber: string; count: number }[] = [];
+    const data: { unitNumber: string; count: number; damageCount: number }[] = [];
     let grandTotal = 0;
+    let grandDamage = 0;
     dateFilteredUnits.forEach(u => {
       const orders = new Set<string>();
+      const damageOrders = new Set<string>();
       u.invoices.forEach(inv => {
         const jobId = inv.orderNumber || inv.invoiceNumber;
         orders.add(jobId);
+        if (isDamageInvoice(inv)) damageOrders.add(jobId);
       });
       const count = orders.size;
+      const damageCount = damageOrders.size;
       grandTotal += count;
+      grandDamage += damageCount;
       if (count > 0) {
-        data.push({ unitNumber: u.unitNumber, count });
+        data.push({ unitNumber: u.unitNumber, count, damageCount });
       }
     });
     data.sort((a, b) => a.unitNumber.localeCompare(b.unitNumber, undefined, { numeric: true }));
-    return { rows: data, grandTotal };
+    return { rows: data, grandTotal, grandDamage };
+  }, [dateFilteredUnits]);
+
+  // Component/System breakdown data
+  const categoryBreakdown = useMemo(() => {
+    const map = new Map<string, { count: number; isDamage: boolean }>();
+    dateFilteredUnits.forEach(u => {
+      u.invoices.forEach(inv => {
+        inv.lines.forEach(line => {
+          if (!line.component && !line.system) return;
+          const key = `${line.component || '?'} / ${line.system || '?'}`;
+          const existing = map.get(key) || { count: 0, isDamage: false };
+          existing.count += 1;
+          if (isDamageLine(line)) existing.isDamage = true;
+          map.set(key, existing);
+        });
+      });
+    });
+    return Array.from(map.entries())
+      .map(([category, { count, isDamage }]) => ({ category, count, isDamage }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 12);
+  }, [dateFilteredUnits]);
+
+  // Repair frequency trend (jobs per month)
+  const repairTrend = useMemo(() => {
+    const monthMap = new Map<string, number>();
+    dateFilteredUnits.forEach(u => {
+      const seen = new Set<string>();
+      u.invoices.forEach(inv => {
+        const jobId = inv.orderNumber || inv.invoiceNumber;
+        if (seen.has(jobId)) return;
+        seen.add(jobId);
+        const monthKey = inv.invoiceDate.substring(0, 7);
+        monthMap.set(monthKey, (monthMap.get(monthKey) || 0) + 1);
+      });
+    });
+    return Array.from(monthMap.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([monthKey, count]) => {
+        const [year, month] = monthKey.split('-');
+        const label = new Date(parseInt(year), parseInt(month) - 1)
+          .toLocaleString('default', { month: 'short', year: '2-digit' });
+        return { month: label, count };
+      });
   }, [dateFilteredUnits]);
 
   const handleMatrixClick = (unitNumber: string) => {
@@ -217,16 +304,16 @@ export function RepairBreakdown({
         </div>
       )}
 
+      {/* Main two-panel layout */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-[750px]">
+        {/* LEFT: Unit job count list */}
         <div className="lg:col-span-4 xl:col-span-3 flex flex-col h-full bg-bg-card border border-border rounded shadow-sm overflow-hidden">
           <div style={{ ...chartBarStyle, flexDirection: 'column', alignItems: 'stretch', gap: '0.5rem', paddingBottom: '1rem', flexShrink: 0 }}>
             <div className="flex justify-center items-center w-full">Number of Jobs Done</div>
-            <div className="flex gap-2 w-full opacity-0 pointer-events-none" aria-hidden="true">
-              <div className="flex-1 px-3 py-1.5 rounded text-sm border border-transparent">&nbsp;</div>
-            </div>
-            <div className="grid grid-cols-[1fr_80px] w-full mt-2 pt-2 border-t border-white/20">
+            <div className="grid grid-cols-[1fr_70px_80px] w-full mt-2 pt-2 border-t border-white/20">
               <div className="text-white font-semibold text-sm uppercase tracking-wider pl-4">Unit</div>
-              <div className="text-white font-semibold text-sm uppercase tracking-wider text-center pr-4">Count</div>
+              <div className="text-white font-semibold text-sm uppercase tracking-wider text-center">Jobs</div>
+              <div className="text-white font-semibold text-sm uppercase tracking-wider text-center pr-4">Damage</div>
             </div>
           </div>
           <div className="flex-1 overflow-y-auto bg-bg-card">
@@ -238,25 +325,36 @@ export function RepairBreakdown({
                   <div
                     key={row.unitNumber}
                     onClick={() => handleMatrixClick(row.unitNumber)}
-                    className="grid grid-cols-[1fr_80px] py-3 border-b border-border hover:bg-bg-hover cursor-pointer transition-colors"
+                    className="grid grid-cols-[1fr_70px_80px] py-3 border-b border-border hover:bg-bg-hover cursor-pointer transition-colors"
                     style={{
                       background: selectedMatrixUnit === row.unitNumber ? 'var(--bg-hover)' : undefined,
                       borderLeft: selectedMatrixUnit === row.unitNumber ? '4px solid var(--primary)' : '4px solid transparent',
                     }}
                   >
                     <div className="pl-4 font-bold text-text-primary">{row.unitNumber}</div>
-                    <div className="pr-4 font-bold text-text-primary text-center">{row.count}</div>
+                    <div className="font-bold text-text-primary text-center">{row.count}</div>
+                    <div className="pr-4 text-center">
+                      {row.damageCount > 0 ? (
+                        <span className="inline-flex items-center justify-center px-1.5 py-0.5 rounded text-xs font-semibold bg-destructive/10 text-destructive border border-destructive/20">
+                          {row.damageCount}
+                        </span>
+                      ) : (
+                        <span className="text-text-secondary text-sm">—</span>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
             )}
           </div>
-          <div className="bg-primary-dark text-white font-bold grid grid-cols-[1fr_80px] py-3 border-t border-white/10 flex-shrink-0 z-10">
+          <div className="bg-primary-dark text-white font-bold grid grid-cols-[1fr_70px_80px] py-3 border-t border-white/10 flex-shrink-0 z-10">
             <div className="pl-4">Total</div>
-            <div className="pr-4 text-center">{jobsData.grandTotal}</div>
+            <div className="text-center">{jobsData.grandTotal}</div>
+            <div className="pr-4 text-center">{jobsData.grandDamage > 0 ? jobsData.grandDamage : '—'}</div>
           </div>
         </div>
 
+        {/* RIGHT: Invoice list */}
         <div className="lg:col-span-8 xl:col-span-9 flex flex-col h-full bg-bg-card border border-border rounded shadow-sm overflow-hidden">
           <div style={{ ...chartBarStyle, flexDirection: 'column', alignItems: 'stretch', gap: '0.5rem', paddingBottom: '1rem', flexShrink: 0 }}>
             <div className="flex justify-between items-center w-full">
@@ -282,8 +380,8 @@ export function RepairBreakdown({
                 </button>
               )}
             </div>
-            <div className="grid grid-cols-[200px_100px_1fr_160px] w-full mt-2 pt-2 border-t border-white/20 px-4 gap-4">
-              <div className="text-white font-semibold text-sm uppercase tracking-wider">Repair Completed Date</div>
+            <div className="grid grid-cols-[180px_90px_1fr_120px] w-full mt-2 pt-2 border-t border-white/20 px-4 gap-4">
+              <div className="text-white font-semibold text-sm uppercase tracking-wider">Date</div>
               <div className="text-white font-semibold text-sm uppercase tracking-wider">Unit</div>
               <div className="text-white font-semibold text-sm uppercase tracking-wider"></div>
               <div className="text-white font-semibold text-sm uppercase tracking-wider text-right">Action</div>
@@ -299,17 +397,26 @@ export function RepairBreakdown({
                 {invoices.map((inv) => (
                   <div
                     key={`${inv.unitNumber}-${inv.invoiceNumber}-${inv.invoiceDate}`}
-                    className="grid grid-cols-[200px_100px_1fr_160px] py-3 px-4 border-b border-border items-center hover:bg-bg-hover transition-colors gap-4"
+                    className={`grid grid-cols-[180px_90px_1fr_120px] py-3 px-4 border-b items-center transition-colors gap-4 ${
+                      isDamageInvoice(inv)
+                        ? 'border-destructive/20 bg-destructive/5 hover:bg-destructive/10'
+                        : 'border-border hover:bg-bg-hover'
+                    }`}
                   >
                     <div className="text-sm text-text-primary">{new Date(inv.invoiceDate).toLocaleDateString()}</div>
-                    <div className="text-sm font-bold text-text-primary">{inv.unitNumber}</div>
+                    <div className="text-sm font-bold text-text-primary flex items-center gap-1">
+                      {inv.unitNumber}
+                      {isDamageInvoice(inv) && (
+                        <Badge variant="destructive">Damage</Badge>
+                      )}
+                    </div>
                     <div></div>
                     <div className="text-right">
                       <button
                         className="btn btn-primary text-xs py-1 px-3"
                         onClick={() => setSelectedInvoice(inv)}
                       >
-                        View Repair Details
+                        View Details
                       </button>
                     </div>
                   </div>
@@ -319,6 +426,126 @@ export function RepairBreakdown({
           </div>
         </div>
       </div>
+
+      {/* Component/System Breakdown + Repair Frequency Trend */}
+      {categoryBreakdown.length > 0 && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Component/System Breakdown Chart */}
+          <div className="bg-bg-card border border-border rounded shadow-sm overflow-hidden">
+            <div style={chartBarStyle}>Component / System Breakdown</div>
+            <div style={{ padding: '1rem', height: 340 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart
+                  data={categoryBreakdown}
+                  layout="vertical"
+                  margin={{ top: 4, right: 40, left: 8, bottom: 4 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
+                  <XAxis
+                    type="number"
+                    stroke="var(--text-secondary)"
+                    fontSize={11}
+                    tickLine={false}
+                    axisLine={false}
+                  />
+                  <YAxis
+                    type="category"
+                    dataKey="category"
+                    width={180}
+                    stroke="var(--text-secondary)"
+                    fontSize={11}
+                    tickLine={false}
+                    axisLine={false}
+                    tick={{ fill: 'var(--text-secondary)' }}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      background: 'var(--bg-card)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 4,
+                    }}
+                    formatter={(value: any) => [value, 'Line Items']}
+                  />
+                  <Bar
+                    dataKey="count"
+                    radius={[0, 3, 3, 0]}
+                    isAnimationActive={false}
+                    fill="#d9a528"
+                  >
+                    {categoryBreakdown.map((entry, index) => (
+                      <rect key={index} fill={entry.isDamage ? '#ef4444' : '#d9a528'} />
+                    ))}
+                    <LabelList
+                      dataKey="count"
+                      position="right"
+                      style={{ fill: 'var(--text-secondary)', fontSize: 11 }}
+                    />
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="px-4 pb-3 flex items-center gap-4 text-xs text-text-secondary border-t border-border pt-2">
+              <span className="flex items-center gap-1">
+                <span className="inline-block w-3 h-3 rounded-sm bg-primary"></span>
+                Standard
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="inline-block w-3 h-3 rounded-sm bg-destructive"></span>
+                Damage-flagged
+              </span>
+            </div>
+          </div>
+
+          {/* Repair Frequency Trend */}
+          <div className="bg-bg-card border border-border rounded shadow-sm overflow-hidden">
+            <div style={chartBarStyle}>Repair Jobs per Month</div>
+            <div style={{ padding: '1rem', height: 340 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={repairTrend} margin={{ top: 20, right: 30, left: 10, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                  <XAxis
+                    dataKey="month"
+                    stroke="var(--text-secondary)"
+                    fontSize={11}
+                    tickLine={false}
+                    axisLine={false}
+                  />
+                  <YAxis
+                    stroke="var(--text-secondary)"
+                    fontSize={11}
+                    tickLine={false}
+                    axisLine={false}
+                    width={30}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      background: 'var(--bg-card)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 4,
+                    }}
+                    formatter={(value: any) => [value, 'Jobs']}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="count"
+                    stroke="#d9a528"
+                    strokeWidth={4}
+                    dot={{ fill: '#d9a528', r: 5, strokeWidth: 0 }}
+                    activeDot={{ r: 7 }}
+                  >
+                    <LabelList
+                      dataKey="count"
+                      position="top"
+                      offset={10}
+                      style={{ fill: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}
+                    />
+                  </Line>
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+      )}
 
       {selectedInvoice && (
         <RepairDetailsModal

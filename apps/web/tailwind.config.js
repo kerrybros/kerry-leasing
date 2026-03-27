@@ -8,40 +8,85 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        // Primary colors
+        // shadcn/ui tokens
+        background: 'var(--background)',
+        foreground: 'var(--foreground)',
+        card: {
+          DEFAULT: 'var(--card)',
+          foreground: 'var(--card-foreground)',
+        },
+        popover: {
+          DEFAULT: 'var(--popover)',
+          foreground: 'var(--popover-foreground)',
+        },
         primary: {
           DEFAULT: 'var(--primary)',
+          foreground: 'var(--primary-foreground)',
           dark: 'var(--primary-dark)',
           light: 'var(--primary-light)',
         },
-        // Background colors
+        secondary: {
+          DEFAULT: 'var(--secondary)',
+          foreground: 'var(--secondary-foreground)',
+        },
+        muted: {
+          DEFAULT: 'var(--muted)',
+          foreground: 'var(--muted-foreground)',
+        },
+        accent: {
+          DEFAULT: 'var(--accent)',
+          foreground: 'var(--accent-foreground)',
+        },
+        destructive: {
+          DEFAULT: 'var(--destructive)',
+          foreground: 'var(--destructive-foreground, #fff)',
+        },
+        border: {
+          DEFAULT: 'var(--border)',
+          light: 'var(--border-light)',
+        },
+        input: 'var(--input)',
+        ring: 'var(--ring)',
+        // Sidebar tokens
+        sidebar: {
+          DEFAULT: 'var(--sidebar)',
+          foreground: 'var(--sidebar-foreground)',
+          primary: {
+            DEFAULT: 'var(--sidebar-primary)',
+            foreground: 'var(--sidebar-primary-foreground)',
+          },
+          accent: {
+            DEFAULT: 'var(--sidebar-accent)',
+            foreground: 'var(--sidebar-accent-foreground)',
+          },
+          border: 'var(--sidebar-border)',
+          ring: 'var(--sidebar-ring)',
+        },
+        // Status colors
+        success: 'var(--success)',
+        warning: 'var(--warning)',
+        error: 'var(--error)',
+        // Legacy aliases (existing pages use these until Phase C rebuilds them)
         'bg-primary': 'var(--bg-primary)',
         'bg-secondary': 'var(--bg-secondary)',
         'bg-tertiary': 'var(--bg-tertiary)',
         'bg-card': 'var(--bg-card)',
         'bg-hover': 'var(--bg-hover)',
-        // Text colors
         'text-primary': 'var(--text-primary)',
         'text-secondary': 'var(--text-secondary)',
         'text-tertiary': 'var(--text-tertiary)',
-        // Status colors
-        success: 'var(--success)',
-        warning: 'var(--warning)',
-        error: 'var(--error)',
-        // Border colors
-        border: {
-          DEFAULT: 'var(--border)',
-          light: 'var(--border-light)',
-        },
+      },
+      borderRadius: {
+        lg: 'var(--radius)',
+        md: 'calc(var(--radius) - 2px)',
+        sm: 'calc(var(--radius) - 4px)',
+        DEFAULT: 'var(--border-radius)',
       },
       boxShadow: {
         sm: 'var(--shadow-sm)',
         DEFAULT: 'var(--shadow-md)',
         md: 'var(--shadow-md)',
         lg: 'var(--shadow-lg)',
-      },
-      borderRadius: {
-        DEFAULT: 'var(--border-radius)',
       },
       fontFamily: {
         sans: [

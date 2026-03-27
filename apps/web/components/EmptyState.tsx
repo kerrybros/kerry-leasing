@@ -1,3 +1,6 @@
+import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
+
 interface EmptyStateProps {
   icon?: React.ReactNode;
   title: string;
@@ -6,20 +9,21 @@ interface EmptyStateProps {
     label: string;
     onClick: () => void;
   };
+  className?: string;
 }
 
-export function EmptyState({ icon, title, description, action }: EmptyStateProps) {
+export function EmptyState({ icon, title, description, action, className }: EmptyStateProps) {
   return (
-    <div className="text-center p-8 bg-bg-secondary rounded-xl">
-      <div className="text-5xl mb-4 text-text-tertiary">
+    <div className={cn('flex flex-col items-center justify-center text-center p-10 rounded-xl border border-border bg-card', className)}>
+      <div className="mb-4 text-muted-foreground">
         {icon || (
-          <svg 
+          <svg
             className="w-12 h-12 mx-auto"
-            viewBox="0 0 24 24" 
-            fill="none" 
-            stroke="currentColor" 
-            strokeWidth="2" 
-            strokeLinecap="round" 
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
             strokeLinejoin="round"
           >
             <rect x="2" y="7" width="20" height="14" rx="2" ry="2" />
@@ -27,16 +31,10 @@ export function EmptyState({ icon, title, description, action }: EmptyStateProps
           </svg>
         )}
       </div>
-      <h3 className="text-lg font-semibold text-text-primary mb-2">
-        {title}
-      </h3>
-      <p className={`text-[0.9375rem] text-text-secondary ${action ? 'mb-6' : 'mb-0'}`}>
-        {description}
-      </p>
+      <h3 className="text-base font-semibold text-foreground mb-1">{title}</h3>
+      <p className={cn('text-sm text-muted-foreground', action ? 'mb-6' : 'mb-0')}>{description}</p>
       {action && (
-        <button className="btn btn-primary" onClick={action.onClick}>
-          {action.label}
-        </button>
+        <Button onClick={action.onClick}>{action.label}</Button>
       )}
     </div>
   );

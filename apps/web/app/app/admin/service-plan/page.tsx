@@ -3,6 +3,9 @@
 import { useOrganization } from '@clerk/nextjs';
 import { useCallback, useEffect, useState } from 'react';
 import { useApiClient } from '@/hooks/useApiClient';
+import { KpiCard } from '@/components/KpiCard';
+import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/Skeleton';
 
 interface ServicePlanUnit {
   id: string;
@@ -29,233 +32,337 @@ interface UnitsSummary {
   withTelematicsData: number;
 }
 
+interface Toast {
+  id: number;
+  type: 'success' | 'error';
+  message: string;
+}
+
+let toastId = 0;
+
+function useToasts() {
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const add = (type: 'success' | 'error', message: string) => {
+    const id = ++toastId;
+    setToasts(prev => [...prev, { id, type, message }]);
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 5000);
+  };
+  return { toasts, addToast: add };
+}
+
 export default function AdminServicePlanPage() {
   const { getApi } = useApiClient();
   const { organization } = useOrganization();
+  const { toasts, addToast } = useToasts();
+
   const [units, setUnits] = useState<ServicePlanUnit[]>([]);
   const [summary, setSummary] = useState<UnitsSummary | null>(null);
   const [telematicsProvider, setTelematicsProvider] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [syncSuccess, setSyncSuccess] = useState<string | null>(null);
   const [filter, setFilter] = useState<'all' | 'unmatched'>('all');
+
+  // Available VINs for inline matching
+  const [availableVins, setAvailableVins] = useState<string[]>([]);
+  const [matchingUnitId, setMatchingUnitId] = useState<string | null>(null);
+  const [matchingVin, setMatchingVin] = useState('');
+  const [matchingInProgress, setMatchingInProgress] = useState(false);
+  const [unmatchingId, setUnmatchingId] = useState<string | null>(null);
 
   const loadUnits = useCallback(async () => {
     try {
       setLoading(true);
-      setError(null);
-
       const api = await getApi();
-      const data = await api.get<{ units: ServicePlanUnit[]; summary: UnitsSummary }>('/admin/service-plan/units');
-
+      const [data, settings] = await Promise.all([
+        api.get<{ units: ServicePlanUnit[]; summary: UnitsSummary }>('/admin/service-plan/units'),
+        api.get<{ telematicsProvider: string | null }>('/org/settings'),
+      ]);
       setUnits(data.units);
       setSummary(data.summary);
-      
-      // Also load org settings to get provider
-      const settings = await api.get<{ telematicsProvider: string | null }>('/org/settings');
       setTelematicsProvider(settings.telematicsProvider);
-    } catch (err: any) {
-      setError(err.message || 'Failed to load units');
-      console.error('Error loading units:', err);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to load units';
+      addToast('error', msg);
     } finally {
       setLoading(false);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [getApi]);
 
   const syncUnits = async () => {
     try {
       setSyncing(true);
-      setError(null);
-      setSyncSuccess(null);
-
       const api = await getApi();
       const data = await api.post<{
-        success: boolean;
-        synced: number;
-        autoMatched: number;
-        newRepairUnits: number;
-        newTelematicsUnits: number;
-        updatedUnits: number;
-        summary: {
-          totalUnits: number;
-          fromRepair: number;
-          fromTelematics: number;
-          matchedUnits: number;
-        };
+        success: boolean; synced: number; autoMatched: number;
+        summary: { totalUnits: number; fromRepair: number; fromTelematics: number; matchedUnits: number };
       }>('/admin/service-plan/sync', {});
-
-      console.log('Sync result:', data);
-
-      // Show success message
-      setSyncSuccess(
-        `✅ Synced ${data.synced} units: ${data.summary.fromRepair} from repair DB, ${data.summary.fromTelematics} from telematics. ${data.autoMatched} auto-matched.`
-      );
-
-      // Reload units after sync
+      addToast('success', `Synced ${data.synced} units. ${data.autoMatched} auto-matched.`);
       await loadUnits();
-    } catch (err: any) {
-      setError(err.message || 'Failed to sync units');
-      console.error('Error syncing units:', err);
+    } catch (err: unknown) {
+      addToast('error', err instanceof Error ? err.message : 'Failed to sync units');
     } finally {
       setSyncing(false);
     }
   };
 
-  useEffect(() => {
-    if (organization?.id) {
-      loadUnits();
+  const loadAvailableVins = async () => {
+    try {
+      const api = await getApi();
+      const data = await api.get<{ vins: string[] }>('/admin/service-plan/available-vins');
+      setAvailableVins(data.vins ?? []);
+    } catch {
+      setAvailableVins([]);
     }
-  }, [organization?.id, loadUnits]);
+  };
+
+  const startMatching = (unitId: string) => {
+    setMatchingUnitId(unitId);
+    setMatchingVin('');
+    if (availableVins.length === 0) loadAvailableVins();
+  };
+
+  const confirmMatch = async (unitId: string) => {
+    if (!matchingVin) return;
+    try {
+      setMatchingInProgress(true);
+      const api = await getApi();
+      await api.put(`/admin/service-plan/units/${unitId}/match`, { telematicsVin: matchingVin });
+      addToast('success', 'Unit matched successfully.');
+      setMatchingUnitId(null);
+      await loadUnits();
+    } catch (err: unknown) {
+      addToast('error', err instanceof Error ? err.message : 'Failed to match unit');
+    } finally {
+      setMatchingInProgress(false);
+    }
+  };
+
+  const unmatchUnit = async (unitId: string) => {
+    try {
+      setUnmatchingId(unitId);
+      const api = await getApi();
+      await (api as unknown as { delete: (url: string) => Promise<unknown> }).delete(`/admin/service-plan/units/${unitId}/match`);
+      addToast('success', 'Unit unmatched.');
+      await loadUnits();
+    } catch (err: unknown) {
+      addToast('error', err instanceof Error ? err.message : 'Failed to unmatch unit');
+    } finally {
+      setUnmatchingId(null);
+    }
+  };
+
+  useEffect(() => {
+    if (organization?.id) loadUnits();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [organization?.id]);
+
+  const autoCount = units.filter(u => u.matchType === 'AUTO').length;
+  const manualCount = units.filter(u => u.matchType === 'MANUAL').length;
+  const unmatchedCount = summary?.unmatched ?? 0;
 
   const filteredUnits = units.filter(unit => {
     if (filter === 'unmatched') return unit.matchType === 'UNMATCHED';
     return true;
   });
 
-  if (loading) {
-    return (
-      <div className="container mx-auto px-4 py-8">
-        <div className="text-center">Loading service plan units...</div>
-      </div>
+  const matchTypeBadge = (type: 'AUTO' | 'MANUAL' | 'UNMATCHED') => {
+    if (type === 'AUTO') return (
+      <span className="px-2 py-0.5 rounded text-xs font-semibold bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300 border border-green-200 dark:border-green-800">
+        Auto
+      </span>
     );
-  }
+    if (type === 'MANUAL') return (
+      <span className="px-2 py-0.5 rounded text-xs font-semibold bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+        Manual
+      </span>
+    );
+    return (
+      <span className="px-2 py-0.5 rounded text-xs font-semibold bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+        Unmatched
+      </span>
+    );
+  };
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold mb-2">Manage Service Plan</h1>
-        <p className="text-text-secondary">
-          Configure which units are included in the service plan for{' '}
+    <div className="container mx-auto px-4 py-8" style={{ maxWidth: '1400px' }}>
+      {/* Toast notifications */}
+      {toasts.length > 0 && (
+        <div className="fixed top-4 right-4 z-50 flex flex-col gap-2 max-w-sm w-full">
+          {toasts.map(t => (
+            <div key={t.id} className={`px-4 py-3 rounded-lg border text-sm font-medium shadow-lg ${
+              t.type === 'success'
+                ? 'bg-green-50 border-green-200 text-green-800 dark:bg-green-900/30 dark:border-green-800 dark:text-green-300'
+                : 'bg-red-50 border-red-200 text-red-800 dark:bg-red-900/30 dark:border-red-800 dark:text-red-300'
+            }`}>
+              {t.message}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="mb-6">
+        <h1 className="text-3xl font-bold mb-1">Service Plan</h1>
+        <p className="text-text-secondary text-sm">
+          Manage unit matching for{' '}
           <span className="font-semibold">{organization?.name}</span>
           {telematicsProvider && (
-            <span className="ml-2 text-sm px-2 py-1 bg-blue-100 text-blue-800 rounded">
-              {telematicsProvider === 'MOTIVE' ? '📡 Motive' : '🛰️ Samsara'}
+            <span className="ml-2 px-2 py-0.5 rounded text-xs bg-bg-secondary border border-border text-text-secondary">
+              {telematicsProvider}
             </span>
           )}
         </p>
       </div>
 
-      {error && (
-        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-800">
-          <strong>Error:</strong> {error}
-        </div>
-      )}
-
-      {syncSuccess && (
-        <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg text-green-800">
-          {syncSuccess}
-        </div>
-      )}
-
-      {/* Summary Cards */}
-      {summary && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-          <div className="bg-bg-secondary border border-border rounded-lg p-4">
-            <div className="text-2xl font-bold text-primary">{summary.total}</div>
-            <div className="text-sm text-text-secondary">Total Units</div>
+      {loading ? (
+        <div className="flex flex-col gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {[1,2,3,4].map(i => <Skeleton key={i} style={{ height: 80, borderRadius: 8 }} />)}
           </div>
-          <div className="bg-bg-secondary border border-border rounded-lg p-4">
-            <div className="text-2xl font-bold text-blue-600">{summary.matched}</div>
-            <div className="text-sm text-text-secondary">Matched</div>
-          </div>
+          <Skeleton style={{ height: 400, borderRadius: 8 }} />
         </div>
-      )}
+      ) : (
+        <>
+          {/* Summary Cards */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            <KpiCard label="Total Units" value={summary?.total ?? 0} />
+            <KpiCard label="Auto-Matched" value={autoCount} variant="success" />
+            <KpiCard label="Manually Matched" value={manualCount} />
+            <KpiCard
+              label="Unmatched"
+              value={unmatchedCount}
+              variant={unmatchedCount > 0 ? 'warning' : 'default'}
+            />
+          </div>
 
-      {/* Actions */}
-      <div className="mb-6">
-        <div className="flex flex-wrap gap-4 items-center mb-2">
-          <button
-            onClick={syncUnits}
-            disabled={syncing}
-            className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-dark disabled:opacity-50 flex items-center gap-2"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
-            {syncing ? 'Syncing...' : 'Refresh Units'}
-          </button>
-
-          <div className="flex gap-2">
+          {/* Actions */}
+          <div className="flex flex-wrap gap-3 items-center mb-4">
             <button
-              onClick={() => setFilter('all')}
-              className={`px-3 py-1 rounded ${
-                filter === 'all'
-                  ? 'bg-primary text-white'
-                  : 'bg-bg-tertiary text-text-primary hover:bg-bg-hover'
-              }`}
+              onClick={syncUnits}
+              disabled={syncing}
+              className="btn btn-primary flex items-center gap-2"
             >
-              All ({units.length})
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              {syncing ? 'Syncing...' : 'Refresh Units'}
             </button>
-            <button
-              onClick={() => setFilter('unmatched')}
-              className={`px-3 py-1 rounded ${
-                filter === 'unmatched'
-                  ? 'bg-primary text-white'
-                  : 'bg-bg-tertiary text-text-primary hover:bg-bg-hover'
-              }`}
-            >
-              Unmatched ({summary?.unmatched || 0})
-            </button>
-          </div>
-        </div>
-        
-        <div className="text-sm text-text-secondary italic ml-auto">
-          💡 Refresh syncs units from both repair database and telematics data
-        </div>
-      </div>
 
-      {/* Units Table */}
-      <div className="bg-bg-secondary border border-border rounded-lg overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-bg-tertiary border-b border-border">
-              <tr>
-                <th className="px-4 py-3 text-left text-sm font-semibold">Unit Number</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold">Repair VIN</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold">Telematics VIN</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold">Match Status</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {filteredUnits.length === 0 ? (
-                <tr>
-                  <td colSpan={4} className="px-4 py-8 text-center text-text-secondary">
-                    No units found. Click &quot;Sync Units&quot; to import from repair database.
-                  </td>
-                </tr>
-              ) : (
-                filteredUnits.map(unit => (
-                  <tr key={unit.id} className="hover:bg-bg-hover">
-                    <td className="px-4 py-3 text-sm">
-                      {unit.repairUnitNumber || <span className="text-text-secondary italic">N/A</span>}
-                    </td>
-                    <td className="px-4 py-3 text-sm font-mono text-xs">
-                      {unit.repairVin || <span className="text-text-secondary italic">N/A</span>}
-                    </td>
-                    <td className="px-4 py-3 text-sm font-mono text-xs">
-                      {unit.telematicsVin || <span className="text-text-secondary italic">N/A</span>}
-                    </td>
-                    <td className="px-4 py-3 text-sm">
-                      <span
-                        className={`px-2 py-1 rounded text-xs font-medium ${
-                          unit.matchType === 'AUTO'
-                            ? 'bg-green-100 text-green-800'
-                            : unit.matchType === 'MANUAL'
-                            ? 'bg-blue-100 text-blue-800'
-                            : 'bg-yellow-100 text-yellow-800'
-                        }`}
-                      >
-                        {unit.matchType}
-                      </span>
-                    </td>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setFilter('all')}
+                className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+                  filter === 'all' ? 'bg-primary text-white' : 'bg-bg-secondary border border-border text-text-primary hover:bg-bg-hover'
+                }`}
+              >
+                All ({units.length})
+              </button>
+              <button
+                onClick={() => setFilter('unmatched')}
+                className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+                  filter === 'unmatched' ? 'bg-primary text-white' : 'bg-bg-secondary border border-border text-text-primary hover:bg-bg-hover'
+                }`}
+              >
+                Unmatched ({unmatchedCount})
+              </button>
+            </div>
+          </div>
+
+          {/* Units Table */}
+          <div className="bg-bg-card border border-border rounded-lg overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-bg-tertiary border-b border-border">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-sm font-semibold text-text-primary">Unit Number</th>
+                    <th className="px-4 py-3 text-left text-sm font-semibold text-text-primary">Repair VIN</th>
+                    <th className="px-4 py-3 text-left text-sm font-semibold text-text-primary">Telematics VIN</th>
+                    <th className="px-4 py-3 text-left text-sm font-semibold text-text-primary">Match Type</th>
+                    <th className="px-4 py-3 text-left text-sm font-semibold text-text-primary">Actions</th>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {filteredUnits.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="px-4 py-8 text-center text-text-secondary">
+                        {filter === 'unmatched'
+                          ? 'No unmatched units.'
+                          : 'No units found. Click Refresh Units to import from the repair database.'}
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredUnits.map(unit => (
+                      <tr
+                        key={unit.id}
+                        className={`hover:bg-bg-hover transition-colors ${unit.matchType === 'UNMATCHED' ? 'bg-amber-50/40 dark:bg-amber-900/10 border-l-2 border-l-amber-400' : ''}`}
+                      >
+                        <td className="px-4 py-3 text-sm font-semibold">
+                          {unit.repairUnitNumber || <span className="text-text-secondary italic">N/A</span>}
+                        </td>
+                        <td className="px-4 py-3 text-xs font-mono text-text-secondary">
+                          {unit.repairVin || '—'}
+                        </td>
+                        <td className="px-4 py-3 text-xs font-mono text-text-secondary">
+                          {unit.telematicsVin || '—'}
+                        </td>
+                        <td className="px-4 py-3">
+                          {matchTypeBadge(unit.matchType)}
+                        </td>
+                        <td className="px-4 py-3">
+                          {unit.matchType === 'UNMATCHED' ? (
+                            matchingUnitId === unit.id ? (
+                              <div className="flex items-center gap-2">
+                                <select
+                                  value={matchingVin}
+                                  onChange={e => setMatchingVin(e.target.value)}
+                                  className="text-xs px-2 py-1 rounded border border-border bg-bg-primary text-text-primary focus:outline-none focus:border-primary"
+                                >
+                                  <option value="">Select VIN...</option>
+                                  {availableVins.map(v => (
+                                    <option key={v} value={v}>{v}</option>
+                                  ))}
+                                </select>
+                                <button
+                                  onClick={() => confirmMatch(unit.id)}
+                                  disabled={!matchingVin || matchingInProgress}
+                                  className="text-xs px-2 py-1 rounded bg-primary text-white disabled:opacity-50 hover:bg-primary-dark"
+                                >
+                                  {matchingInProgress ? 'Saving...' : 'Match'}
+                                </button>
+                                <button
+                                  onClick={() => setMatchingUnitId(null)}
+                                  className="text-xs px-2 py-1 rounded border border-border text-text-secondary hover:bg-bg-hover"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => startMatching(unit.id)}
+                                className="text-xs px-2 py-1 rounded border border-primary text-primary hover:bg-primary/10 transition-colors"
+                              >
+                                Match VIN
+                              </button>
+                            )
+                          ) : (
+                            <button
+                              onClick={() => unmatchUnit(unit.id)}
+                              disabled={unmatchingId === unit.id}
+                              className="text-xs px-2 py-1 rounded border border-border text-text-secondary hover:bg-bg-hover hover:border-destructive hover:text-destructive transition-colors disabled:opacity-50"
+                            >
+                              {unmatchingId === unit.id ? 'Removing...' : 'Unmatch'}
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

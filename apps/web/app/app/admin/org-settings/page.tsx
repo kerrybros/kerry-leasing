@@ -3,6 +3,10 @@
 import { useOrganization } from '@clerk/nextjs';
 import { useEffect, useState } from 'react';
 import { useApiClient } from '@/hooks/useApiClient';
+import { Card, CardContent } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/Skeleton';
 
 interface RepairCustomerConfig {
   klOrgId: string;
@@ -15,32 +19,28 @@ export default function AdminOrgSettingsPage() {
   const { organization } = useOrganization();
   const { getApi } = useApiClient();
 
-  const [config, setConfig] = useState<RepairCustomerConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [customerName, setCustomerName] = useState('');
   const [contractStartDate, setContractStartDate] = useState('');
-  const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   useEffect(() => {
     if (!organization?.id) return;
     loadConfig();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [organization?.id]);
 
   const loadConfig = async () => {
     try {
       setLoading(true);
-      setError(null);
       const api = await getApi();
       const res = await api.get<{ config: RepairCustomerConfig | null }>('/admin/repair-customer');
-      const configData = res?.config ?? null;
-      setConfig(configData);
-      setCustomerName(configData?.customerName ?? '');
-      setContractStartDate(configData?.contractStartDate ?? '');
-    } catch (err: any) {
-      setError(err.message || 'Failed to load settings');
+      const config = res?.config ?? null;
+      setCustomerName(config?.customerName ?? '');
+      setContractStartDate(config?.contractStartDate ?? '');
+    } catch (err: unknown) {
+      setStatusMsg({ type: 'error', text: err instanceof Error ? err.message : 'Failed to load settings' });
     } finally {
       setLoading(false);
     }
@@ -50,22 +50,16 @@ export default function AdminOrgSettingsPage() {
     e.preventDefault();
     const name = (customerName ?? '').trim();
     if (!organization?.id || !name || !contractStartDate) return;
-
     try {
       setSaving(true);
-      setError(null);
-      setSaveSuccess(null);
-
+      setStatusMsg(null);
       const api = await getApi();
-      await api.put('/admin/repair-customer', {
-        customerName: name,
-        contractStartDate,
-      });
-
-      setSaveSuccess('Org settings saved successfully.');
+      await api.put('/admin/repair-customer', { customerName: name, contractStartDate });
+      setStatusMsg({ type: 'success', text: 'Settings saved.' });
+      setTimeout(() => setStatusMsg(null), 5000);
       await loadConfig();
-    } catch (err: any) {
-      setError(err.message || 'Failed to save settings');
+    } catch (err: unknown) {
+      setStatusMsg({ type: 'error', text: err instanceof Error ? err.message : 'Failed to save settings' });
     } finally {
       setSaving(false);
     }
@@ -73,72 +67,67 @@ export default function AdminOrgSettingsPage() {
 
   if (loading) {
     return (
-      <div className="container mx-auto px-4 py-8">
-        <div className="text-center">Loading org settings...</div>
+      <div className="container mx-auto px-4 py-8 max-w-xl flex flex-col gap-4">
+        <Skeleton style={{ height: 32, width: '40%', borderRadius: 8 }} />
+        <Skeleton style={{ height: 200, borderRadius: 8 }} />
       </div>
     );
   }
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold mb-2">Org Settings</h1>
-        <p className="text-text-secondary">
+    <div className="container mx-auto px-4 py-8 max-w-xl">
+      <div className="mb-6">
+        <h1 className="text-3xl font-bold mb-1">Org Settings</h1>
+        <p className="text-sm text-muted-foreground">
           Customer name and contract start date for{' '}
-          <span className="font-semibold">{organization?.name}</span>. This date is used as the
-          reference for data timeframes (repairs and telematics).
+          <span className="font-semibold text-foreground">{organization?.name}</span>.
+          This date is used as the reference for repair and telematics data ranges.
         </p>
       </div>
 
-      {error && (
-        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-800">
-          <strong>Error:</strong> {error}
-        </div>
-      )}
+      <Card>
+        <CardContent className="pt-6">
+          <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+            <div>
+              <label className="text-sm font-medium mb-2 block">Customer Name</label>
+              <Input
+                type="text"
+                value={customerName}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCustomerName(e.target.value)}
+                placeholder="e.g. Wolverine"
+                required
+              />
+            </div>
 
-      {saveSuccess && (
-        <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg text-green-800">
-          {saveSuccess}
-        </div>
-      )}
+            <div>
+              <label className="text-sm font-medium mb-2 block">Contract Start Date</label>
+              <Input
+                type="date"
+                value={contractStartDate}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setContractStartDate(e.target.value)}
+                required
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                Used as the start of the data range for repairs and telematics.
+              </p>
+            </div>
 
-      <form onSubmit={handleSubmit} className="bg-bg-secondary border border-border rounded-lg p-6 max-w-lg">
-        <div className="flex flex-col gap-5">
-          <div>
-            <label className="block text-sm font-medium mb-2">Customer Name</label>
-            <input
-              type="text"
-              value={customerName ?? ''}
-              onChange={(e) => setCustomerName(e.target.value)}
-              placeholder="e.g. Wolverine"
-              className="w-full px-3 py-2 bg-bg-primary border border-border rounded-lg text-sm focus:outline-none focus:border-primary"
-              required
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-2">Contract Start Date</label>
-            <input
-              type="date"
-              value={contractStartDate ?? ''}
-              onChange={(e) => setContractStartDate(e.target.value)}
-              className="w-full px-3 py-2 bg-bg-primary border border-border rounded-lg text-sm focus:outline-none focus:border-primary"
-              required
-            />
-            <p className="text-xs text-text-secondary mt-1">
-              Used as the start of the date range for repair and telematics data.
-            </p>
-          </div>
-
-          <button
-            type="submit"
-            disabled={saving || !(customerName ?? '').trim() || !contractStartDate}
-            className="w-fit px-5 py-2 bg-primary text-white rounded-lg hover:bg-primary-dark disabled:opacity-50 text-sm font-medium"
-          >
-            {saving ? 'Saving...' : 'Save Settings'}
-          </button>
-        </div>
-      </form>
+            <div className="flex items-center gap-4">
+              <Button
+                type="submit"
+                disabled={saving || !customerName.trim() || !contractStartDate}
+              >
+                {saving ? 'Saving...' : 'Save Settings'}
+              </Button>
+              {statusMsg && (
+                <p className={`text-sm ${statusMsg.type === 'success' ? 'text-green-600 dark:text-green-400' : 'text-destructive'}`}>
+                  {statusMsg.text}
+                </p>
+              )}
+            </div>
+          </form>
+        </CardContent>
+      </Card>
     </div>
   );
 }

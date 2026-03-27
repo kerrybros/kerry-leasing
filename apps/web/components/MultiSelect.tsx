@@ -1,6 +1,9 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import { cn } from '@/lib/utils';
+import { Input } from '@/components/ui/input';
+import { ChevronDown, Check } from 'lucide-react';
 
 interface Option {
   label: string;
@@ -15,12 +18,17 @@ interface MultiSelectProps {
   className?: string;
 }
 
-export function MultiSelect({ options, selected, onChange, placeholder = 'Select...', className = '' }: MultiSelectProps) {
+export function MultiSelect({
+  options,
+  selected,
+  onChange,
+  placeholder = 'Select...',
+  className = '',
+}: MultiSelectProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [searchTerm, setSearchQuery] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Close on click outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
@@ -31,81 +39,87 @@ export function MultiSelect({ options, selected, onChange, placeholder = 'Select
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const filteredOptions = options.filter(opt =>
+  const filteredOptions = options.filter((opt) =>
     opt.label.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   const toggleOption = (value: string) => {
-    const newSelected = selected.includes(value)
-      ? selected.filter(v => v !== value)
-      : [...selected, value];
-    onChange(newSelected);
+    onChange(
+      selected.includes(value) ? selected.filter((v) => v !== value) : [...selected, value]
+    );
   };
 
   return (
-    <div className={`relative ${className}`} ref={containerRef}>
-      <div
-        className="flex items-center justify-between w-full px-3 py-2 bg-bg-card border border-border rounded-md cursor-pointer min-h-[44px] min-w-[200px]"
+    <div className={cn('relative', className)} ref={containerRef}>
+      <button
+        type="button"
         onClick={() => setIsOpen(!isOpen)}
+        className="flex items-center justify-between w-full px-3 py-2 bg-card border border-border rounded-md text-sm text-foreground min-h-[36px] min-w-[200px] hover:bg-accent transition-colors"
       >
-        <span className="text-sm text-text-primary truncate select-none mr-2">
-          {selected.length === 0
-            ? placeholder
-            : `${selected.length} selected`}
+        <span className="truncate mr-2 text-left">
+          {selected.length === 0 ? (
+            <span className="text-muted-foreground">{placeholder}</span>
+          ) : (
+            `${selected.length} selected`
+          )}
         </span>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           {selected.length > 0 && (
             <span
               role="button"
               tabIndex={0}
-              className="text-xs text-text-secondary hover:text-text-primary transition-colors mr-1 underline"
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors underline"
               onClick={(e) => {
                 e.stopPropagation();
                 onChange([]);
               }}
-              title="Clear all"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') { e.stopPropagation(); onChange([]); }
+              }}
             >
               Clear
             </span>
           )}
-          <svg className={`w-4 h-4 text-text-secondary transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-          </svg>
+          <ChevronDown className={cn('w-4 h-4 text-muted-foreground transition-transform', isOpen && 'rotate-180')} />
         </div>
-      </div>
+      </button>
 
       {isOpen && (
-        <div className="absolute z-50 w-full mt-1 bg-bg-card border border-border rounded-md shadow-lg max-h-60 overflow-hidden flex flex-col">
+        <div className="absolute z-50 w-full mt-1 bg-card border border-border rounded-md shadow-lg max-h-60 overflow-hidden flex flex-col">
           <div className="p-2 border-b border-border">
-            <input
+            <Input
               type="text"
               placeholder="Search..."
-              className="w-full p-1 bg-bg-tertiary border border-border rounded text-sm text-text-primary focus:outline-none focus:border-primary"
               value={searchTerm}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e) => setSearchTerm(e.target.value)}
               onClick={(e) => e.stopPropagation()}
+              className="h-8 text-sm"
             />
           </div>
           <div className="overflow-y-auto flex-1">
             {filteredOptions.length === 0 ? (
-              <div className="p-2 text-sm text-text-secondary text-center">No options found</div>
+              <div className="p-3 text-sm text-muted-foreground text-center">No options found</div>
             ) : (
-              filteredOptions.map((option) => (
-                <div
-                  key={option.value}
-                  className="flex items-center px-3 py-2 cursor-pointer hover:bg-bg-hover"
-                  onClick={() => toggleOption(option.value)}
-                >
-                  <div className={`w-4 h-4 mr-2 border rounded flex items-center justify-center ${selected.includes(option.value) ? 'bg-primary border-primary' : 'border-text-secondary'}`}>
-                    {selected.includes(option.value) && (
-                      <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                      </svg>
-                    )}
+              filteredOptions.map((option) => {
+                const isSelected = selected.includes(option.value);
+                return (
+                  <div
+                    key={option.value}
+                    className="flex items-center px-3 py-2 cursor-pointer hover:bg-accent text-sm text-foreground"
+                    onClick={() => toggleOption(option.value)}
+                  >
+                    <div
+                      className={cn(
+                        'w-4 h-4 mr-2 border rounded flex items-center justify-center shrink-0',
+                        isSelected ? 'bg-primary border-primary' : 'border-muted-foreground'
+                      )}
+                    >
+                      {isSelected && <Check className="w-3 h-3 text-primary-foreground" />}
+                    </div>
+                    <span className="select-none">{option.label}</span>
                   </div>
-                  <span className="text-sm text-text-primary select-none">{option.label}</span>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </div>

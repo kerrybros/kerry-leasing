@@ -1,109 +1,134 @@
+@import "tw-animate-css";
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* ============================================
-   TRUCKGENIUS THEME SYSTEM
-   Fleet Management Portal - Dark & Light Mode
-   ============================================ */
-
-/* Dark Theme (Default) */
-:root[data-theme="dark"] {
-  /* Primary - Bright Blue */
-  --primary: #00a8ff;
-  --primary-dark: #0080cc;
-  --primary-light: #33b8ff;
-  
-  /* Backgrounds - Deep Blue/Navy */
-  --bg-primary: #0a0f1a;
-  --bg-secondary: #131b2e;
-  --bg-tertiary: #1a2332;
-  --bg-card: #1e2936;
-  --bg-hover: #252f3f;
-  
-  /* Text */
-  --text-primary: #ffffff;
-  --text-secondary: #94a3b8;
-  --text-tertiary: #64748b;
-  
-  /* Status Colors */
-  --success: #10b981;
-  --warning: #f59e0b;
-  --error: #ef4444;
-  
-  /* Borders */
-  --border: #2d3748;
-  --border-light: #374151;
-  
-  /* Shadows */
-  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.4);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.6);
-}
-
-/* Light Theme */
-:root[data-theme="light"] {
-  /* Primary - Bright Blue */
-  --primary: #0891b2;
-  --primary-dark: #0e7490;
-  --primary-light: #06b6d4;
-  
-  /* Backgrounds - Clean White/Gray */
-  --bg-primary: #f8fafc;
-  --bg-secondary: #ffffff;
-  --bg-tertiary: #f1f5f9;
-  --bg-card: #ffffff;
-  --bg-hover: #f1f5f9;
-  
-  /* Text */
-  --text-primary: #0f172a;
-  --text-secondary: #475569;
-  --text-tertiary: #64748b;
-  
-  /* Status Colors */
-  --success: #059669;
-  --warning: #d97706;
-  --error: #dc2626;
-  
-  /* Borders */
-  --border: #e2e8f0;
-  --border-light: #cbd5e1;
-  
-  /* Shadows */
-  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
-}
-
-/* Default to dark theme */
-:root {
-  --border-radius: 0.75rem;
-}
-
 @layer base {
+  :root {
+    /* shadcn tokens — light mode */
+    --background: oklch(1 0 0);
+    --foreground: oklch(0.145 0 0);
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.145 0 0);
+    --popover: oklch(1 0 0);
+    --popover-foreground: oklch(0.145 0 0);
+    --primary: oklch(0.74 0.16 85); /* #d9a528 gold */
+    --primary-foreground: oklch(0.985 0 0);
+    --secondary: oklch(0.97 0 0);
+    --secondary-foreground: oklch(0.205 0 0);
+    --muted: oklch(0.97 0 0);
+    --muted-foreground: oklch(0.556 0 0);
+    --accent: oklch(0.97 0 0);
+    --accent-foreground: oklch(0.205 0 0);
+    --destructive: oklch(0.577 0.245 27.325);
+    --border: oklch(0.922 0 0);
+    --input: oklch(0.922 0 0);
+    --ring: oklch(0.708 0 0);
+    --chart-1: oklch(0.87 0 0);
+    --chart-2: oklch(0.556 0 0);
+    --chart-3: oklch(0.439 0 0);
+    --chart-4: oklch(0.371 0 0);
+    --chart-5: oklch(0.269 0 0);
+    --radius: 0.625rem;
+    --sidebar: oklch(0.985 0 0);
+    --sidebar-foreground: oklch(0.145 0 0);
+    --sidebar-primary: oklch(0.205 0 0);
+    --sidebar-primary-foreground: oklch(0.985 0 0);
+    --sidebar-accent: oklch(0.97 0 0);
+    --sidebar-accent-foreground: oklch(0.205 0 0);
+    --sidebar-border: oklch(0.922 0 0);
+    --sidebar-ring: oklch(0.708 0 0);
+
+    /* Status colors */
+    --success: #059669;
+    --warning: #d97706;
+    --error: #dc2626;
+
+    /* Gold variants */
+    --primary-dark: oklch(0.64 0.16 85);
+    --primary-light: oklch(0.84 0.14 85);
+    --border-light: oklch(0.875 0 0);
+    --border-radius: var(--radius);
+
+    /* Shadow tokens */
+    --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.15);
+
+    /* Legacy aliases — existing pages reference these until Phase C rebuilds them */
+    --bg-primary: var(--background);
+    --bg-secondary: var(--muted);
+    --bg-tertiary: var(--muted);
+    --bg-card: var(--card);
+    --bg-hover: var(--accent);
+    --text-primary: var(--foreground);
+    --text-secondary: var(--muted-foreground);
+    --text-tertiary: var(--muted-foreground);
+  }
+
+  .dark {
+    /* shadcn tokens — dark mode */
+    --background: oklch(0.145 0 0);
+    --foreground: oklch(0.985 0 0);
+    --card: oklch(0.205 0 0);
+    --card-foreground: oklch(0.985 0 0);
+    --popover: oklch(0.205 0 0);
+    --popover-foreground: oklch(0.985 0 0);
+    --primary: oklch(0.74 0.16 85); /* #d9a528 gold */
+    --primary-foreground: oklch(0.205 0 0);
+    --secondary: oklch(0.269 0 0);
+    --secondary-foreground: oklch(0.985 0 0);
+    --muted: oklch(0.269 0 0);
+    --muted-foreground: oklch(0.708 0 0);
+    --accent: oklch(0.269 0 0);
+    --accent-foreground: oklch(0.985 0 0);
+    --destructive: oklch(0.704 0.191 22.216);
+    --border: oklch(1 0 0 / 10%);
+    --input: oklch(1 0 0 / 15%);
+    --ring: oklch(0.556 0 0);
+    --chart-1: oklch(0.87 0 0);
+    --chart-2: oklch(0.556 0 0);
+    --chart-3: oklch(0.439 0 0);
+    --chart-4: oklch(0.371 0 0);
+    --chart-5: oklch(0.269 0 0);
+    --sidebar: oklch(0.205 0 0);
+    --sidebar-foreground: oklch(0.985 0 0);
+    --sidebar-primary: oklch(0.488 0.243 264.376);
+    --sidebar-primary-foreground: oklch(0.985 0 0);
+    --sidebar-accent: oklch(0.269 0 0);
+    --sidebar-accent-foreground: oklch(0.985 0 0);
+    --sidebar-border: oklch(1 0 0 / 10%);
+    --sidebar-ring: oklch(0.556 0 0);
+
+    /* Status colors — dark mode */
+    --success: #10b981;
+    --warning: #f59e0b;
+    --error: #ef4444;
+
+    /* Shadow tokens — dark mode */
+    --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.4);
+    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
+    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.6);
+  }
+
+  .theme {
+    --font-heading: var(--font-sans);
+    --font-sans: var(--font-sans);
+  }
+
   * {
-    @apply box-border m-0 p-0;
+    @apply box-border border-border;
   }
 
-  html,
-  body {
-    @apply h-full bg-bg-primary text-text-primary antialiased;
+  html {
+    @apply h-full;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-      'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-      sans-serif;
-    transition: background-color 0.3s ease, color 0.3s ease;
+      'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
   }
-}
 
-/* ============================================
-   SKELETON LOADING
-   ============================================ */
-@keyframes skeleton-shimmer {
-  0% {
-    background-position: 200% 0;
-  }
-  100% {
-    background-position: -200% 0;
+  body {
+    @apply h-full bg-background text-foreground antialiased;
+    transition: background-color 0.3s ease, color 0.3s ease;
   }
 }
 
@@ -111,18 +136,6 @@
   /* Container */
   .container {
     @apply max-w-[1400px] mx-auto px-8 sm:px-4;
-  }
-
-  /* Skeleton loading */
-  .skeleton {
-    background: linear-gradient(
-      90deg,
-      var(--bg-tertiary) 25%,
-      var(--bg-hover) 37%,
-      var(--bg-tertiary) 63%
-    );
-    background-size: 400% 100%;
-    animation: skeleton-shimmer 1.2s ease-in-out infinite;
   }
 
   /* Page header pattern */
@@ -149,12 +162,12 @@
 
   /* Card */
   .card {
-    @apply bg-bg-card rounded-xl p-6 sm:p-4 shadow-md border border-border transition-all duration-200;
+    @apply bg-card rounded-xl p-6 sm:p-4 shadow-md border border-border transition-all duration-200;
   }
 
   /* Theme Toggle Button */
   .theme-toggle {
-    @apply flex items-center justify-center w-10 h-10 rounded-lg bg-bg-tertiary border border-border text-text-primary cursor-pointer transition-all duration-200 hover:bg-bg-hover hover:border-primary;
+    @apply flex items-center justify-center w-10 h-10 rounded-lg bg-muted border border-border text-foreground cursor-pointer transition-all duration-200 hover:bg-accent hover:border-primary;
   }
 
   .theme-toggle svg {
@@ -165,15 +178,15 @@
   .tabs {
     @apply flex gap-2 border-b-2 border-border mb-8 sm:mb-4 overflow-x-auto;
     -webkit-overflow-scrolling: touch;
-    scrollbar-width: none; /* Firefox */
+    scrollbar-width: none;
   }
 
   .tabs::-webkit-scrollbar {
-    display: none; /* Chrome/Safari/Webkit */
+    display: none;
   }
 
   .tab {
-    @apply px-6 sm:px-4 py-3 sm:py-2.5 bg-transparent border-none text-text-secondary text-base sm:text-[0.95rem] font-medium cursor-pointer border-b-[3px] border-transparent transition-all duration-200 relative -bottom-0.5 hover:text-text-primary hover:bg-bg-hover hover:rounded-t-xl whitespace-nowrap;
+    @apply px-6 sm:px-4 py-3 sm:py-2.5 bg-transparent border-none text-muted-foreground text-base sm:text-[0.95rem] font-medium cursor-pointer border-b-[3px] border-transparent transition-all duration-200 relative -bottom-0.5 hover:text-foreground hover:bg-accent hover:rounded-t-xl whitespace-nowrap;
   }
 
   .tab.active {
@@ -186,11 +199,11 @@
   }
 
   .toggle {
-    @apply flex bg-bg-tertiary rounded-lg p-1 border border-border;
+    @apply flex bg-muted rounded-lg p-1 border border-border;
   }
 
   .toggle-btn {
-    @apply px-6 sm:px-3.5 py-2 bg-transparent border-none text-text-secondary text-sm font-medium cursor-pointer rounded-md transition-all duration-200;
+    @apply px-6 sm:px-3.5 py-2 bg-transparent border-none text-muted-foreground text-sm font-medium cursor-pointer rounded-md transition-all duration-200;
   }
 
   .toggle-btn.active {
@@ -204,32 +217,31 @@
   }
 
   .table {
-    @apply w-full border-collapse bg-bg-card;
+    @apply w-full border-collapse bg-card;
   }
 
   .table thead {
-    @apply bg-bg-tertiary border-b-2 border-border;
+    @apply bg-muted border-b-2 border-border;
   }
 
   .table th {
-    @apply p-3 text-left font-semibold text-sm text-text-secondary uppercase tracking-wider;
+    @apply p-3 text-left font-semibold text-sm text-muted-foreground uppercase tracking-wider;
   }
 
   .table td {
-    @apply p-3 border-t border-border text-text-primary text-sm;
+    @apply p-3 border-t border-border text-foreground text-sm;
   }
 
-  /* Dense variant removed/deprecated in favor of standard consistent sizing */
   .table-dense th {
-    @apply p-3 text-left font-semibold text-sm text-text-secondary uppercase tracking-wider;
+    @apply p-3 text-left font-semibold text-sm text-muted-foreground uppercase tracking-wider;
   }
 
   .table-dense td {
-    @apply p-3 border-t border-border text-text-primary text-sm;
+    @apply p-3 border-t border-border text-foreground text-sm;
   }
 
   .table tbody tr {
-    @apply transition-colors duration-150 hover:bg-bg-hover;
+    @apply transition-colors duration-150 hover:bg-accent;
   }
 
   /* Button */
@@ -238,11 +250,11 @@
   }
 
   .btn-primary {
-    @apply bg-primary text-white hover:bg-primary-dark hover:-translate-y-0.5 hover:shadow-md;
+    @apply bg-primary text-white hover:opacity-90 hover:-translate-y-0.5 hover:shadow-md;
   }
 
   .btn-secondary {
-    @apply bg-bg-tertiary text-text-primary border border-border hover:bg-bg-hover;
+    @apply bg-muted text-foreground border border-border hover:bg-accent;
   }
 
   /* Badge */
@@ -269,33 +281,15 @@
   }
 
   .badge-gray {
-    @apply bg-bg-tertiary text-text-secondary border border-border;
-  }
-
-  /* Stat Card */
-  .stat-card {
-    @apply bg-bg-card p-6 rounded-xl border border-border transition-all duration-200 hover:border-primary hover:-translate-y-0.5 hover:shadow-lg;
-  }
-
-  .stat-label {
-    @apply text-text-secondary text-sm font-medium uppercase tracking-wide mb-2;
-  }
-
-  .stat-value {
-    @apply text-text-primary text-3xl font-bold leading-none;
-  }
-
-  .stat-subtext {
-    @apply text-text-tertiary text-sm mt-2;
+    @apply bg-muted text-muted-foreground border border-border;
   }
 
   /* Loading & Error States */
-  .loading,
-  .error {
-    @apply text-center p-12 text-text-secondary;
+  .loading {
+    @apply text-center p-12 text-muted-foreground;
   }
 
   .error {
-    @apply text-error;
+    @apply text-center p-12 text-destructive;
   }
 }
