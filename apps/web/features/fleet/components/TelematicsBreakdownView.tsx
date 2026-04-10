@@ -21,7 +21,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import type { UnitMetrics, DriverMetrics, FleetTotals } from './types';
+import type { UnitMetrics, DriverMetrics, FleetTotals } from '@/features/fleet/types';
 
 interface TelematicsBreakdownViewProps {
   viewMode: 'unit' | 'driver';

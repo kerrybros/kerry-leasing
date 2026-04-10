@@ -15,9 +15,9 @@ export default function AppError({
 
   return (
     <div className="min-h-[50vh] flex items-center justify-center p-6">
-      <div className="bg-bg-card border border-border rounded-xl shadow-lg p-8 max-w-md w-full text-center">
-        <h2 className="text-xl font-bold text-text-primary mb-2">Something went wrong</h2>
-        <p className="text-text-secondary text-sm mb-6">
+      <div className="bg-card border border-border rounded-xl shadow-lg p-8 max-w-md w-full text-center">
+        <h2 className="text-xl font-bold text-foreground mb-2">Something went wrong</h2>
+        <p className="text-muted-foreground text-sm mb-6">
           An unexpected error occurred. Please try again.
         </p>
         <button

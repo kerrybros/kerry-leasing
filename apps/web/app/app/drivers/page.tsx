@@ -1,16 +1,10 @@
 'use client';
 
-import { useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useOrganization } from '@clerk/nextjs';
 import Papa from 'papaparse';
-import {
-  useOrgSettingsQuery,
-  useDriverUtilizationQuery,
-  useVehicleUtilizationQuery,
-  useFleetUnitsQuery,
-} from '@/hooks/useDataQueries';
-import { computeDriverScore, scoreVariant } from '@/lib/driverScore';
+import { useDriversData } from '@/features/drivers/hooks/useDriversData';
+import { scoreVariant } from '@/lib/driverScore';
 import { Skeleton } from '@/components/Skeleton';
 import { EmptyState } from '@/components/EmptyState';
 import { Badge } from '@/components/ui/badge';
@@ -23,16 +17,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-
-interface DriverRow {
-  driverId: number;
-  driverName: string;
-  totalMiles: number;
-  avgMpg: number;
-  idlePct: number;
-  idleFuelGal: number;
-  score: number;
-}
+import type { DriverRow } from '@/features/drivers/types';
 
 function downloadCsv(rows: DriverRow[], orgName: string) {
   const data = rows.map(r => ({
@@ -41,6 +26,8 @@ function downloadCsv(rows: DriverRow[], orgName: string) {
     MPG: r.avgMpg.toFixed(2),
     'Idle %': r.idlePct.toFixed(2),
     'Idle Fuel (gal)': Math.round(r.idleFuelGal),
+    'Total Fuel (gal)': Math.round(r.totalFuelGal),
+    'Est. Fuel Cost': r.estimatedFuelCost,
     Score: r.score,
   }));
   const csv = Papa.unparse(data);
@@ -62,68 +49,11 @@ function scoreBadgeVariant(variant: string): 'default' | 'secondary' | 'destruct
 export default function DriversPage() {
   const router = useRouter();
   const { organization } = useOrganization();
-
-  const orgSettingsQuery = useOrgSettingsQuery();
-  const orgSettings = orgSettingsQuery.data;
-
-  const isMotive = orgSettings?.telematicsProvider === 'MOTIVE';
-  const tracksDrivers = orgSettings?.tracksDrivers === true;
-  const canShow = isMotive && tracksDrivers;
-
-  const driverUtilQuery = useDriverUtilizationQuery(canShow);
-  const fleetUnitsQuery = useFleetUnitsQuery();
-  const vehicleUtilQuery = useVehicleUtilizationQuery(canShow ? 'MOTIVE' : undefined);
-
-  const fleetAvgMpg = useMemo(() => {
-    if (!fleetUnitsQuery.data || !vehicleUtilQuery.data) return undefined;
-    const includedVins = new Set(
-      fleetUnitsQuery.data.units.filter(u => u.telematicsVin).map(u => u.telematicsVin!)
-    );
-    const data = vehicleUtilQuery.data.filter(v => v.vin && includedVins.has(v.vin));
-    let totalMiles = 0, totalFuel = 0;
-    data.forEach(r => {
-      totalMiles += r.totalDistance || 0;
-      totalFuel += r.totalFuel || 0;
-    });
-    return totalFuel > 0 ? totalMiles / totalFuel : undefined;
-  }, [fleetUnitsQuery.data, vehicleUtilQuery.data]);
-
-  const driverRows = useMemo((): DriverRow[] => {
-    if (!driverUtilQuery.data) return [];
-    const grouped = new Map<number, {
-      driverId: number; driverName: string;
-      totalMiles: number; totalFuel: number;
-      totalIdleTime: number; totalDrivingTime: number; totalIdleFuel: number;
-    }>();
-    driverUtilQuery.data.forEach(r => {
-      if (!r.driverId) return;
-      const existing = grouped.get(r.driverId) || {
-        driverId: r.driverId,
-        driverName: `${r.driverFirstName || ''} ${r.driverLastName || ''}`.trim() || `Driver ${r.driverId}`,
-        totalMiles: 0, totalFuel: 0,
-        totalIdleTime: 0, totalDrivingTime: 0, totalIdleFuel: 0,
-      };
-      existing.totalMiles += r.totalDistance || 0;
-      existing.totalFuel += (r.drivingFuel || 0) + (r.idleFuel || 0);
-      existing.totalIdleTime += r.idleTime || 0;
-      existing.totalDrivingTime += r.drivingTime || 0;
-      existing.totalIdleFuel += r.idleFuel || 0;
-      grouped.set(r.driverId, existing);
-    });
-    return Array.from(grouped.values()).map(d => {
-      const engineOn = d.totalIdleTime + d.totalDrivingTime;
-      const idlePct = engineOn > 0 ? (d.totalIdleTime / engineOn) * 100 : 0;
-      const avgMpg = d.totalFuel > 0 && d.totalMiles > 0 ? d.totalMiles / d.totalFuel : 0;
-      const score = computeDriverScore({ idlePct, mpg: avgMpg, fleetAvgMpg });
-      return { driverId: d.driverId, driverName: d.driverName, totalMiles: d.totalMiles, avgMpg, idlePct, idleFuelGal: d.totalIdleFuel, score };
-    }).sort((a, b) => b.score - a.score);
-  }, [driverUtilQuery.data, fleetAvgMpg]);
-
-  const isLoading = orgSettingsQuery.isLoading || driverUtilQuery.isLoading;
+  const { orgSettingsQuery, canShow, isMotive, tracksDrivers, driverRows, isLoading } = useDriversData();
 
   if (orgSettingsQuery.isLoading) {
     return (
-      <div className="container p-6">
+      <div className="max-w-[1400px] mx-auto px-4 sm:px-6 p-6">
         <Skeleton style={{ height: 300, borderRadius: 8, marginTop: 24 }} />
       </div>
     );
@@ -131,7 +61,7 @@ export default function DriversPage() {
 
   if (!canShow) {
     return (
-      <div className="container p-6 pt-8">
+      <div className="max-w-[1400px] mx-auto px-4 sm:px-6 p-6 pt-8">
         <EmptyState
           title="Driver Scorecard Unavailable"
           description={
@@ -144,7 +74,6 @@ export default function DriversPage() {
     );
   }
 
-  // Top 3 = best score (already sorted desc), Bottom 3 = worst score
   const topIds = new Set(driverRows.slice(0, 3).map(r => r.driverId));
   const bottomIds = new Set(driverRows.slice(-3).map(r => r.driverId));
 
@@ -177,7 +106,7 @@ export default function DriversPage() {
           description="No driver utilization records found. Ensure telematics data has been synced."
         />
       ) : (
-        <div className="rounded-lg border border-border overflow-hidden">
+        <div className="overflow-x-auto rounded-lg border border-border">
           <Table>
             <TableHeader>
               <TableRow className="bg-muted hover:bg-muted">
@@ -187,6 +116,8 @@ export default function DriversPage() {
                 <TableHead className="text-muted-foreground font-semibold uppercase tracking-wide text-xs">MPG</TableHead>
                 <TableHead className="text-muted-foreground font-semibold uppercase tracking-wide text-xs">Idle %</TableHead>
                 <TableHead className="text-muted-foreground font-semibold uppercase tracking-wide text-xs">Idle Fuel (gal)</TableHead>
+                <TableHead className="text-muted-foreground font-semibold uppercase tracking-wide text-xs">Total Fuel (gal)</TableHead>
+                <TableHead className="text-muted-foreground font-semibold uppercase tracking-wide text-xs">Est. Fuel Cost</TableHead>
                 <TableHead className="text-muted-foreground font-semibold uppercase tracking-wide text-xs">Score</TableHead>
               </TableRow>
             </TableHeader>
@@ -214,6 +145,8 @@ export default function DriversPage() {
                     <TableCell>{row.avgMpg.toFixed(2)}</TableCell>
                     <TableCell className="font-semibold">{row.idlePct.toFixed(2)}%</TableCell>
                     <TableCell>{Math.round(row.idleFuelGal).toLocaleString()}</TableCell>
+                    <TableCell>{Math.round(row.totalFuelGal).toLocaleString()}</TableCell>
+                    <TableCell>${row.estimatedFuelCost.toLocaleString()}</TableCell>
                     <TableCell>
                       <Badge variant={scoreBadgeVariant(variant)} className="font-bold tabular-nums">
                         {row.score}

@@ -3,7 +3,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useOrganization } from '@clerk/nextjs';
 import { useApiClient } from './useApiClient';
-import type { RepairUnitSummary } from '@/app/app/fleet/RepairBreakdown';
+import type { RepairUnitSummary } from '@/features/fleet/components/RepairBreakdown';
 
 // --- Shared Types ---
 
@@ -11,6 +11,11 @@ export type OrgSettings = {
   tracksDrivers: boolean;
   telematicsProvider: 'MOTIVE' | 'SAMSARA' | null;
   contractStartDate: string | null;
+  serviceRequestUrl: string | null;
+  contractTermYears: number | null;
+  telematicsDashboardUrl: string | null;
+  telematicsDashboardUsername: string | null;
+  telematicsDashboardPassword: string | null;
 };
 
 export type VehicleUtilization = {
@@ -23,6 +28,7 @@ export type VehicleUtilization = {
   drivingTime: number | null;   // seconds
   totalFuel: number | null;     // gallons
   idleFuel: number | null;      // gallons
+  drivingFuel: number | null;   // gallons
 };
 
 export type DriverUtilization = {
@@ -118,19 +124,21 @@ export type RepairsResponse = {
 
 // --- Query Keys ---
 
-const keys = {
+export const keys = {
   orgSettings: (orgId: string | undefined) =>
     ['org-settings', orgId] as const,
   fleetUnits: (orgId: string | undefined) =>
     ['fleet-units', orgId] as const,
-  vehicleUtilization: (orgId: string | undefined, provider: string | null) =>
-    ['vehicle-utilization', orgId, provider] as const,
-  driverUtilization: (orgId: string | undefined) =>
-    ['driver-utilization', orgId] as const,
+  vehicleUtilization: (orgId: string | undefined, startDate?: string, endDate?: string) =>
+    ['vehicle-utilization', orgId, startDate, endDate] as const,
+  driverUtilization: (orgId: string | undefined, startDate?: string, endDate?: string) =>
+    ['driver-utilization', orgId, startDate, endDate] as const,
   repairs: (orgId: string | undefined) =>
     ['repairs', orgId] as const,
   unitDetail: (orgId: string | undefined, vin: string) =>
     ['unit-detail', orgId, vin] as const,
+  servicePlan: (orgId: string) =>
+    ['service-plan', orgId] as const,
 };
 
 // --- Hooks ---
@@ -163,42 +171,57 @@ export function useFleetUnitsQuery() {
   });
 }
 
+/**
+ * Normalized vehicle utilization — provider-agnostic.
+ * The backend TelematicsService routes to the correct provider table.
+ * Optional date params filter server-side; omit for all-time data (backend returns all records).
+ */
 export function useVehicleUtilizationQuery(
-  provider: 'MOTIVE' | 'SAMSARA' | null | undefined
+  startDate?: string,
+  endDate?: string
 ) {
   const { getApi } = useApiClient();
   const { organization } = useOrganization();
   return useQuery({
-    queryKey: keys.vehicleUtilization(organization?.id, provider ?? null),
+    queryKey: keys.vehicleUtilization(organization?.id, startDate, endDate),
     queryFn: async (): Promise<VehicleUtilization[]> => {
       const api = await getApi();
-      if (provider === 'MOTIVE') {
-        const resp = await api.get<{ data: VehicleUtilization[] }>(
-          '/telematics/motive/vehicle-utilization?pageSize=50000'
-        );
-        return resp.data;
-      }
-      if (provider === 'SAMSARA') {
-        const resp = await api.get<{ data: VehicleUtilization[] }>(
-          '/telematics/samsara/vehicle-stats?pageSize=50000'
-        );
-        return resp.data;
-      }
-      return [];
+      const params = new URLSearchParams();
+      if (startDate) params.set('startDate', startDate);
+      if (endDate) params.set('endDate', endDate);
+      const qs = params.toString() ? `?${params.toString()}` : '';
+      const resp = await api.get<{ data: VehicleUtilization[] }>(
+        `/telematics/normalized/vehicle-utilization${qs}`
+      );
+      return resp.data;
     },
-    enabled: !!organization?.id && !!provider,
+    enabled: !!organization?.id,
     staleTime: 2 * 60 * 1000,
   });
 }
 
-export function useDriverUtilizationQuery(enabled = true) {
+/**
+ * Normalized driver utilization — provider-agnostic.
+ */
+export function useDriverUtilizationQuery(
+  enabled = true,
+  startDate?: string,
+  endDate?: string
+) {
   const { getApi } = useApiClient();
   const { organization } = useOrganization();
   return useQuery({
-    queryKey: keys.driverUtilization(organization?.id),
+    queryKey: keys.driverUtilization(organization?.id, startDate, endDate),
     queryFn: async (): Promise<DriverUtilization[]> => {
       const api = await getApi();
-      return api.get<DriverUtilization[]>('/telematics/motive/driver-utilization');
+      const params = new URLSearchParams();
+      if (startDate) params.set('startDate', startDate);
+      if (endDate) params.set('endDate', endDate);
+      const qs = params.toString() ? `?${params.toString()}` : '';
+      const resp = await api.get<{ data: DriverUtilization[]; provider: string }>(
+        `/telematics/normalized/driver-utilization${qs}`
+      );
+      return resp.data;
     },
     enabled: !!organization?.id && enabled,
     staleTime: 2 * 60 * 1000,
@@ -229,6 +252,47 @@ export function useUnitDetailQuery(vin: string) {
       return api.get<UnitDetailResponse>(`/fleet/units/${vin}`);
     },
     enabled: !!organization?.id && !!vin,
+    staleTime: 2 * 60 * 1000,
+  });
+}
+
+export type ServicePlanUnit = {
+  id: string;
+  repairUnitId: string;
+  repairUnitNumber: string | null;
+  repairVin: string | null;
+  telematicsVin: string | null;
+  matchType: 'AUTO' | 'MANUAL' | 'UNMATCHED';
+  matchConfidence: number | null;
+  notes: string | null;
+  telematicsData?: {
+    vehicleNumber: string;
+    lastDataDate: string;
+    hasTelematicsData: boolean;
+  } | null;
+};
+
+export type ServicePlanSummary = {
+  total: number;
+  matched: number;
+  unmatched: number;
+  fromRepair: number;
+  fromTelematicsOnly: number;
+  withTelematicsData: number;
+};
+
+export function useServicePlanQuery() {
+  const { getApi } = useApiClient();
+  const { organization } = useOrganization();
+  return useQuery({
+    queryKey: keys.servicePlan(organization?.id ?? ''),
+    queryFn: async () => {
+      const api = await getApi();
+      return api.get<{ units: ServicePlanUnit[]; summary: ServicePlanSummary }>(
+        '/admin/service-plan/units?summary=true'
+      );
+    },
+    enabled: !!organization?.id,
     staleTime: 2 * 60 * 1000,
   });
 }

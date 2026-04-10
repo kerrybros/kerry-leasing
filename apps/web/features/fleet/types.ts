@@ -31,7 +31,12 @@ export interface DriverMetrics {
 export interface FleetTotals {
   totalMiles: number;
   totalIdleFuel: number;
+  totalDrivingFuel: number;
+  totalFuel: number;
   totalIdleTime: number;
+  totalDrivingTime: number;
   avgMpg: string;
   idlePercentage: string;
+  estimatedFuelCost: number;
+  estimatedIdleFuelCost: number;
 }

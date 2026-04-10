@@ -62,7 +62,7 @@ export default function DriverDetailPage() {
     orgSettingsQuery.data?.tracksDrivers && orgSettingsQuery.data?.telematicsProvider === 'MOTIVE'
   );
   const fleetUnitsQuery = useFleetUnitsQuery();
-  const vehicleUtilQuery = useVehicleUtilizationQuery(orgSettingsQuery.data?.telematicsProvider);
+  const vehicleUtilQuery = useVehicleUtilizationQuery();
 
   const driverRecords = useMemo(() => {
     if (!driverUtilQuery.data) return [];
@@ -103,7 +103,7 @@ export default function DriverDetailPage() {
     const avgMpg = totalFuel > 0 && totalMiles > 0 ? totalMiles / totalFuel : 0;
     const driveTimeHours = totalDrivingTime / 3600;
     const score = computeDriverScore({ idlePct, mpg: avgMpg, fleetAvgMpg });
-    return { totalMiles, avgMpg, idlePct, totalIdleFuel, driveTimeHours, score };
+    return { totalMiles, totalFuel, avgMpg, idlePct, totalIdleFuel, driveTimeHours, score };
   }, [driverRecords, fleetAvgMpg]);
 
   const monthlyMetrics = useMemo((): MonthlyDriverMetrics[] => {
@@ -144,7 +144,7 @@ export default function DriverDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="container p-6">
+      <div className="max-w-[1400px] mx-auto px-4 sm:px-6 p-6">
         <Skeleton style={{ height: 32, width: '30%', borderRadius: 8, marginTop: 24 }} />
         <div className="grid grid-cols-5 gap-3 mt-6">
           {[1, 2, 3, 4, 5].map(i => <Skeleton key={i} style={{ height: 90, borderRadius: 8 }} />)}
@@ -156,7 +156,7 @@ export default function DriverDetailPage() {
 
   if (isNaN(driverId) || driverRecords.length === 0) {
     return (
-      <div className="container p-6 pt-8">
+      <div className="max-w-[1400px] mx-auto px-4 sm:px-6 p-6 pt-8">
         <Button variant="outline" onClick={() => router.back()} className="mb-4">
           Back to Drivers
         </Button>
@@ -188,11 +188,13 @@ export default function DriverDetailPage() {
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 mb-8">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 mb-8">
         <KpiCard label="Total Miles" value={Math.round(kpis.totalMiles).toLocaleString()} subtext="miles" />
         <KpiCard label="Avg MPG" value={kpis.avgMpg.toFixed(2)} />
         <KpiCard label="Idle %" value={`${kpis.idlePct.toFixed(2)}%`} variant={kpis.idlePct > 30 ? 'warning' : 'default'} />
         <KpiCard label="Idle Fuel" value={Math.round(kpis.totalIdleFuel).toLocaleString()} subtext="gallons" />
+        <KpiCard label="Total Fuel" value={Math.round(kpis.totalFuel).toLocaleString()} subtext="gallons" />
+        <KpiCard label="Est. Fuel Cost" value={`$${Math.round(kpis.totalFuel * 3.50).toLocaleString()}`} />
         <KpiCard label="Total Drive Time" value={`${Math.round(kpis.driveTimeHours).toLocaleString()} hrs`} />
       </div>
 

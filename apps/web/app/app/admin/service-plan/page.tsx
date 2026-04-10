@@ -1,8 +1,10 @@
 'use client';
 
 import { useOrganization } from '@clerk/nextjs';
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useApiClient } from '@/hooks/useApiClient';
+import { useServicePlanQuery, useOrgSettingsQuery, keys } from '@/hooks/useDataQueries';
 import { KpiCard } from '@/components/KpiCard';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -14,31 +16,6 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Skeleton } from '@/components/Skeleton';
-
-interface ServicePlanUnit {
-  id: string;
-  repairUnitId: string;
-  repairUnitNumber: string | null;
-  repairVin: string | null;
-  telematicsVin: string | null;
-  matchType: 'AUTO' | 'MANUAL' | 'UNMATCHED';
-  matchConfidence: number | null;
-  notes: string | null;
-  telematicsData?: {
-    vehicleNumber: string;
-    lastDataDate: string;
-    hasTelematicsData: boolean;
-  } | null;
-}
-
-interface UnitsSummary {
-  total: number;
-  matched: number;
-  unmatched: number;
-  fromRepair: number;
-  fromTelematicsOnly: number;
-  withTelematicsData: number;
-}
 
 interface Toast {
   id: number;
@@ -58,60 +35,82 @@ function useToasts() {
   return { toasts, addToast: add };
 }
 
+function matchTypeBadge(type: 'AUTO' | 'MANUAL' | 'UNMATCHED') {
+  if (type === 'AUTO') return (
+    <Badge variant="default" className="bg-green-600 hover:bg-green-600">Auto</Badge>
+  );
+  if (type === 'MANUAL') return (
+    <Badge variant="secondary">Manual</Badge>
+  );
+  return (
+    <Badge variant="outline" className="border-amber-400 text-amber-600 dark:text-amber-400">Unmatched</Badge>
+  );
+}
+
 export default function AdminServicePlanPage() {
-  const { getApi } = useApiClient();
   const { organization } = useOrganization();
+  const { getApi } = useApiClient();
+  const queryClient = useQueryClient();
   const { toasts, addToast } = useToasts();
 
-  const [units, setUnits] = useState<ServicePlanUnit[]>([]);
-  const [summary, setSummary] = useState<UnitsSummary | null>(null);
-  const [telematicsProvider, setTelematicsProvider] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [syncing, setSyncing] = useState(false);
-  const [filter, setFilter] = useState<'all' | 'unmatched'>('all');
+  const servicePlanQuery = useServicePlanQuery();
+  const orgSettingsQuery = useOrgSettingsQuery();
 
+  const [filter, setFilter] = useState<'all' | 'unmatched'>('all');
   const [availableVins, setAvailableVins] = useState<string[]>([]);
   const [matchingUnitId, setMatchingUnitId] = useState<string | null>(null);
   const [matchingVin, setMatchingVin] = useState('');
-  const [matchingInProgress, setMatchingInProgress] = useState(false);
-  const [unmatchingId, setUnmatchingId] = useState<string | null>(null);
 
-  const loadUnits = useCallback(async () => {
-    try {
-      setLoading(true);
-      const api = await getApi();
-      const [data, settings] = await Promise.all([
-        api.get<{ units: ServicePlanUnit[]; summary: UnitsSummary }>('/admin/service-plan/units'),
-        api.get<{ telematicsProvider: string | null }>('/org/settings'),
-      ]);
-      setUnits(data.units);
-      setSummary(data.summary);
-      setTelematicsProvider(settings.telematicsProvider);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Failed to load units';
-      addToast('error', msg);
-    } finally {
-      setLoading(false);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [getApi]);
+  const units = servicePlanQuery.data?.units ?? [];
+  const summary = servicePlanQuery.data?.summary ?? null;
+  const telematicsProvider = orgSettingsQuery.data?.telematicsProvider ?? null;
+  const orgId = organization?.id ?? '';
 
-  const syncUnits = async () => {
-    try {
-      setSyncing(true);
+  const syncMutation = useMutation({
+    mutationFn: async () => {
       const api = await getApi();
-      const data = await api.post<{
+      return api.post<{
         success: boolean; synced: number; autoMatched: number;
         summary: { totalUnits: number; fromRepair: number; fromTelematics: number; matchedUnits: number };
       }>('/admin/service-plan/sync', {});
+    },
+    onSuccess: (data) => {
       addToast('success', `Synced ${data.synced} units. ${data.autoMatched} auto-matched.`);
-      await loadUnits();
-    } catch (err: unknown) {
+      queryClient.invalidateQueries({ queryKey: keys.servicePlan(orgId) });
+    },
+    onError: (err: unknown) => {
       addToast('error', err instanceof Error ? err.message : 'Failed to sync units');
-    } finally {
-      setSyncing(false);
-    }
-  };
+    },
+  });
+
+  const matchMutation = useMutation({
+    mutationFn: async ({ unitId, telematicsVin }: { unitId: string; telematicsVin: string }) => {
+      const api = await getApi();
+      await api.put(`/admin/service-plan/units/${unitId}/match`, { telematicsVin });
+    },
+    onSuccess: () => {
+      addToast('success', 'Unit matched successfully.');
+      setMatchingUnitId(null);
+      queryClient.invalidateQueries({ queryKey: keys.servicePlan(orgId) });
+    },
+    onError: (err: unknown) => {
+      addToast('error', err instanceof Error ? err.message : 'Failed to match unit');
+    },
+  });
+
+  const unmatchMutation = useMutation({
+    mutationFn: async (unitId: string) => {
+      const api = await getApi();
+      await api.delete(`/admin/service-plan/units/${unitId}/match`);
+    },
+    onSuccess: () => {
+      addToast('success', 'Unit unmatched.');
+      queryClient.invalidateQueries({ queryKey: keys.servicePlan(orgId) });
+    },
+    onError: (err: unknown) => {
+      addToast('error', err instanceof Error ? err.message : 'Failed to unmatch unit');
+    },
+  });
 
   const loadAvailableVins = async () => {
     try {
@@ -129,65 +128,17 @@ export default function AdminServicePlanPage() {
     if (availableVins.length === 0) loadAvailableVins();
   };
 
-  const confirmMatch = async (unitId: string) => {
-    if (!matchingVin) return;
-    try {
-      setMatchingInProgress(true);
-      const api = await getApi();
-      await api.put(`/admin/service-plan/units/${unitId}/match`, { telematicsVin: matchingVin });
-      addToast('success', 'Unit matched successfully.');
-      setMatchingUnitId(null);
-      await loadUnits();
-    } catch (err: unknown) {
-      addToast('error', err instanceof Error ? err.message : 'Failed to match unit');
-    } finally {
-      setMatchingInProgress(false);
-    }
-  };
-
-  const unmatchUnit = async (unitId: string) => {
-    try {
-      setUnmatchingId(unitId);
-      const api = await getApi();
-      await (api as unknown as { delete: (url: string) => Promise<unknown> }).delete(`/admin/service-plan/units/${unitId}/match`);
-      addToast('success', 'Unit unmatched.');
-      await loadUnits();
-    } catch (err: unknown) {
-      addToast('error', err instanceof Error ? err.message : 'Failed to unmatch unit');
-    } finally {
-      setUnmatchingId(null);
-    }
-  };
-
-  useEffect(() => {
-    if (organization?.id) loadUnits();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [organization?.id]);
-
   const autoCount = units.filter(u => u.matchType === 'AUTO').length;
   const manualCount = units.filter(u => u.matchType === 'MANUAL').length;
   const unmatchedCount = summary?.unmatched ?? 0;
+  const filteredUnits = filter === 'unmatched'
+    ? units.filter(u => u.matchType === 'UNMATCHED')
+    : units;
 
-  const filteredUnits = units.filter(unit => {
-    if (filter === 'unmatched') return unit.matchType === 'UNMATCHED';
-    return true;
-  });
-
-  const matchTypeBadge = (type: 'AUTO' | 'MANUAL' | 'UNMATCHED') => {
-    if (type === 'AUTO') return (
-      <Badge variant="default" className="bg-green-600 hover:bg-green-600">Auto</Badge>
-    );
-    if (type === 'MANUAL') return (
-      <Badge variant="secondary">Manual</Badge>
-    );
-    return (
-      <Badge variant="outline" className="border-amber-400 text-amber-600 dark:text-amber-400">Unmatched</Badge>
-    );
-  };
+  const isLoading = servicePlanQuery.isLoading || orgSettingsQuery.isLoading;
 
   return (
     <div className="w-full p-6" style={{ maxWidth: '1400px' }}>
-      {/* Toast notifications */}
       {toasts.length > 0 && (
         <div className="fixed top-4 right-4 z-50 flex flex-col gap-2 max-w-sm w-full">
           {toasts.map(t => (
@@ -213,7 +164,7 @@ export default function AdminServicePlanPage() {
         </p>
       </div>
 
-      {loading ? (
+      {isLoading ? (
         <div className="flex flex-col gap-4">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {[1, 2, 3, 4].map(i => <Skeleton key={i} style={{ height: 80, borderRadius: 8 }} />)}
@@ -222,7 +173,6 @@ export default function AdminServicePlanPage() {
         </div>
       ) : (
         <>
-          {/* Summary Cards */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
             <KpiCard label="Total Units" value={summary?.total ?? 0} />
             <KpiCard label="Auto-Matched" value={autoCount} variant="success" />
@@ -230,13 +180,16 @@ export default function AdminServicePlanPage() {
             <KpiCard label="Unmatched" value={unmatchedCount} variant={unmatchedCount > 0 ? 'warning' : 'default'} />
           </div>
 
-          {/* Actions */}
           <div className="flex flex-wrap gap-3 items-center mb-4">
-            <Button onClick={syncUnits} disabled={syncing} className="flex items-center gap-2">
+            <Button
+              onClick={() => syncMutation.mutate()}
+              disabled={syncMutation.isPending}
+              className="flex items-center gap-2"
+            >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
               </svg>
-              {syncing ? 'Syncing...' : 'Refresh Units'}
+              {syncMutation.isPending ? 'Syncing...' : 'Refresh Units'}
             </Button>
 
             <div className="flex rounded-md border border-border overflow-hidden">
@@ -259,7 +212,6 @@ export default function AdminServicePlanPage() {
             </div>
           </div>
 
-          {/* Units Table */}
           <div className="bg-card border border-border rounded-lg overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full">
@@ -315,11 +267,11 @@ export default function AdminServicePlanPage() {
                                 </Select>
                                 <Button
                                   size="sm"
-                                  onClick={() => confirmMatch(unit.id)}
-                                  disabled={!matchingVin || matchingInProgress}
+                                  onClick={() => matchMutation.mutate({ unitId: unit.id, telematicsVin: matchingVin })}
+                                  disabled={!matchingVin || matchMutation.isPending}
                                   className="h-8"
                                 >
-                                  {matchingInProgress ? 'Saving...' : 'Match'}
+                                  {matchMutation.isPending ? 'Saving...' : 'Match'}
                                 </Button>
                                 <Button
                                   size="sm"
@@ -344,11 +296,11 @@ export default function AdminServicePlanPage() {
                             <Button
                               size="sm"
                               variant="ghost"
-                              onClick={() => unmatchUnit(unit.id)}
-                              disabled={unmatchingId === unit.id}
+                              onClick={() => unmatchMutation.mutate(unit.id)}
+                              disabled={unmatchMutation.isPending}
                               className="h-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
                             >
-                              {unmatchingId === unit.id ? 'Removing...' : 'Unmatch'}
+                              {unmatchMutation.isPending ? 'Removing...' : 'Unmatch'}
                             </Button>
                           )}
                         </td>

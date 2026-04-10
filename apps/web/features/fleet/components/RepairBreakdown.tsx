@@ -280,129 +280,144 @@ export function RepairBreakdown({
   return (
     <div className="flex flex-col gap-6">
       {error && (
-        <div className="card" style={{ borderColor: 'var(--error)' }}>
-          <div style={{ color: 'var(--error)', fontWeight: 700, marginBottom: 4 }}>Failed to load repair data</div>
-          <div style={{ color: 'var(--text-secondary)' }}>{error}</div>
+        <div className="bg-destructive/10 text-destructive px-4 py-3 rounded-lg">
+          <div className="font-bold mb-1">Failed to load repair data</div>
+          <div className="text-sm">{error}</div>
         </div>
       )}
 
       {/* Main two-panel layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-[750px]">
+      <div style={{ display: 'flex', gap: 16, height: 480 }}>
         {/* LEFT: Unit job count list */}
-        <div className="lg:col-span-4 xl:col-span-3 flex flex-col h-full bg-card border border-border rounded shadow-sm overflow-hidden">
-          <div className="bg-primary-dark text-white flex flex-col gap-2 px-4 pt-3 pb-3 flex-shrink-0 rounded-t">
-            <div className="text-lg font-bold uppercase tracking-wider text-center">Number of Jobs Done</div>
-            <div className="grid grid-cols-[1fr_70px_80px] pt-2 border-t border-white/20">
-              <div className="text-white font-semibold text-xs uppercase tracking-wider pl-0">Unit</div>
-              <div className="text-white font-semibold text-xs uppercase tracking-wider text-center">Jobs</div>
-              <div className="text-white font-semibold text-xs uppercase tracking-wider text-center pr-0">Damage</div>
-            </div>
+        <div style={{ width: 260, flexShrink: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRadius: 6, border: '1px solid #333' }} className="bg-card">
+          <div className="bg-primary-dark text-white" style={{ padding: '8px 0 6px', flexShrink: 0, textAlign: 'center', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Number of Jobs Done
           </div>
-          <div className="flex-1 overflow-y-auto bg-card">
-            {jobsData.rows.length === 0 ? (
-              <div className="text-center p-4 text-text-secondary">No data</div>
-            ) : (
-              <div className="flex flex-col">
-                {jobsData.rows.map((row) => (
-                  <div
-                    key={row.unitNumber}
-                    onClick={() => handleMatrixClick(row.unitNumber)}
-                    className="grid grid-cols-[1fr_70px_80px] py-3 border-b border-border hover:bg-bg-hover cursor-pointer transition-colors"
-                    style={{
-                      background: selectedMatrixUnit === row.unitNumber ? 'var(--bg-hover)' : undefined,
-                      borderLeft: selectedMatrixUnit === row.unitNumber ? '4px solid var(--primary)' : '4px solid transparent',
-                    }}
-                  >
-                    <div className="pl-4 font-bold text-text-primary">{row.unitNumber}</div>
-                    <div className="font-bold text-text-primary text-center">{row.count}</div>
-                    <div className="pr-4 text-center">
-                      {row.damageCount > 0 ? (
-                        <span className="inline-flex items-center justify-center px-1.5 py-0.5 rounded text-xs font-semibold bg-destructive/10 text-destructive border border-destructive/20">
-                          {row.damageCount}
-                        </span>
-                      ) : (
-                        <span className="text-text-secondary text-sm">—</span>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-          <div className="bg-primary-dark text-white font-bold grid grid-cols-[1fr_70px_80px] py-3 border-t border-white/10 flex-shrink-0 z-10">
-            <div className="pl-4">Total</div>
-            <div className="text-center">{jobsData.grandTotal}</div>
-            <div className="pr-4 text-center">{jobsData.grandDamage > 0 ? jobsData.grandDamage : '—'}</div>
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ position: 'sticky', top: 0, zIndex: 2, background: '#1a1500', color: 'white' }}>
+                  <th style={{ textAlign: 'center', fontSize: 10, fontWeight: 600, textTransform: 'uppercase', padding: '5px 8px', borderBottom: '1px solid rgba(255,255,255,0.2)', borderRight: '1px solid rgba(255,255,255,0.15)', background: 'inherit' }}>Unit</th>
+                  <th style={{ textAlign: 'center', fontSize: 10, fontWeight: 600, textTransform: 'uppercase', padding: '5px 8px', width: 55, borderBottom: '1px solid rgba(255,255,255,0.2)', borderRight: '1px solid rgba(255,255,255,0.15)', background: 'inherit' }}>Jobs</th>
+                  <th style={{ textAlign: 'center', fontSize: 10, fontWeight: 600, textTransform: 'uppercase', padding: '5px 8px', width: 55, borderBottom: '1px solid rgba(255,255,255,0.2)', background: 'inherit' }}>Dmg</th>
+                </tr>
+              </thead>
+              <tbody>
+                {jobsData.rows.length === 0 ? (
+                  <tr><td colSpan={3} style={{ textAlign: 'center', padding: 16, fontSize: 12 }} className="text-muted-foreground">No data</td></tr>
+                ) : (
+                  jobsData.rows.map((row) => (
+                    <tr
+                      key={row.unitNumber}
+                      onClick={() => handleMatrixClick(row.unitNumber)}
+                      style={{
+                        cursor: 'pointer',
+                        fontSize: 12,
+                        background: selectedMatrixUnit === row.unitNumber ? 'hsl(var(--accent))' : undefined,
+                        borderLeft: selectedMatrixUnit === row.unitNumber ? '3px solid hsl(var(--primary))' : '3px solid transparent',
+                      }}
+                      className="hover:bg-accent/30"
+                    >
+                      <td style={{ padding: '3px 8px', fontWeight: 700, borderBottom: '1px solid #333', borderRight: '1px solid #2a2a2a' }}>{row.unitNumber.split(' - ')[0]}</td>
+                      <td style={{ padding: '3px 8px', fontWeight: 700, textAlign: 'center', width: 55, borderBottom: '1px solid #333', borderRight: '1px solid #2a2a2a' }}>{row.count}</td>
+                      <td style={{ padding: '3px 8px', textAlign: 'center', width: 55, borderBottom: '1px solid #333' }}>
+                        {row.damageCount > 0 ? (
+                          <span className="text-destructive" style={{ fontWeight: 600 }}>{row.damageCount}</span>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+              <tfoot>
+                <tr style={{ position: 'sticky', bottom: 0, zIndex: 2, background: '#1a1500', color: 'white' }}>
+                  <td style={{ padding: '5px 8px', fontWeight: 700, fontSize: 12, borderTop: '1px solid rgba(255,255,255,0.1)', borderRight: '1px solid rgba(255,255,255,0.15)', background: 'inherit' }}>Total</td>
+                  <td style={{ padding: '5px 8px', fontWeight: 700, fontSize: 12, textAlign: 'center', width: 55, borderTop: '1px solid rgba(255,255,255,0.1)', borderRight: '1px solid rgba(255,255,255,0.15)', background: 'inherit' }}>{jobsData.grandTotal}</td>
+                  <td style={{ padding: '5px 8px', fontWeight: 700, fontSize: 12, textAlign: 'center', width: 55, borderTop: '1px solid rgba(255,255,255,0.1)', background: 'inherit' }}>{jobsData.grandDamage > 0 ? jobsData.grandDamage : '—'}</td>
+                </tr>
+              </tfoot>
+            </table>
           </div>
         </div>
 
         {/* RIGHT: Invoice list */}
-        <div className="lg:col-span-8 xl:col-span-9 flex flex-col h-full bg-card border border-border rounded shadow-sm overflow-hidden">
-          <div className="bg-primary-dark text-white flex flex-col gap-2 px-4 pt-3 pb-3 flex-shrink-0 rounded-t">
-            <div className="flex justify-between items-center w-full">
-              <span className="text-lg font-bold uppercase tracking-wider">
-                {selectedMatrixUnit ? `Repairs: Unit ${selectedMatrixUnit}` : 'All Repairs'}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRadius: 6, border: '1px solid #333' }} className="bg-card">
+          <div className="bg-primary-dark text-white" style={{ padding: '10px 12px 8px', flexShrink: 0 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <span style={{ fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                {selectedMatrixUnit ? `Repairs: Unit ${selectedMatrixUnit.split(' - ')[0]}` : 'All Repairs'}
               </span>
-              <span className="text-sm font-normal opacity-80">{invoices.length} repairs</span>
+              <span style={{ fontSize: 12, opacity: 0.8 }}>{invoices.length} repairs</span>
             </div>
-            <div className="flex gap-2 w-full">
+            <div style={{ display: 'flex', gap: 8 }}>
               <input
                 type="text"
                 placeholder="Search Unit..."
                 value={unitSearchQuery}
                 onChange={(e) => setUnitSearchQuery(e.target.value)}
                 onClick={(e) => e.stopPropagation()}
-                className="flex-1 px-3 py-1.5 rounded text-sm bg-white/10 border border-white/20 text-white placeholder:text-white/60 focus:ring-1 focus:ring-white/50 outline-none"
+                style={{ flex: 1, padding: '5px 10px', borderRadius: 4, fontSize: 13, background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', color: 'white', outline: 'none' }}
               />
               {selectedMatrixUnit && (
                 <button
                   onClick={() => setSelectedMatrixUnit(null)}
-                  className="text-xs bg-white/20 hover:bg-white/30 text-white px-3 py-1.5 rounded transition-colors"
+                  style={{ fontSize: 11, background: 'rgba(255,255,255,0.2)', color: 'white', padding: '5px 10px', borderRadius: 4, border: 'none', cursor: 'pointer' }}
                 >
                   Clear Filter
                 </button>
               )}
             </div>
-            <div className="grid grid-cols-[180px_90px_1fr_120px] pt-2 border-t border-white/20 gap-4">
-              <div className="text-white font-semibold text-xs uppercase tracking-wider">Date</div>
-              <div className="text-white font-semibold text-xs uppercase tracking-wider">Unit</div>
-              <div></div>
-              <div className="text-white font-semibold text-xs uppercase tracking-wider text-right">Action</div>
-            </div>
           </div>
-          <div className="flex-1 overflow-y-auto bg-card">
-            {invoices.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-secondary)' }}>
-                {units.length === 0 ? 'No repair data available' : 'No invoices found for selected filters'}
-              </div>
-            ) : (
-              <div className="flex flex-col">
-                {invoices.map((inv) => (
-                  <div
-                    key={`${inv.unitNumber}-${inv.invoiceNumber}-${inv.invoiceDate}`}
-                    className={`grid grid-cols-[180px_90px_1fr_120px] py-3 px-4 border-b items-center transition-colors gap-4 ${
-                      isDamageInvoice(inv)
-                        ? 'border-destructive/20 bg-destructive/5 hover:bg-destructive/10'
-                        : 'border-border hover:bg-bg-hover'
-                    }`}
-                  >
-                    <div className="text-sm text-text-primary">{new Date(inv.invoiceDate).toLocaleDateString()}</div>
-                    <div className="text-sm font-bold text-text-primary flex items-center gap-1">
-                      {inv.unitNumber}
-                      {isDamageInvoice(inv) && (
-                        <Badge variant="destructive">Damage</Badge>
-                      )}
-                    </div>
-                    <div></div>
-                    <div className="text-right">
-                      <Button size="sm" variant="outline" onClick={() => setSelectedInvoice(inv)}>
-                        View Details
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr className="bg-primary-dark text-white" style={{ position: 'sticky', top: 0, zIndex: 1 }}>
+                  <th style={{ textAlign: 'center', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', padding: '6px 10px', width: '20%', borderBottom: '1px solid rgba(255,255,255,0.2)', borderRight: '1px solid rgba(255,255,255,0.15)' }}>Date</th>
+                  <th style={{ textAlign: 'center', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', padding: '6px 10px', width: '15%', borderBottom: '1px solid rgba(255,255,255,0.2)', borderRight: '1px solid rgba(255,255,255,0.15)' }}>Unit</th>
+                  <th style={{ textAlign: 'center', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', padding: '6px 10px', borderBottom: '1px solid rgba(255,255,255,0.2)', borderRight: '1px solid rgba(255,255,255,0.15)' }}>Description</th>
+                  <th style={{ textAlign: 'center', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', padding: '6px 10px', width: 90, borderBottom: '1px solid rgba(255,255,255,0.2)' }}>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {invoices.length === 0 ? (
+                  <tr><td colSpan={4} style={{ textAlign: 'center', padding: 32, fontSize: 13 }} className="text-muted-foreground">
+                    {units.length === 0 ? 'No repair data available' : 'No invoices found for selected filters'}
+                  </td></tr>
+                ) : (
+                  invoices.map((inv) => {
+                    const parts = inv.unitNumber.split(' - ');
+                    const unitNum = parts[0];
+                    const unitDesc = parts.slice(1).join(' - ') || '';
+                    const isDmg = isDamageInvoice(inv);
+                    return (
+                      <tr
+                        key={`${inv.unitNumber}-${inv.invoiceNumber}-${inv.invoiceDate}`}
+                        style={{ fontSize: 12, background: isDmg ? 'rgba(220,38,38,0.05)' : undefined }}
+                        className={isDmg ? 'hover:bg-destructive/10' : 'hover:bg-accent/30'}
+                      >
+                        <td style={{ padding: '5px 10px', width: '20%', borderBottom: '1px solid #333', borderRight: '1px solid #2a2a2a' }}>{new Date(inv.invoiceDate).toLocaleDateString()}</td>
+                        <td style={{ padding: '5px 10px', width: '15%', fontWeight: 700, borderBottom: '1px solid #333', borderRight: '1px solid #2a2a2a' }}>
+                          {unitNum}
+                          {isDmg && <Badge variant="destructive" className="ml-1 text-[10px] px-1 py-0 leading-tight">DMG</Badge>}
+                        </td>
+                        <td style={{ padding: '5px 10px', borderBottom: '1px solid #333', borderRight: '1px solid #2a2a2a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 0 }} className="text-muted-foreground">{unitDesc}</td>
+                        <td style={{ padding: '5px 10px', width: 90, textAlign: 'center', borderBottom: '1px solid #333' }}>
+                          <button
+                            onClick={() => setSelectedInvoice(inv)}
+                            style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, border: '1px solid #444', background: 'transparent', color: 'inherit', cursor: 'pointer' }}
+                            className="hover:bg-accent"
+                          >
+                            View Details
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
       </div>
@@ -425,31 +440,33 @@ export function RepairBreakdown({
                   layout="vertical"
                   margin={{ top: 4, right: 40, left: 8, bottom: 4 }}
                 >
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#333" horizontal={false} />
                   <XAxis
                     type="number"
-                    stroke="var(--text-secondary)"
+                    stroke="#888"
                     fontSize={11}
                     tickLine={false}
                     axisLine={false}
+                    tick={{ fill: '#888' }}
                   />
                   <YAxis
                     type="category"
                     dataKey="category"
                     width={180}
-                    stroke="var(--text-secondary)"
+                    stroke="#888"
                     fontSize={11}
                     tickLine={false}
                     axisLine={false}
-                    tick={{ fill: 'var(--text-secondary)' }}
+                    tick={{ fill: '#aaa' }}
                   />
                   <Tooltip
                     contentStyle={{
-                      background: 'var(--bg-card)',
-                      border: '1px solid var(--border)',
+                      background: '#1a1a1a',
+                      border: '1px solid #444',
                       borderRadius: 4,
+                      color: '#ccc',
                     }}
-                    formatter={(value: any) => [value, 'Line Items']}
+                    formatter={(value) => [value as string, 'Line Items']}
                   />
                   <Bar
                     dataKey="count"
@@ -463,7 +480,7 @@ export function RepairBreakdown({
                     <LabelList
                       dataKey="count"
                       position="right"
-                      style={{ fill: 'var(--text-secondary)', fontSize: 11 }}
+                      style={{ fill: '#aaa', fontSize: 11 }}
                     />
                   </Bar>
                 </BarChart>
@@ -493,28 +510,31 @@ export function RepairBreakdown({
             <div style={{ height: 340 }}>
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={repairTrend} margin={{ top: 20, right: 30, left: 10, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#333" vertical={false} />
                   <XAxis
                     dataKey="month"
-                    stroke="var(--text-secondary)"
+                    stroke="#888"
                     fontSize={11}
                     tickLine={false}
                     axisLine={false}
+                    tick={{ fill: '#aaa' }}
                   />
                   <YAxis
-                    stroke="var(--text-secondary)"
+                    stroke="#888"
                     fontSize={11}
                     tickLine={false}
                     axisLine={false}
                     width={30}
+                    tick={{ fill: '#aaa' }}
                   />
                   <Tooltip
                     contentStyle={{
-                      background: 'var(--bg-card)',
-                      border: '1px solid var(--border)',
+                      background: '#1a1a1a',
+                      border: '1px solid #444',
                       borderRadius: 4,
+                      color: '#ccc',
                     }}
-                    formatter={(value: any) => [value, 'Jobs']}
+                    formatter={(value) => [value as string, 'Jobs']}
                   />
                   <Line
                     type="monotone"
@@ -528,7 +548,7 @@ export function RepairBreakdown({
                       dataKey="count"
                       position="top"
                       offset={10}
-                      style={{ fill: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}
+                      style={{ fill: '#aaa', fontSize: 11, fontWeight: 600 }}
                     />
                   </Line>
                 </LineChart>

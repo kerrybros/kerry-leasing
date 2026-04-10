@@ -13,9 +13,9 @@ export default async function HomePage() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]">
+    <div className="min-h-screen flex flex-col bg-background text-foreground">
       {/* Header */}
-      <header className="border-b border-[var(--border)] bg-[var(--bg-secondary)]">
+      <header className="border-b border-border bg-muted">
         <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-4 bg-white rounded-lg px-3 py-2">
             <Image
@@ -44,10 +44,10 @@ export default async function HomePage() {
       {/* Hero */}
       <section className="flex-1 flex flex-col items-center justify-center text-center px-6 py-24">
         <div className="max-w-3xl mx-auto">
-          <h1 className="text-4xl sm:text-5xl font-bold tracking-tight text-[var(--text-primary)] mb-6">
+          <h1 className="text-4xl sm:text-5xl font-bold tracking-tight text-foreground mb-6">
             Full-service fleet management built for fixed-cost contracts.
           </h1>
-          <p className="text-lg text-[var(--text-secondary)] mb-10 max-w-xl mx-auto">
+          <p className="text-lg text-muted-foreground mb-10 max-w-xl mx-auto">
             One portal for telematics, repair history, and driver performance — purpose-built for Kerry Leasing customers.
           </p>
           <Link href="/sign-in">
@@ -59,35 +59,35 @@ export default async function HomePage() {
       </section>
 
       {/* Feature columns */}
-      <section className="border-t border-[var(--border)] bg-[var(--bg-secondary)]">
+      <section className="border-t border-border bg-muted">
         <div className="max-w-5xl mx-auto px-6 py-20">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-12">
             <div className="flex flex-col gap-4">
-              <div className="w-10 h-10 rounded-lg bg-[var(--primary)]/10 flex items-center justify-center">
-                <Truck className="w-5 h-5 text-[var(--primary)]" />
+              <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                <Truck className="w-5 h-5 text-primary" />
               </div>
-              <h3 className="text-lg font-semibold text-[var(--text-primary)]">Fleet Telematics</h3>
-              <p className="text-sm text-[var(--text-secondary)] leading-relaxed">
+              <h3 className="text-lg font-semibold text-foreground">Fleet Telematics</h3>
+              <p className="text-sm text-muted-foreground leading-relaxed">
                 MPG, idle time, and miles visibility across your entire fleet. Monthly trends, unit breakdowns, and top-performer rankings in one view.
               </p>
             </div>
 
             <div className="flex flex-col gap-4">
-              <div className="w-10 h-10 rounded-lg bg-[var(--primary)]/10 flex items-center justify-center">
-                <Wrench className="w-5 h-5 text-[var(--primary)]" />
+              <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                <Wrench className="w-5 h-5 text-primary" />
               </div>
-              <h3 className="text-lg font-semibold text-[var(--text-primary)]">Repair Tracking</h3>
-              <p className="text-sm text-[var(--text-secondary)] leading-relaxed">
+              <h3 className="text-lg font-semibold text-foreground">Repair Tracking</h3>
+              <p className="text-sm text-muted-foreground leading-relaxed">
                 Complete repair history with damage flagging and job counts. Know exactly what work has been done on every unit in your fleet.
               </p>
             </div>
 
             <div className="flex flex-col gap-4">
-              <div className="w-10 h-10 rounded-lg bg-[var(--primary)]/10 flex items-center justify-center">
-                <FileText className="w-5 h-5 text-[var(--primary)]" />
+              <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                <FileText className="w-5 h-5 text-primary" />
               </div>
-              <h3 className="text-lg font-semibold text-[var(--text-primary)]">Fixed-Cost Clarity</h3>
-              <p className="text-sm text-[var(--text-secondary)] leading-relaxed">
+              <h3 className="text-lg font-semibold text-foreground">Fixed-Cost Clarity</h3>
+              <p className="text-sm text-muted-foreground leading-relaxed">
                 No invoices, no surprises. Track fleet performance and maintenance activity under your fixed-cost service contract.
               </p>
             </div>
@@ -96,8 +96,8 @@ export default async function HomePage() {
       </section>
 
       {/* Footer */}
-      <footer className="border-t border-[var(--border)] bg-[var(--bg-secondary)]">
-        <div className="max-w-6xl mx-auto px-6 py-6 text-center text-sm text-[var(--text-secondary)]">
+      <footer className="border-t border-border bg-muted">
+        <div className="max-w-6xl mx-auto px-6 py-6 text-center text-sm text-muted-foreground">
           &copy; {new Date().getFullYear()} Kerry Leasing. All rights reserved.
         </div>
       </footer>

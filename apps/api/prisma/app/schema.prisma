@@ -44,11 +44,16 @@ model RepairCustomerConfig {
 // Organization Settings
 // Configures feature flags and display preferences per organization
 model OrganizationSettings {
-  id                String   @id @default(cuid())
-  clerkOrgId        String   @unique @map("clerk_org_id")
-  tracksDrivers     Boolean  @default(true) @map("tracks_drivers") // Whether org uses driver tracking
-  createdAt         DateTime @default(now()) @map("created_at")
-  updatedAt         DateTime @updatedAt @map("updated_at")
+  id                          String   @id @default(cuid())
+  clerkOrgId                  String   @unique @map("clerk_org_id")
+  tracksDrivers               Boolean  @default(true) @map("tracks_drivers") // Whether org uses driver tracking
+  serviceRequestUrl           String?  @map("service_request_url")           // FullBay or external service request link
+  contractTermYears           Int?     @map("contract_term_years")           // 1-5 years
+  telematicsDashboardUrl      String?  @map("telematics_dashboard_url")      // Provider web UI URL for reference
+  telematicsDashboardUsername String?  @map("telematics_dashboard_username") // Provider web UI username
+  telematicsDashboardPassword String?  @map("telematics_dashboard_password") // Provider web UI password (plaintext reference)
+  createdAt                   DateTime @default(now()) @map("created_at")
+  updatedAt                   DateTime @updatedAt @map("updated_at")
 
   @@index([clerkOrgId])
   @@map("organization_settings")

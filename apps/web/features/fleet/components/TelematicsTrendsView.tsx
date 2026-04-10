@@ -11,8 +11,9 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { PieChart, Pie, Cell, Legend, Tooltip, ResponsiveContainer } from 'recharts';
 import { TrendLineChart } from './TrendLineChart';
-import type { MonthlyMetrics, UnitMetrics, DriverMetrics, FleetTotals } from './types';
+import type { MonthlyMetrics, UnitMetrics, DriverMetrics, FleetTotals } from '@/features/fleet/types';
 
 interface TelematicsTrendsViewProps {
   loading: boolean;
@@ -124,6 +125,97 @@ export function TelematicsTrendsView({
           )}
         </p>
 
+        {/* Pie Charts — side by side at the top */}
+        <div style={{ display: 'flex', gap: 16 }}>
+          {/* Fuel Usage Breakdown */}
+          <Card className="flex-1">
+            <CardContent className="relative pt-4">
+              <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', textAlign: 'center', marginBottom: 4 }} className="text-muted-foreground">
+                Fuel Usage
+              </div>
+              {fleetTotals.totalIdleFuel > 0 || fleetTotals.totalDrivingFuel > 0 ? (
+                <ResponsiveContainer width="100%" height={200}>
+                  <PieChart>
+                    <Pie
+                      data={[
+                        { name: 'Idle Fuel', value: Math.round(fleetTotals.totalIdleFuel) },
+                        { name: 'Driving Fuel', value: Math.round(fleetTotals.totalDrivingFuel) },
+                      ]}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={50}
+                      outerRadius={75}
+                      paddingAngle={3}
+                      dataKey="value"
+                    >
+                      <Cell fill="#ef4444" />
+                      <Cell fill="#d9a528" />
+                    </Pie>
+                    <Tooltip contentStyle={{ background: '#1a1a1a', border: '1px solid #444', borderRadius: 4, color: '#ccc' }} formatter={(val) => [`${Number(val).toLocaleString()} gal`]} />
+                    <Legend formatter={(name) => <span style={{ fontSize: 11, color: '#aaa' }}>{name}</span>} />
+                  </PieChart>
+                </ResponsiveContainer>
+              ) : (
+                <div style={{ height: 200, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                  <ResponsiveContainer width="100%" height={150}>
+                    <PieChart>
+                      <Pie data={[{ name: 'No Data', value: 1 }]} cx="50%" cy="50%" innerRadius={50} outerRadius={75} dataKey="value" stroke="none">
+                        <Cell fill="#333" />
+                      </Pie>
+                      <Legend formatter={() => <span style={{ fontSize: 11, color: '#555' }}>Idle Fuel / Driving Fuel</span>} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <span style={{ fontSize: 13, color: '#555', fontWeight: 500, marginTop: -8 }}>No data available</span>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Drive Time vs Idle Time */}
+          <Card className="flex-1">
+            <CardContent className="relative pt-4">
+              <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', textAlign: 'center', marginBottom: 4 }} className="text-muted-foreground">
+                Drive vs Idle Time
+              </div>
+              {fleetTotals.totalIdleTime > 0 || fleetTotals.totalDrivingTime > 0 ? (
+                <ResponsiveContainer width="100%" height={200}>
+                  <PieChart>
+                    <Pie
+                      data={[
+                        { name: 'Idle Time', value: fleetTotals.totalIdleTime },
+                        { name: 'Drive Time', value: fleetTotals.totalDrivingTime },
+                      ]}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={50}
+                      outerRadius={75}
+                      paddingAngle={3}
+                      dataKey="value"
+                    >
+                      <Cell fill="#ef4444" />
+                      <Cell fill="#22c55e" />
+                    </Pie>
+                    <Tooltip contentStyle={{ background: '#1a1a1a', border: '1px solid #444', borderRadius: 4, color: '#ccc' }} formatter={(val) => [`${Number(val).toLocaleString()} min`]} />
+                    <Legend formatter={(name) => <span style={{ fontSize: 11, color: '#aaa' }}>{name}</span>} />
+                  </PieChart>
+                </ResponsiveContainer>
+              ) : (
+                <div style={{ height: 200, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                  <ResponsiveContainer width="100%" height={150}>
+                    <PieChart>
+                      <Pie data={[{ name: 'No Data', value: 1 }]} cx="50%" cy="50%" innerRadius={50} outerRadius={75} dataKey="value" stroke="none">
+                        <Cell fill="#333" />
+                      </Pie>
+                      <Legend formatter={() => <span style={{ fontSize: 11, color: '#555' }}>Idle Time / Drive Time</span>} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <span style={{ fontSize: 13, color: '#555', fontWeight: 500, marginTop: -8 }}>No data available</span>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
         <TrendLineChart title="MPG" dataKey="avgMpg" data={monthlyMetrics.chartData} loading={loading} />
         <TrendLineChart
           title="Idle %"
@@ -143,8 +235,8 @@ export function TelematicsTrendsView({
         />
       </div>
 
-      {/* RIGHT COLUMN — FILTERS + MONTHLY TABLE */}
-      <div className="lg:col-span-4 flex flex-col gap-4 h-full">
+      {/* RIGHT COLUMN — FILTERS + MONTHLY TABLE (sticky) */}
+      <div className="lg:col-span-4 flex flex-col gap-4" style={{ position: 'sticky', top: 16, alignSelf: 'start' }}>
         <div className="flex flex-col gap-2">
           {tracksDrivers && (
             <div className="flex rounded-md border border-border overflow-hidden">
@@ -186,7 +278,7 @@ export function TelematicsTrendsView({
         </div>
 
         {/* Monthly Summary Table */}
-        <Card className="flex flex-col flex-1 overflow-hidden">
+        <Card className="flex flex-col overflow-hidden">
           <CardHeader className="pb-2 flex-row items-center justify-between space-y-0">
             <CardTitle className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
               Monthly Summary
@@ -207,7 +299,7 @@ export function TelematicsTrendsView({
               </div>
             )}
           </CardHeader>
-          <CardContent className="p-0 flex-1 overflow-auto min-h-[400px]">
+          <CardContent className="p-0">
             <Table>
               <TableHeader>
                 <TableRow className="bg-muted hover:bg-muted">

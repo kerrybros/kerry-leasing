@@ -16,8 +16,8 @@ export default function AppRootPage() {
   }, [isLoaded, userId, router]);
 
   return (
-    <div className="container">
-      <div className="loading">Redirecting...</div>
+    <div className="max-w-[1400px] mx-auto px-4 sm:px-6">
+      <div className="flex items-center justify-center py-12 text-muted-foreground">Redirecting...</div>
     </div>
   );
 }

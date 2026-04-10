@@ -190,7 +190,7 @@ export default function AdminTelematicsPage() {
 
   if (loading) {
     return (
-      <div className="container mx-auto px-4 py-8 max-w-3xl flex flex-col gap-4">
+      <div className="mx-auto px-4 py-8 max-w-3xl flex flex-col gap-4">
         <Skeleton style={{ height: 32, width: '40%', borderRadius: 8 }} />
         {[1,2,3].map(i => <Skeleton key={i} style={{ height: 120, borderRadius: 8 }} />)}
       </div>
@@ -198,7 +198,7 @@ export default function AdminTelematicsPage() {
   }
 
   return (
-    <div className="container mx-auto px-4 py-8 max-w-3xl flex flex-col gap-6">
+    <div className="mx-auto px-4 py-8 max-w-3xl flex flex-col gap-6">
       <div>
         <h1 className="text-3xl font-bold mb-1">Telematics Settings</h1>
         <p className="text-sm text-muted-foreground">

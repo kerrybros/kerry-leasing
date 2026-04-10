@@ -4,9 +4,12 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
 const adminTabs = [
+  { label: 'Overview',     href: '/app/admin/overview' },
   { label: 'Org Settings', href: '/app/admin/org-settings' },
   { label: 'Service Plan', href: '/app/admin/service-plan' },
-  { label: 'Telematics', href: '/app/admin/telematics' },
+  { label: 'Telematics',   href: '/app/admin/telematics' },
+  { label: 'Contract',     href: '/app/admin/contract' },
+  { label: 'Exhibit B',    href: '/app/admin/exhibit-b' },
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -14,14 +17,17 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
   return (
     <>
-      <div style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-secondary)', paddingTop: '0.5rem' }}>
-        <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '0 1rem', display: 'flex', gap: '0.25rem' }}>
+      <div className="border-b border-border bg-muted pt-2">
+        <div className="max-w-[1400px] mx-auto px-4 flex gap-1">
           {adminTabs.map((tab) => (
             <Link
               key={tab.href}
               href={tab.href}
-              className={`tab no-underline ${pathname === tab.href ? 'active' : ''}`}
-              style={{ borderBottom: 'none', marginBottom: 0 }}
+              className={`px-4 py-2 text-sm font-medium no-underline transition-colors cursor-pointer border-b-[3px] relative -bottom-0.5 ${
+                pathname === tab.href
+                  ? 'text-primary border-primary'
+                  : 'text-muted-foreground border-transparent hover:text-foreground hover:bg-accent rounded-t-lg'
+              }`}
             >
               {tab.label}
             </Link>

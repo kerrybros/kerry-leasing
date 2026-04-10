@@ -1,13 +1,12 @@
 'use client';
 
-import { useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { UserButton, OrganizationSwitcher, useAuth } from '@clerk/nextjs';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useApiClient } from '@/hooks/useApiClient';
-import { useOrgSettings } from '@/hooks/useOrgSettings';
+import { useOrgSettingsQuery } from '@/hooks/useDataQueries';
 import {
   Sidebar,
   SidebarContent,
@@ -20,22 +19,27 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarProvider,
-  SidebarRail,
-  SidebarTrigger,
 } from '@/components/ui/sidebar';
-import { Truck, Settings, Users } from 'lucide-react';
+import { Truck, Settings, Users, Wrench, CalendarClock, MessageSquare } from 'lucide-react';
+
+const defaultOrgSettings = {
+  tracksDrivers: true,
+  telematicsProvider: null as 'MOTIVE' | 'SAMSARA' | null,
+  contractStartDate: null as string | null,
+  serviceRequestUrl: null as string | null,
+  contractTermYears: null as number | null,
+  telematicsDashboardUrl: null as string | null,
+  telematicsDashboardUsername: null as string | null,
+  telematicsDashboardPassword: null as string | null,
+};
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { has } = useAuth();
   const pathname = usePathname();
   const isAdmin = has && has({ role: 'org:admin' });
-  const { getApi } = useApiClient();
-  const { orgSettings, loadOrgSettings } = useOrgSettings(getApi);
-
-  useEffect(() => {
-    loadOrgSettings();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const { data: orgSettings = defaultOrgSettings } = useOrgSettingsQuery();
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   const showDrivers =
     orgSettings.tracksDrivers && orgSettings.telematicsProvider === 'MOTIVE';
@@ -48,6 +52,24 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       active: !!pathname?.includes('/fleet') || !!pathname?.includes('/units'),
     },
     {
+      href: '/app/wip',
+      label: 'Shop',
+      icon: Wrench,
+      active: !!pathname?.includes('/wip'),
+    },
+    {
+      href: '/app/pm',
+      label: 'PM',
+      icon: CalendarClock,
+      active: !!pathname?.includes('/pm'),
+    },
+    {
+      href: '/app/chat',
+      label: 'Chat',
+      icon: MessageSquare,
+      active: !!pathname?.includes('/chat'),
+    },
+    {
       href: '/app/drivers',
       label: 'Drivers',
       icon: Users,
@@ -55,7 +77,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       hidden: !showDrivers,
     },
     {
-      href: '/app/admin/service-plan',
+      href: '/app/admin/overview',
       label: 'Admin',
       icon: Settings,
       active: !!pathname?.includes('/admin'),
@@ -64,25 +86,20 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   ].filter((item) => !item.hidden);
 
   return (
-    <SidebarProvider>
-      <Sidebar collapsible="icon">
+    <SidebarProvider style={{ "--sidebar-width": "11rem" } as React.CSSProperties}>
+      <Sidebar collapsible="none">
         {/* Logo */}
-        <SidebarHeader className="py-3 px-2">
+        <SidebarHeader className="py-3 px-3">
           <Link href="/app/fleet" className="no-underline block">
-            {/* Expanded logo */}
-            <div className="group-data-[collapsible=icon]:hidden flex items-center px-2 py-1.5 bg-white rounded-lg">
+            <div className="flex items-center px-2 py-1.5 bg-white rounded-lg">
               <Image
                 src="/logos/Kerry Leasing Logo.png"
                 alt="Kerry Leasing"
-                width={152}
-                height={52}
-                className="h-8 w-auto object-contain"
+                width={120}
+                height={40}
+                className="h-7 w-auto object-contain"
                 priority
               />
-            </div>
-            {/* Collapsed icon */}
-            <div className="hidden group-data-[collapsible=icon]:flex items-center justify-center w-8 h-8 bg-white rounded-md">
-              <span className="text-xs font-bold text-[#b8860b] leading-none">KL</span>
             </div>
           </Link>
         </SidebarHeader>
@@ -107,51 +124,50 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
+
+          {/* Service Request Button — pinned to bottom of body */}
+          <div className="mt-auto px-3 pb-2">
+            <a
+              href={orgSettings.serviceRequestUrl || '#'}
+              target={orgSettings.serviceRequestUrl ? '_blank' : undefined}
+              rel={orgSettings.serviceRequestUrl ? 'noopener noreferrer' : undefined}
+              onClick={orgSettings.serviceRequestUrl ? undefined : (e) => { e.preventDefault(); alert('No service request URL configured. Ask your admin to set one in Org Settings.'); }}
+              className="flex items-center justify-center rounded-md px-3 py-2 text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors w-full"
+            >
+              Submit Service Request
+            </a>
+          </div>
         </SidebarContent>
 
         {/* Footer: org switcher + user controls */}
         <SidebarFooter className="border-t border-sidebar-border pb-3">
-          {/* OrganizationSwitcher — hidden when collapsed to icon mode */}
-          <div className="group-data-[collapsible=icon]:hidden px-1 pt-1">
-            <OrganizationSwitcher
-              hidePersonal={true}
-              afterSelectOrganizationUrl="/app/fleet"
-              appearance={{
-                elements: {
-                  rootBox: 'w-full',
-                  organizationSwitcherTrigger:
-                    'w-full justify-start rounded-md px-2 py-1.5 text-sm text-sidebar-foreground hover:bg-sidebar-accent transition-colors',
-                },
-              }}
-            />
-          </div>
 
-          {/* Theme + User — always visible */}
-          <div className="flex items-center gap-1 px-1">
-            <div className="group-data-[collapsible=icon]:hidden">
-              <ThemeToggle />
+          {/* OrganizationSwitcher — only render after hydration to avoid portal mismatch */}
+          {mounted && (
+            <div className="px-1 pt-1">
+              <OrganizationSwitcher
+                hidePersonal={true}
+                afterSelectOrganizationUrl="/app/fleet"
+                appearance={{
+                  elements: {
+                    rootBox: 'w-full',
+                    organizationSwitcherTrigger:
+                      'w-full justify-start rounded-md px-2 py-1.5 text-sm text-sidebar-foreground hover:bg-sidebar-accent transition-colors',
+                  },
+                }}
+              />
             </div>
-            <UserButton afterSignOutUrl="/sign-in" />
+          )}
+
+          {/* Theme + User */}
+          <div className="flex items-center gap-1 px-1">
+            <ThemeToggle />
+            {mounted && <UserButton afterSignOutUrl="/sign-in" />}
           </div>
         </SidebarFooter>
-
-        <SidebarRail />
       </Sidebar>
 
       <SidebarInset>
-        {/* Mobile top bar with hamburger trigger */}
-        <header className="flex items-center h-12 px-4 border-b border-border bg-background lg:hidden sticky top-0 z-40">
-          <SidebarTrigger />
-          <div className="ml-3 flex items-center bg-white rounded-md px-2 py-1">
-            <Image
-              src="/logos/Kerry Leasing Logo.png"
-              alt="Kerry Leasing"
-              width={120}
-              height={40}
-              className="h-7 w-auto object-contain"
-            />
-          </div>
-        </header>
         <main className="flex-1 min-h-0 min-w-0 overflow-auto">
           {children}
         </main>

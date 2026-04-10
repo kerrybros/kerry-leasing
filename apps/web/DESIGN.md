@@ -81,6 +81,49 @@ Flag a repair job as damage if:
 `(field ?? '').toLowerCase().includes('damage')`
 This is applied to both the `component` and `system` fields.
 
+## Tailwind Utility Mapping Reference
+
+All UI is built with Tailwind utilities that map to the CSS token layer. Custom `@layer components` classes have been removed. Use the following mappings when building new components:
+
+| Intent | Tailwind Utility | CSS Token |
+|---|---|---|
+| Page background | `bg-background` | `--background` |
+| Card / panel background | `bg-card` | `--card` |
+| Muted / subtle background | `bg-muted` | `--muted` |
+| Hover highlight | `bg-accent` | `--accent` |
+| Primary brand color | `bg-primary` / `text-primary` | `--primary` |
+| Primary text | `text-foreground` | `--foreground` |
+| Secondary / label text | `text-muted-foreground` | `--muted-foreground` |
+| Destructive / error | `text-destructive` / `bg-destructive` | `--destructive` |
+| Border | `border-border` | `--border` |
+| Input border | `border-input` | `--input` |
+| Focus ring | `ring-ring` | `--ring` |
+| Status success | `text-[var(--success)]` | `--success` |
+| Status warning | `text-[var(--warning)]` | `--warning` |
+| Status error | `text-[var(--error)]` | `--error` |
+
+### Layout Conventions
+
+- **Page wrapper:** `max-w-[1400px] mx-auto px-4 sm:px-6`
+- **Page header row:** `flex justify-between items-center gap-4 mb-8 flex-wrap`
+- **Two-column grid:** `grid grid-cols-2 lg:grid-cols-1 gap-8`
+- **Three-column grid:** `grid grid-cols-3 md:grid-cols-1 gap-6`
+- **Five-column KPI grid:** `grid grid-cols-5 md:grid-cols-1 gap-4`
+- **Section loading state:** `flex items-center justify-center py-12 text-muted-foreground`
+- **Error state:** `flex items-center justify-center py-12 text-destructive`
+- **Scrollable table container:** `overflow-x-auto rounded-xl border border-border`
+
+### Tab Bar Pattern
+
+```tsx
+// Tab container
+<div className="flex gap-2 border-b border-border mb-8">
+  // Inactive tab
+  <button className="px-6 py-3 text-muted-foreground font-medium border-b-2 border-transparent -mb-px hover:text-foreground">
+  // Active tab
+  <button className="px-6 py-3 text-primary font-medium border-b-2 border-primary -mb-px">
+```
+
 ## Immutable Rules
 - No dollar figures anywhere.
 - No emoji anywhere.

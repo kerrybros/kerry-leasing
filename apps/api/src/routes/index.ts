@@ -10,6 +10,7 @@ import * as appRepo from '../db/appRepo.js';
 import { getRepairDbSafetyStatus } from '../safety/repairDbSafety.js';
 import { getAppPrisma } from '../lib/prisma.js';
 import telematicsRoutes from './telematics.js';
+import normalizedTelematicsRoutes from './telematicsNormalized.js';
 import cronRoutes from './cron.js';
 import servicePlanRoutes from './servicePlan.js';
 import fleetRoutes from './fleet.js';
@@ -402,8 +403,11 @@ router.get(
   }
 );
 
-// Mount telematics routes
+// Mount telematics routes (provider-specific: /telematics/motive/*, /telematics/samsara/*, etc.)
 router.use('/telematics', telematicsRoutes);
+
+// Mount normalized telematics routes (provider-agnostic: /telematics/normalized/*)
+router.use('/telematics/normalized', normalizedTelematicsRoutes);
 
 // Mount cron routes
 router.use('/cron', cronRoutes);
@@ -433,11 +437,16 @@ router.get(
       const clerkOrgId = req.auth!.orgId!;
       const appPrisma = getAppPrisma();
       
-      // Get organization settings (tracksDrivers)
+      // Get organization settings
       const settings = await appPrisma.organizationSettings.findUnique({
         where: { clerkOrgId },
         select: {
           tracksDrivers: true,
+          serviceRequestUrl: true,
+          contractTermYears: true,
+          telematicsDashboardUrl: true,
+          telematicsDashboardUsername: true,
+          telematicsDashboardPassword: true,
         },
       });
 
@@ -455,13 +464,17 @@ router.get(
         },
       });
       
-      // Default to true if no settings found (backward compatible)
       res.json({
         tracksDrivers: settings?.tracksDrivers ?? true,
-        telematicsProvider: providerAccount?.provider || null, // MOTIVE, SAMSARA, or null
+        telematicsProvider: providerAccount?.provider || null,
         contractStartDate: repairConfig?.contractStartDate
           ? repairConfig.contractStartDate.toISOString().split('T')[0]
           : null,
+        serviceRequestUrl: settings?.serviceRequestUrl ?? null,
+        contractTermYears: settings?.contractTermYears ?? null,
+        telematicsDashboardUrl: settings?.telematicsDashboardUrl ?? null,
+        telematicsDashboardUsername: settings?.telematicsDashboardUsername ?? null,
+        telematicsDashboardPassword: settings?.telematicsDashboardPassword ?? null,
       });
     } catch (error) {
       console.error('Error fetching org settings:', error);
@@ -469,6 +482,51 @@ router.get(
         error: 'Service Unavailable',
         message: 'Failed to load organization settings. Please try again later.',
       });
+    }
+  }
+);
+
+// Update organization settings (admin-only)
+router.put(
+  '/admin/org-settings',
+  clerkAuthMiddleware,
+  requireOrg,
+  requireRole(['internal']),
+  async (req: AuthRequest, res) => {
+    try {
+      const clerkOrgId = req.auth!.orgId!;
+      const appPrisma = getAppPrisma();
+      const {
+        serviceRequestUrl,
+        contractTermYears,
+        telematicsDashboardUrl,
+        telematicsDashboardUsername,
+        telematicsDashboardPassword,
+      } = req.body;
+
+      await appPrisma.organizationSettings.upsert({
+        where: { clerkOrgId },
+        update: {
+          ...(serviceRequestUrl !== undefined && { serviceRequestUrl }),
+          ...(contractTermYears !== undefined && { contractTermYears }),
+          ...(telematicsDashboardUrl !== undefined && { telematicsDashboardUrl }),
+          ...(telematicsDashboardUsername !== undefined && { telematicsDashboardUsername }),
+          ...(telematicsDashboardPassword !== undefined && { telematicsDashboardPassword }),
+        },
+        create: {
+          clerkOrgId,
+          serviceRequestUrl: serviceRequestUrl ?? null,
+          contractTermYears: contractTermYears ?? null,
+          telematicsDashboardUrl: telematicsDashboardUrl ?? null,
+          telematicsDashboardUsername: telematicsDashboardUsername ?? null,
+          telematicsDashboardPassword: telematicsDashboardPassword ?? null,
+        },
+      });
+
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('Error updating org settings:', error);
+      res.status(500).json({ error: 'Internal Server Error' });
     }
   }
 );
