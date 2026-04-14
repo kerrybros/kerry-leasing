@@ -46,6 +46,7 @@ export const createApiClient = (token: string | null, customHeaders: Record<stri
     apiRequest<T>(endpoint, token, { 
       method: 'GET',
       headers: customHeaders,
+      cache: 'no-store',
     }),
 
   post: <T>(endpoint: string, data?: unknown) =>

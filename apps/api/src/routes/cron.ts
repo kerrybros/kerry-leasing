@@ -10,6 +10,7 @@ import { syncMotiveDaily } from '../telematics/motive/syncService.js';
 import { syncSamsaraDaily } from '../telematics/samsara/syncService.js';
 import { refreshDieselPrice } from '../lib/eiaFuelPrice.js';
 import { getAppPrisma } from '../lib/prisma.js';
+import { cacheDelPattern } from '../lib/redis.js';
 
 const router = Router();
 
@@ -39,6 +40,7 @@ router.post('/sync-motive', async (req: Request, res: Response) => {
   try {
     console.log(`\n✅ Authorized Motive cron request from ${req.ip}`);
     const result = await syncMotiveDaily();
+    await cacheDelPattern('prod:telematics:*');
     const allSucceeded = result.errorCount === 0;
     res.status(allSucceeded ? 200 : 207).json({
       success: allSucceeded,
@@ -63,6 +65,7 @@ router.post('/sync-samsara', async (req: Request, res: Response) => {
   try {
     console.log(`\n✅ Authorized Samsara cron request from ${req.ip}`);
     const result = await syncSamsaraDaily();
+    await cacheDelPattern('prod:telematics:*');
     const allSucceeded = result.errorCount === 0;
     res.status(allSucceeded ? 200 : 207).json({
       success: allSucceeded,

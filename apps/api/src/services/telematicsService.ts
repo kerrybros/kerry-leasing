@@ -12,6 +12,10 @@
 
 import { getAppPrisma } from '../lib/prisma.js';
 import { TelematicsProvider } from '../telematics/types.js';
+import { cacheGetOrSet } from '../lib/redis.js';
+import { config } from '../config.js';
+
+const CACHE_TTL_SECS = 7200; // 2 hours — nightly sync invalidates anyway
 
 // Normalized types live in telematics/interfaces — imported and re-exported
 // here for backwards compatibility with existing route imports.
@@ -43,6 +47,18 @@ export class TelematicsService {
     startDate: string,
     endDate: string
   ): Promise<NormalizedVehicleResponse> {
+    const env = config.nodeEnv === 'production' ? 'prod' : 'dev';
+    const key = `${env}:telematics:vehicle:${orgId}:${startDate}:${endDate}`;
+    return cacheGetOrSet(key, CACHE_TTL_SECS, () =>
+      this._fetchVehicleUtilization(orgId, startDate, endDate)
+    );
+  }
+
+  private async _fetchVehicleUtilization(
+    orgId: string,
+    startDate: string,
+    endDate: string
+  ): Promise<NormalizedVehicleResponse> {
     const provider = await this.resolveProvider(orgId);
 
     if (provider === TelematicsProvider.MOTIVE) {
@@ -63,6 +79,18 @@ export class TelematicsService {
    * Automatically routes to the correct provider DB table.
    */
   async getDriverUtilization(
+    orgId: string,
+    startDate: string,
+    endDate: string
+  ): Promise<NormalizedDriverResponse> {
+    const env = config.nodeEnv === 'production' ? 'prod' : 'dev';
+    const key = `${env}:telematics:driver:${orgId}:${startDate}:${endDate}`;
+    return cacheGetOrSet(key, CACHE_TTL_SECS, () =>
+      this._fetchDriverUtilization(orgId, startDate, endDate)
+    );
+  }
+
+  private async _fetchDriverUtilization(
     orgId: string,
     startDate: string,
     endDate: string
@@ -305,6 +333,18 @@ export class TelematicsService {
    * Weights: Idle% (30%) + MPG (25%) + Safety (20%) + Utilization (15%) + Fuel Economy (10%)
    */
   async getDriverScorecard(
+    orgId: string,
+    startDate: string,
+    endDate: string
+  ): Promise<DriverScorecardResponse> {
+    const env = config.nodeEnv === 'production' ? 'prod' : 'dev';
+    const key = `${env}:telematics:scorecard:${orgId}:${startDate}:${endDate}`;
+    return cacheGetOrSet(key, CACHE_TTL_SECS, () =>
+      this._fetchDriverScorecard(orgId, startDate, endDate)
+    );
+  }
+
+  private async _fetchDriverScorecard(
     orgId: string,
     startDate: string,
     endDate: string

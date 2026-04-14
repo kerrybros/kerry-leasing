@@ -18,6 +18,7 @@ export const config = {
     ],
   },
   cronSecret: process.env.CRON_SECRET,
+  redisUrl: process.env.REDIS_URL ?? null,
 };
 
 // Validate required env vars

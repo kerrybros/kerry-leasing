@@ -48,6 +48,7 @@ router.get(
       const result = await telematicsService.getVehicleUtilization(orgId, startDate, endDate);
 
       res.setHeader('Cache-Control', 'private, max-age=3600');
+      res.setHeader('Vary', 'Authorization');
       res.json(result);
     } catch (error) {
       console.error('[Normalized] Error fetching vehicle utilization:', error);
@@ -86,6 +87,7 @@ router.get(
       const result = await telematicsService.getDriverUtilization(orgId, startDate, endDate);
 
       res.setHeader('Cache-Control', 'private, max-age=3600');
+      res.setHeader('Vary', 'Authorization');
       res.json(result);
     } catch (error) {
       console.error('[Normalized] Error fetching driver utilization:', error);
@@ -124,6 +126,7 @@ router.get(
       const result = await telematicsService.getDriverScorecard(orgId, startDate, endDate);
 
       res.setHeader('Cache-Control', 'private, max-age=300');
+      res.setHeader('Vary', 'Authorization');
       res.json(result);
     } catch (error) {
       console.error('[Normalized] Error fetching driver scorecard:', error);
