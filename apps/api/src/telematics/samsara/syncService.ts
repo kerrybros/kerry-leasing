@@ -28,6 +28,7 @@ interface OrgSyncResult {
   clerkOrgId: string;
   success: boolean;
   date: string;
+  verify: boolean;
   results: SyncResult[];
   error?: string;
   duration: number;
@@ -47,6 +48,7 @@ export async function syncSamsaraOrgForDate(
     clerkOrgId,
     success: true,
     date,
+    verify,
     results: [],
     duration: 0,
   };
@@ -91,9 +93,10 @@ export async function syncSamsaraOrgForDate(
       `${safetyResult.errorCount} errors`
     );
 
-    const totalErrors = orgResult.results.reduce((s, r) => s + r.errorCount, 0);
+    const totalErrors = orgResult.results.reduce((s, r) => s + (r.skipped ? 0 : r.errorCount), 0);
     orgResult.success = totalErrors === 0;
     orgResult.error = orgResult.results
+      .filter((r) => !r.skipped)
       .flatMap((r) => r.errors)
       .map((e) => e.error)
       .join('; ') || undefined;

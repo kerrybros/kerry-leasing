@@ -13,6 +13,8 @@
 import 'dotenv/config';
 import { syncMotiveDaily } from '../telematics/motive/syncService.js';
 import { assertCredentialsEncryptionKeyConfigured } from '../lib/credentials.js';
+import { recordTelematicsCronRun } from '../lib/telematicsCronRun.js';
+import { CronJobType } from '../generated/app-client/index.js';
 
 async function main() {
   console.log(`\n${'='.repeat(60)}`);
@@ -29,6 +31,14 @@ async function main() {
 
     // Run daily sync
     const result = await syncMotiveDaily();
+
+    await recordTelematicsCronRun(CronJobType.MOTIVE_DAILY, {
+      totalOrgs: result.totalOrgs,
+      successCount: result.successCount,
+      errorCount: result.errorCount,
+      duration: result.duration,
+      results: result.results as any,
+    });
 
     // Exit with appropriate code
     if (result.errorCount > 0) {

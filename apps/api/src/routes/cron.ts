@@ -11,6 +11,8 @@ import { syncSamsaraDaily } from '../telematics/samsara/syncService.js';
 import { refreshDieselPrice } from '../lib/eiaFuelPrice.js';
 import { getAppPrisma } from '../lib/prisma.js';
 import { cacheDelPattern } from '../lib/redis.js';
+import { recordTelematicsCronRun } from '../lib/telematicsCronRun.js';
+import { CronJobType } from '../generated/app-client/index.js';
 
 const router = Router();
 
@@ -40,6 +42,13 @@ router.post('/sync-motive', async (req: Request, res: Response) => {
   try {
     console.log(`\n✅ Authorized Motive cron request from ${req.ip}`);
     const result = await syncMotiveDaily();
+    await recordTelematicsCronRun(CronJobType.MOTIVE_DAILY, {
+      totalOrgs: result.totalOrgs,
+      successCount: result.successCount,
+      errorCount: result.errorCount,
+      duration: result.duration,
+      results: result.results as any,
+    });
     await Promise.all([
       cacheDelPattern('prod:telematics:*'),
       cacheDelPattern('prod:fleet:*'),
@@ -68,6 +77,13 @@ router.post('/sync-samsara', async (req: Request, res: Response) => {
   try {
     console.log(`\n✅ Authorized Samsara cron request from ${req.ip}`);
     const result = await syncSamsaraDaily();
+    await recordTelematicsCronRun(CronJobType.SAMSARA_DAILY, {
+      totalOrgs: result.totalOrgs,
+      successCount: result.successCount,
+      errorCount: result.errorCount,
+      duration: result.duration,
+      results: result.results as any,
+    });
     await Promise.all([
       cacheDelPattern('prod:telematics:*'),
       cacheDelPattern('prod:fleet:*'),

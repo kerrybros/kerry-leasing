@@ -78,6 +78,28 @@ model TelematicsProviderAccount {
   @@map("telematics_provider_accounts")
 }
 
+// Persisted summary of each telematics cron run (Samsara / Motive daily jobs) for admin debugging.
+model TelematicsCronRun {
+  id           String      @id @default(cuid())
+  job          CronJobType @map("job")
+  startedAt    DateTime    @map("started_at")
+  finishedAt   DateTime    @map("finished_at")
+  durationMs   Int         @map("duration_ms")
+  totalOrgs    Int         @map("total_orgs")
+  successOrgs  Int         @map("success_orgs")
+  failedOrgs   Int         @map("failed_orgs")
+  allSucceeded Boolean     @map("all_succeeded")
+  report       Json        @map("report")
+
+  @@index([job, startedAt(sort: Desc)])
+  @@map("telematics_cron_runs")
+}
+
+enum CronJobType {
+  SAMSARA_DAILY
+  MOTIVE_DAILY
+}
+
 // SAMSARA Idling Events (source table: one row per event, no aggregation)
 // Link to fuel-energy by assetId = vehicle.id and date when combining in API
 model SamsaraIdlingEvent {

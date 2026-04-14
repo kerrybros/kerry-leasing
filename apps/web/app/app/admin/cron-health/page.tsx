@@ -58,15 +58,65 @@ interface CronHealthResponse {
   accounts: CronAccount[];
 }
 
+interface CronRunStep {
+  endpoint: string;
+  newCount: number;
+  updatedCount: number;
+  unchangedCount: number;
+  errorCount: number;
+  recordCount: number;
+  skipped: boolean;
+  skipReason: string | null;
+}
+
+interface CronRunPass {
+  clerkOrgId: string;
+  orgName: string;
+  date: string;
+  verify: boolean;
+  success: boolean;
+  durationMs: number;
+  error: string | null;
+  steps: CronRunStep[];
+}
+
+interface CronRunRow {
+  id: string;
+  job: 'SAMSARA_DAILY' | 'MOTIVE_DAILY';
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
+  totalOrgs: number;
+  successOrgs: number;
+  failedOrgs: number;
+  allSucceeded: boolean;
+  report: { passes: CronRunPass[] };
+}
+
+interface CronRunsResponse {
+  timestamp: string;
+  runs: CronRunRow[];
+}
+
 export default function CronHealthPage() {
   const { getApi } = useApiClient();
   const [errorModal, setErrorModal] = useState<string | null>(null);
+  const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
 
   const { data, isLoading, error, refetch, isFetching } = useQuery<CronHealthResponse>({
     queryKey: ['cron-health'],
     queryFn: async () => {
       const api = await getApi();
       return api.get<CronHealthResponse>('/admin/orgs/cron-health');
+    },
+    refetchInterval: 60_000,
+  });
+
+  const { data: runsData, isLoading: runsLoading } = useQuery<CronRunsResponse>({
+    queryKey: ['cron-runs'],
+    queryFn: async () => {
+      const api = await getApi();
+      return api.get<CronRunsResponse>('/admin/orgs/cron-runs?limit=25');
     },
     refetchInterval: 60_000,
   });
@@ -188,6 +238,98 @@ export default function CronHealthPage() {
           <p className="text-xs text-muted-foreground text-right">
             Last refreshed: {new Date(data.timestamp).toLocaleString()} · Auto-refreshes every 60s
           </p>
+
+          {/* Recent cron job runs (persisted summaries) */}
+          <div className="mt-10">
+            <h2 className="text-lg font-semibold mb-2">Recent cron runs</h2>
+            <p className="text-sm text-muted-foreground mb-4">
+              Per-step new / unchanged / updated counts from the last telematics daily jobs. Expand a row for details.
+            </p>
+            {runsLoading ? (
+              <Skeleton style={{ height: 120, borderRadius: 8 }} />
+            ) : runsData?.runs.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No runs recorded yet. Runs are saved after each Samsara/Motive daily job (Render cron or HTTP).</p>
+            ) : (
+              <div className="bg-card border border-border rounded-lg overflow-hidden divide-y divide-border">
+                {runsData?.runs.map((run) => {
+                  const open = expandedRunId === run.id;
+                  return (
+                    <div key={run.id}>
+                      <button
+                        type="button"
+                        className="w-full flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-left hover:bg-accent/50 transition-colors"
+                        onClick={() => setExpandedRunId(open ? null : run.id)}
+                      >
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant="outline" className="text-xs font-mono">{run.job.replace('_', ' ')}</Badge>
+                          {run.allSucceeded ? (
+                            <Badge className="bg-green-600 hover:bg-green-600 text-xs">All OK</Badge>
+                          ) : (
+                            <Badge variant="destructive" className="text-xs">{run.failedOrgs} org(s) failed</Badge>
+                          )}
+                          <span className="text-sm text-muted-foreground">
+                            {new Date(run.startedAt).toLocaleString()}
+                          </span>
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          {Math.round(run.durationMs / 1000)}s · {run.successOrgs}/{run.totalOrgs} org passes OK
+                          <span className="ml-2" aria-hidden>{open ? '▼' : '▶'}</span>
+                        </div>
+                      </button>
+                      {open && (
+                        <div className="px-4 pb-4 space-y-4 bg-muted/30">
+                          {run.report.passes.map((p, idx) => (
+                            <div key={`${p.clerkOrgId}-${p.date}-${p.verify}-${idx}`} className="border border-border rounded-md bg-background p-3 text-sm">
+                              <div className="flex flex-wrap items-center gap-2 mb-2">
+                                <span className="font-semibold">{p.orgName}</span>
+                                <Badge variant="secondary" className="text-xs">{p.date}</Badge>
+                                {p.verify && <Badge variant="outline" className="text-xs">verify</Badge>}
+                                {p.success ? (
+                                  <Badge className="bg-green-600 hover:bg-green-600 text-xs">pass</Badge>
+                                ) : (
+                                  <Badge variant="destructive" className="text-xs">fail</Badge>
+                                )}
+                                <span className="text-xs text-muted-foreground">{p.durationMs}ms</span>
+                              </div>
+                              {p.error && (
+                                <pre className="text-xs text-destructive whitespace-pre-wrap mb-2 font-mono">{p.error}</pre>
+                              )}
+                              <table className="w-full text-xs">
+                                <thead>
+                                  <tr className="text-left text-muted-foreground border-b border-border">
+                                    <th className="py-1 pr-2">Step</th>
+                                    <th className="py-1 pr-2">New</th>
+                                    <th className="py-1 pr-2">Same</th>
+                                    <th className="py-1 pr-2">Updated</th>
+                                    <th className="py-1 pr-2">Err</th>
+                                    <th className="py-1">Note</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {p.steps.map((s) => (
+                                    <tr key={s.endpoint} className="border-b border-border/60">
+                                      <td className="py-1 pr-2 font-mono">{s.endpoint}</td>
+                                      <td className="py-1 pr-2">{s.newCount}</td>
+                                      <td className="py-1 pr-2">{s.unchangedCount}</td>
+                                      <td className="py-1 pr-2">{s.updatedCount}</td>
+                                      <td className="py-1 pr-2">{s.errorCount}</td>
+                                      <td className="py-1 text-muted-foreground">
+                                        {s.skipped && s.skipReason ? s.skipReason : '—'}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </>
       ) : null}
 

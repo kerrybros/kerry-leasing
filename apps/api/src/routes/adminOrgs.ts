@@ -15,7 +15,7 @@ import { SamsaraClient } from '../telematics/samsara/client.js';
 import { backdateMotiveData } from '../telematics/motive/backdate.js';
 import { backdateSamsaraData } from '../telematics/samsara/backdate.js';
 import { REPAIR_SHOP_ORG_ID } from '../config/repairShop.js';
-import { ServicePlanMatchType } from '../generated/app-client/index.js';
+import { CronJobType, ServicePlanMatchType } from '../generated/app-client/index.js';
 import { createId } from '@paralleldrive/cuid2';
 import { config } from '../config.js';
 
@@ -514,6 +514,87 @@ router.post('/:clerkOrgId/fleet/sync', async (req: AuthRequest, res) => {
   } catch (err: any) {
     console.error('[adminOrgs] POST /:clerkOrgId/fleet/sync error:', err);
     res.status(500).json({ error: err.message ?? 'Fleet sync failed' });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// GET /admin/orgs/cron-runs
+// Recent persisted telematics cron summaries (Samsara / Motive daily jobs).
+// ---------------------------------------------------------------------------
+router.get('/cron-runs', async (req: AuthRequest, res) => {
+  try {
+    const appPrisma = getAppPrisma();
+    const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '20'), 10) || 20, 1), 100);
+    const job = req.query.job as string | undefined;
+
+    const runs = await appPrisma.telematicsCronRun.findMany({
+      where:
+        job === 'SAMSARA_DAILY' || job === 'MOTIVE_DAILY'
+          ? { job: job as CronJobType }
+          : undefined,
+      orderBy: { startedAt: 'desc' },
+      take: limit,
+    });
+
+    const clerkOrgIds = new Set<string>();
+    for (const run of runs) {
+      const report = run.report as { passes?: Array<{ clerkOrgId: string }> };
+      for (const p of report?.passes ?? []) {
+        clerkOrgIds.add(p.clerkOrgId);
+      }
+    }
+
+    const clerkOrgs = await Promise.allSettled(
+      [...clerkOrgIds].map((id) => clerk.organizations.getOrganization({ organizationId: id }))
+    );
+    const orgNameMap = new Map<string, string>();
+    [...clerkOrgIds].forEach((id, i) => {
+      const r = clerkOrgs[i];
+      if (r.status === 'fulfilled') orgNameMap.set(id, r.value.name);
+    });
+
+    const enriched = runs.map((run) => {
+      const report = run.report as {
+        passes?: Array<{
+          clerkOrgId: string;
+          date: string;
+          verify: boolean;
+          success: boolean;
+          durationMs: number;
+          error: string | null;
+          steps: Array<{
+            endpoint: string;
+            newCount: number;
+            updatedCount: number;
+            unchangedCount: number;
+            errorCount: number;
+            recordCount: number;
+            skipped: boolean;
+            skipReason: string | null;
+          }>;
+        }>;
+      };
+      const passes = (report.passes ?? []).map((p) => ({
+        ...p,
+        orgName: orgNameMap.get(p.clerkOrgId) ?? p.clerkOrgId,
+      }));
+      return {
+        id: run.id,
+        job: run.job,
+        startedAt: run.startedAt.toISOString(),
+        finishedAt: run.finishedAt.toISOString(),
+        durationMs: run.durationMs,
+        totalOrgs: run.totalOrgs,
+        successOrgs: run.successOrgs,
+        failedOrgs: run.failedOrgs,
+        allSucceeded: run.allSucceeded,
+        report: { passes },
+      };
+    });
+
+    res.json({ timestamp: new Date().toISOString(), runs: enriched });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Internal server error', message: error.message });
   }
 });
 

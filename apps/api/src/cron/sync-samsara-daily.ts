@@ -14,6 +14,8 @@
 import 'dotenv/config';
 import { syncSamsaraDaily } from '../telematics/samsara/syncService.js';
 import { assertCredentialsEncryptionKeyConfigured } from '../lib/credentials.js';
+import { recordTelematicsCronRun } from '../lib/telematicsCronRun.js';
+import { CronJobType } from '../generated/app-client/index.js';
 
 async function main() {
   console.log(`\n${'='.repeat(60)}`);
@@ -30,6 +32,14 @@ async function main() {
 
     // Run daily sync
     const result = await syncSamsaraDaily();
+
+    await recordTelematicsCronRun(CronJobType.SAMSARA_DAILY, {
+      totalOrgs: result.totalOrgs,
+      successCount: result.successCount,
+      errorCount: result.errorCount,
+      duration: result.duration,
+      results: result.results as any,
+    });
 
     // Final status for monitoring / logs
     if (result.errorCount > 0) {

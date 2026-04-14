@@ -32,7 +32,14 @@ export class SamsaraClient {
           const data = error.response.data;
           
           if (status === 401) {
-            throw new Error('Samsara API authentication failed - invalid API token');
+            const path =
+              typeof error.config?.url === 'string'
+                ? error.config.url
+                : `${error.config?.baseURL ?? ''}${(error.config as any)?.url ?? ''}`;
+            throw new Error(
+              `Samsara API authentication failed - invalid API token (HTTP 401 on ${path || 'unknown path'}). ` +
+                `If other fleet endpoints work, the token may lack permission for this path (e.g. safety events).`
+            );
           } else if (status === 429) {
             throw new Error('Samsara API rate limit exceeded');
           } else if (status >= 500) {

@@ -23,6 +23,7 @@ interface OrgSyncResult {
   clerkOrgId: string;
   success: boolean;
   date: string;
+  verify: boolean;
   results: SyncResult[];
   error?: string;
   duration: number;
@@ -42,6 +43,7 @@ export async function syncMotiveOrgForDate(
     clerkOrgId,
     success: true,
     date,
+    verify,
     results: [],
     duration: 0
   };
