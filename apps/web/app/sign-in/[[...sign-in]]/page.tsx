@@ -49,16 +49,16 @@ export default function SignInPage() {
         </div>
 
         {/* Headline */}
-        <div className="relative z-10 space-y-5">
+        <div className="relative z-10 space-y-4">
           <div
             className="w-10 h-1 rounded-full"
             style={{ background: '#d9a528' }}
           />
           <h1 className="text-4xl font-bold text-white leading-tight tracking-tight">
-            Fleet management<br />built for fixed-cost<br />contracts.
+            Your fleet.<br />One portal.
           </h1>
-          <p className="text-base text-white/50 leading-relaxed max-w-sm">
-            One portal for telematics, repair history, and driver performance — purpose-built for Kerry Leasing customers.
+          <p className="text-sm text-white/40 tracking-wide uppercase">
+            Telematics · Repairs · Driver Performance
           </p>
         </div>
 
