@@ -5,7 +5,8 @@
  * Sync order per org per date:
  *   1. syncSamsaraVehicles (vehicle roster — gated to once per 7 days)
  *   2. syncFuelEnergyReports → writes to samsara_vehicle_utilization
- *   3. syncSamsaraVehicleStats → writes to samsara_vehicle_stats_snapshots
+ *   3. syncSamsaraVehicleStats → samsara_vehicle_stats_snapshots (primary pass only;
+ *      API is point-in-time, not historical per verify date)
  *   4. syncSamsaraSafetyEvents → writes to samsara_safety_events
  *
  * Each step is isolated: a failure in one step does not prevent subsequent
@@ -133,17 +134,38 @@ export async function syncSamsaraOrgForDate(
         (fuelResult.errorCount > 0 ? `, ${fuelResult.errorCount} errors` : '')
   );
 
-  // 3. Vehicle stats snapshot
-  const statsResult = await safeStep('vehicle_stats', date, () =>
-    syncSamsaraVehicleStats(clerkOrgId, apiToken)
-  );
-  orgResult.results.push(statsResult);
-  console.log(
-    statsResult.skipped
-      ? `  ⏭  Vehicle stats: skipped (${statsResult.skipReason})`
-      : `  ✓ Vehicle stats: ${statsResult.recordCount} vehicles — ${statsResult.newCount} inserted, ${statsResult.unchangedCount} unchanged, ` +
-          `${statsResult.updatedCount} updated, ${statsResult.errorCount} errors`
-  );
+  // 3. Vehicle stats snapshot (live /fleet/vehicles/stats — not scoped to sync `date`).
+  // On verify passes, skipping avoids re-fetching with fresh timestamps and redundant rows.
+  let statsResult: SyncResult;
+  if (verify) {
+    statsResult = {
+      endpoint: 'vehicle_stats',
+      date,
+      recordCount: 0,
+      newCount: 0,
+      updatedCount: 0,
+      unchangedCount: 0,
+      errorCount: 0,
+      errors: [],
+      skipped: true,
+      skipReason:
+        'Point-in-time fleet stats run on the primary sync only (not tied to verify dates).',
+    };
+    orgResult.results.push(statsResult);
+    console.log(`  ⏭  Vehicle stats: skipped (verify pass — primary sync only)`);
+  } else {
+    statsResult = await safeStep('vehicle_stats', date, () =>
+      syncSamsaraVehicleStats(clerkOrgId, apiToken)
+    );
+    orgResult.results.push(statsResult);
+    console.log(
+      statsResult.skipped
+        ? `  ⏭  Vehicle stats: skipped (${statsResult.skipReason})`
+        : `  ✓ Vehicle stats: ${statsResult.recordCount} vehicles — ${statsResult.newCount} inserted, ${statsResult.unchangedCount} unchanged, ` +
+            `${statsResult.updatedCount} updated, ${statsResult.errorCount} errors`
+    );
+  }
+
 
   // 4. Safety events
   const safetyResult = await safeStep('safety_events', date, () =>
