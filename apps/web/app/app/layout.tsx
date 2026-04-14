@@ -71,7 +71,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     },
     {
       href: '/app/drivers',
-      label: 'Drivers',
+      label: 'Scorecard',
       icon: Users,
       active: !!pathname?.includes('/drivers'),
       hidden: !showDrivers,
