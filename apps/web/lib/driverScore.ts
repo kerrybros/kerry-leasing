@@ -1,65 +1,75 @@
 /**
- * Driver score computation.
- * Weights and formula documented in DESIGN.md.
+ * Driver score computation — weighted composite of efficiency, behavior, and safety metrics.
  *
  * Score range: 0–100
- * - Idle %  → 40% weight (lower is better)
- * - MPG     → 40% weight (relative to fleet average)
- * - Safety  → 20% weight (stubbed at full score until safety-event APIs are connected)
+ *
+ * Category weights:
+ *   Idle %         → 30%  (lower idle = better fuel savings)
+ *   MPG efficiency → 25%  (relative to fleet average)
+ *   Utilization    → 15%  (drive time / total engine time)
+ *   Fuel economy   → 10%  (driving fuel as share of total — lower idle fuel share)
+ *   Safety         → 20%  (fewer violations = higher score)
  */
 
-export interface DriverSafetyEvents {
-  speedingEvents?: number;      // stub — not yet available
-  hardStops?: number;           // stub — not yet available
-  stopSignViolations?: number;  // stub — not yet available
+export interface DriverScoreInput {
+  idlePct: number;
+  mpg: number;
+  fleetAvgMpg?: number;
+  driveTimePct?: number;
+  drivingFuelRatio?: number;
+  safetyViolations?: number;
 }
 
 export const SCORE_WEIGHTS = {
-  idle: 0.4,
-  mpg: 0.4,
-  safety: 0.2,
+  idle: 0.30,
+  mpg: 0.25,
+  utilization: 0.15,
+  fuelEconomy: 0.10,
+  safety: 0.20,
 } as const;
 
-// Idle % at which the idle sub-score reaches 0. Above this, clamp to 0.
 const MAX_SCOREABLE_IDLE_PCT = 50;
+const SAFETY_DECAY_RATE = 12;
 
-/**
- * Compute a 0–100 driver score.
- *
- * @param metrics.idlePct   Idle percentage (0–100, e.g. 25 for 25%).
- * @param metrics.mpg       Driver MPG for the period.
- * @param metrics.fleetAvgMpg  Fleet-wide average MPG; used for relative scoring.
- *                             If absent, treats driver MPG as average.
- * @param safetyEvents      Optional safety event counts (stubbed).
- */
-export function computeDriverScore(
-  metrics: { idlePct: number; mpg: number; fleetAvgMpg?: number },
-  safetyEvents?: DriverSafetyEvents
-): number {
+export function computeDriverScore(metrics: DriverScoreInput): number {
   // Idle sub-score: 100 at 0% idle, 0 at MAX_SCOREABLE_IDLE_PCT or above
-  const idleScore = Math.max(
-    0,
-    Math.min(100, (1 - metrics.idlePct / MAX_SCOREABLE_IDLE_PCT) * 100)
-  );
+  const idleScore = Math.max(0, Math.min(100, (1 - metrics.idlePct / MAX_SCOREABLE_IDLE_PCT) * 100));
 
-  // MPG sub-score: fleet average earns 60/100; scaled linearly above/below
+  // MPG sub-score: fleet average earns 60/100; scaled linearly
   const refMpg = metrics.fleetAvgMpg && metrics.fleetAvgMpg > 0 ? metrics.fleetAvgMpg : metrics.mpg || 1;
   const mpgScore = Math.max(0, Math.min(100, (metrics.mpg / refMpg) * 60));
 
-  // Safety sub-score: stubbed at full score until event APIs are connected
-  const safetyScore = 100;
-  void safetyEvents; // reserved for future use
+  // Utilization sub-score: % of engine-on time spent driving (100% drive = 100 score)
+  const driveTimePct = metrics.driveTimePct ?? (100 - metrics.idlePct);
+  const utilizationScore = Math.max(0, Math.min(100, driveTimePct));
+
+  // Fuel economy sub-score: driving fuel / total fuel ratio (1.0 = no idle fuel burn)
+  const fuelRatio = metrics.drivingFuelRatio ?? 1;
+  const fuelEconomyScore = Math.max(0, Math.min(100, fuelRatio * 100));
+
+  // Safety sub-score: exponential decay per violation (0 violations = 100)
+  const violations = metrics.safetyViolations ?? 0;
+  const safetyScore = Math.max(0, 100 * Math.exp(-violations / SAFETY_DECAY_RATE));
 
   return Math.round(
     idleScore * SCORE_WEIGHTS.idle +
     mpgScore * SCORE_WEIGHTS.mpg +
+    utilizationScore * SCORE_WEIGHTS.utilization +
+    fuelEconomyScore * SCORE_WEIGHTS.fuelEconomy +
     safetyScore * SCORE_WEIGHTS.safety
   );
 }
 
-/** Returns the badge variant for a given driver score. */
 export function scoreVariant(score: number): 'success' | 'warning' | 'destructive' {
-  if (score >= 80) return 'success';
-  if (score >= 60) return 'warning';
+  if (score >= 75) return 'success';
+  if (score >= 55) return 'warning';
   return 'destructive';
+}
+
+export function scoreLabel(score: number): string {
+  if (score >= 90) return 'Excellent';
+  if (score >= 75) return 'Good';
+  if (score >= 55) return 'Fair';
+  if (score >= 35) return 'Needs Work';
+  return 'Poor';
 }
