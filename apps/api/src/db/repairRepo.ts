@@ -24,6 +24,12 @@
 
 import { createRequire } from 'module';
 import { REPAIR_SHOP_ORG_ID } from '../config/repairShop.js';
+import { cacheGetOrSet } from '../lib/redis.js';
+import { config } from '../config.js';
+
+const REPAIR_TTL = 1800; // 30 minutes — repair data is read-only external; short TTL handles freshness
+const CUSTOMER_LIST_TTL = 3600; // 1 hour — customer list changes rarely
+const env = () => (config.nodeEnv === 'production' ? 'prod' : 'dev');
 
 const require = createRequire(import.meta.url);
 const { PrismaClient } = require('../generated/repair-client/index.js');
@@ -63,6 +69,12 @@ function getRepairClient(): any {
  * @returns Array of units owned by this customer
  */
 export async function getUnitsByCustomer(customerId: string) {
+  return cacheGetOrSet(`${env()}:repair:units:${customerId}`, REPAIR_TTL, () =>
+    _getUnitsByCustomer(customerId)
+  );
+}
+
+async function _getUnitsByCustomer(customerId: string) {
   const client = getRepairClient();
   
   const units = await client.customer_units.findMany({
@@ -129,6 +141,12 @@ export async function getUnitsByCustomer(customerId: string) {
  * @returns Unit if found and owned by customer, null otherwise
  */
 export async function getUnitByVin(customerId: string, vin: string) {
+  return cacheGetOrSet(`${env()}:repair:unit:${customerId}:${vin}`, REPAIR_TTL, () =>
+    _getUnitByVin(customerId, vin)
+  );
+}
+
+async function _getUnitByVin(customerId: string, vin: string) {
   const client = getRepairClient();
   
   const unit = await client.customer_units.findFirst({
@@ -193,6 +211,12 @@ export async function getUnitByVin(customerId: string, vin: string) {
  * @returns Array of invoice/repair records, empty if unit not owned
  */
 export async function getInvoicesByVin(customerId: string, vin: string) {
+  return cacheGetOrSet(`${env()}:repair:invoices:${customerId}:${vin}`, REPAIR_TTL, () =>
+    _getInvoicesByVin(customerId, vin)
+  );
+}
+
+async function _getInvoicesByVin(customerId: string, vin: string) {
   const client = getRepairClient();
   
   // STEP 1: Verify unit ownership with strict scoping
@@ -287,6 +311,12 @@ export async function getInvoicesByVin(customerId: string, vin: string) {
  * Returns all unique customers with units in the repair shop.
  */
 export async function getDistinctCustomers(): Promise<{ id: string; name: string }[]> {
+  return cacheGetOrSet(`${env()}:repair:customers`, CUSTOMER_LIST_TTL, () =>
+    _getDistinctCustomers()
+  );
+}
+
+async function _getDistinctCustomers(): Promise<{ id: string; name: string }[]> {
   const client = getRepairClient();
   const rows = await client.customer_units.groupBy({
     by: ['cust_id', 'customer'],

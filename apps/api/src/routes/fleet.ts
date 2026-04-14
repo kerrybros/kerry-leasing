@@ -11,6 +11,12 @@ import { getAppPrisma, getRepairPrisma } from '../lib/prisma.js';
 import { REPAIR_SHOP_ORG_ID } from '../config/repairShop.js';
 import { getSamsaraIdleAggregatesByDate } from '../telematics/samsara/idleAggregates.js';
 import { getDieselPricePerGallon } from '../lib/eiaFuelPrice.js';
+import { cacheGetOrSet, getRedis } from '../lib/redis.js';
+import { config } from '../config.js';
+
+const FLEET_LIST_TTL = 900;  // 15 minutes
+const FLEET_UNIT_TTL = 900;  // 15 minutes
+const fleetEnv = () => (config.nodeEnv === 'production' ? 'prod' : 'dev');
 
 const router = Router();
 
@@ -41,6 +47,16 @@ router.get('/units', clerkAuthMiddleware, requireOrg, async (req: AuthRequest, r
     const clerkOrgId = req.auth!.orgId!;
     const appPrisma = getAppPrisma();
     const repairPrisma = getRepairPrisma();
+    const cacheKey = `${fleetEnv()}:fleet:units:${clerkOrgId}`;
+
+    // Serve from cache if available
+    const redis = getRedis();
+    if (redis) {
+      try {
+        const cached = await redis.get(cacheKey);
+        if (cached) return res.json(JSON.parse(cached));
+      } catch {} // fall through to DB
+    }
 
     // 1. Get included service plan units for this org (excluded units are hidden from the portal)
     const servicePlanUnits = await (appPrisma.servicePlanUnit as any).findMany({
@@ -235,10 +251,14 @@ router.get('/units', clerkAuthMiddleware, requireOrg, async (req: AuthRequest, r
       };
     });
 
-    res.json({
-      units: enrichedUnits,
-      total: enrichedUnits.length,
-    });
+    const result = { units: enrichedUnits, total: enrichedUnits.length };
+
+    // Write to cache (non-blocking) — redis already declared above
+    if (redis) {
+      redis.setex(cacheKey, FLEET_LIST_TTL, JSON.stringify(result)).catch(() => {});
+    }
+
+    res.json(result);
   } catch (error) {
     console.error('[Fleet] Error fetching units:', error);
     res.status(500).json({
@@ -260,6 +280,16 @@ router.get('/units/:identifier', clerkAuthMiddleware, requireOrg, async (req: Au
     const { identifier } = req.params;
     const appPrisma = getAppPrisma();
     const repairPrisma = getRepairPrisma();
+
+    // Serve from cache if available
+    const unitCacheKey = `${fleetEnv()}:fleet:unit:${clerkOrgId}:${identifier}`;
+    const unitRedis = getRedis();
+    if (unitRedis) {
+      try {
+        const cached = await unitRedis.get(unitCacheKey);
+        if (cached) return res.json(JSON.parse(cached));
+      } catch {} // fall through to DB
+    }
 
     // Find the service plan unit (search by VIN or unit number) — excluded units are not accessible
     let servicePlanUnit = await appPrisma.servicePlanUnit.findFirst({
@@ -504,7 +534,7 @@ router.get('/units/:identifier', clerkAuthMiddleware, requireOrg, async (req: Au
       }
     }
 
-    res.json({
+    const unitResult = {
       servicePlan: {
         id: servicePlanUnit.id,
         repairUnitNumber: servicePlanUnit.repairUnitNumber,
@@ -524,7 +554,14 @@ router.get('/units/:identifier', clerkAuthMiddleware, requireOrg, async (req: Au
         history: repairHistory,
         hasData: repairHistory.length > 0,
       },
-    });
+    };
+
+    // Write to cache (non-blocking)
+    if (unitRedis) {
+      unitRedis.setex(unitCacheKey, FLEET_UNIT_TTL, JSON.stringify(unitResult)).catch(() => {});
+    }
+
+    res.json(unitResult);
   } catch (error) {
     console.error('[Fleet] Error fetching unit details:', error);
     res.status(500).json({

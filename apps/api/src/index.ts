@@ -130,6 +130,11 @@ async function startServer() {
     app.listen(port, () => {
       console.log(`✓ API server running on http://localhost:${port}`);
       console.log(`✓ Environment: ${config.nodeEnv}`);
+      if (config.redisUrl) {
+        console.log(`✓ Redis configured (${config.redisUrl.replace(/\/\/.*@/, '//**@')})`);
+      } else {
+        console.warn('⚠️  Redis not configured — caching disabled (set REDIS_URL to enable)');
+      }
     });
   } catch (error) {
     console.error('Failed to start server:', error);

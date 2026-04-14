@@ -18,14 +18,31 @@ import fleetRoutes from './fleet.js';
 import repairsRoutes from './repairs.js';
 import adminOrgsRoutes from './adminOrgs.js';
 import { LinkOrgSchema, RepairCustomerSchema, parseBody } from '../lib/validate.js';
+import { getRedis } from '../lib/redis.js';
 
 const router = Router();
 
-// Public health check endpoint
-router.get('/health', (req, res) => {
+// Public health check endpoint — also pings Redis if configured
+router.get('/health', async (_req, res) => {
+  const redis = getRedis();
+  let redisStatus: 'ok' | 'error' | 'not_configured' = 'not_configured';
+  let redisLatencyMs: number | null = null;
+
+  if (redis) {
+    const t0 = Date.now();
+    try {
+      await redis.ping();
+      redisStatus = 'ok';
+      redisLatencyMs = Date.now() - t0;
+    } catch (err: any) {
+      redisStatus = 'error';
+    }
+  }
+
   res.json({
     ok: true,
     timestamp: new Date().toISOString(),
+    redis: { status: redisStatus, latencyMs: redisLatencyMs },
   });
 });
 

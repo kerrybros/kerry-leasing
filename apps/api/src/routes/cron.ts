@@ -40,7 +40,10 @@ router.post('/sync-motive', async (req: Request, res: Response) => {
   try {
     console.log(`\n✅ Authorized Motive cron request from ${req.ip}`);
     const result = await syncMotiveDaily();
-    await cacheDelPattern('prod:telematics:*');
+    await Promise.all([
+      cacheDelPattern('prod:telematics:*'),
+      cacheDelPattern('prod:fleet:*'),
+    ]);
     const allSucceeded = result.errorCount === 0;
     res.status(allSucceeded ? 200 : 207).json({
       success: allSucceeded,
@@ -65,7 +68,10 @@ router.post('/sync-samsara', async (req: Request, res: Response) => {
   try {
     console.log(`\n✅ Authorized Samsara cron request from ${req.ip}`);
     const result = await syncSamsaraDaily();
-    await cacheDelPattern('prod:telematics:*');
+    await Promise.all([
+      cacheDelPattern('prod:telematics:*'),
+      cacheDelPattern('prod:fleet:*'),
+    ]);
     const allSucceeded = result.errorCount === 0;
     res.status(allSucceeded ? 200 : 207).json({
       success: allSucceeded,
