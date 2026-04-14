@@ -19,14 +19,16 @@ export function getRedis(): Redis | null {
       client = new Redis(config.redisUrl, {
         // Fail fast — don't retry forever
         maxRetriesPerRequest: 1,
-        // Don't queue commands when disconnected; reject immediately
-        enableOfflineQueue: false,
+        // Queue commands briefly while the socket is connecting/reconnecting.
+        // With false, ioredis throws "Stream isn't writeable and enableOfflineQueue
+        // is false" on the first request or during brief disconnects (common on Render).
+        enableOfflineQueue: true,
         // Don't connect until first command
         lazyConnect: true,
         // If a command takes longer than 500ms, reject it (falls through to DB)
         commandTimeout: 500,
-        // Max 2s to establish the initial TCP connection
-        connectTimeout: 2000,
+        // Render internal Redis can be slow to accept TCP on cold start
+        connectTimeout: 5000,
         // Exponential backoff on reconnect, give up after 3 attempts
         retryStrategy: (times) => {
           if (times > 3) return null; // stop retrying
