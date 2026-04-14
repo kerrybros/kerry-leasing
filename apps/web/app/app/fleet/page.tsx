@@ -1,32 +1,67 @@
 'use client';
 
+import { useState } from 'react';
 import { useOrganization } from '@clerk/nextjs';
 import { DateRangePicker } from '@/components/DateRangePicker';
-import { KpiCard } from '@/components/KpiCard';
+import { KpiCard, SkeletonKpiCard } from '@/components/KpiCard';
+import { Loader2 } from 'lucide-react';
 import { RepairBreakdown } from '@/features/fleet/components/RepairBreakdown';
 import { TelematicsTrendsView } from '@/features/fleet/components/TelematicsTrendsView';
 import { TelematicsBreakdownView } from '@/features/fleet/components/TelematicsBreakdownView';
 import { useFleetData } from '@/features/fleet/hooks/useFleetData';
 
+function formatDateLabel(start: string, end: string): string {
+  const today = new Date();
+  const todayStr = today.toISOString().split('T')[0];
+  const startOfYear = `${today.getFullYear()}-01-01`;
+
+  if (start === startOfYear && end === todayStr) return 'This Year';
+
+  const startDate = new Date(start + 'T00:00:00');
+  const endDate = new Date(end + 'T00:00:00');
+  const opts: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric', year: 'numeric' };
+  return `${startDate.toLocaleDateString('en-US', opts)} – ${endDate.toLocaleDateString('en-US', opts)}`;
+}
+
 export default function FleetOverviewPage() {
   const { organization } = useOrganization();
   const fleet = useFleetData();
+  const [repairSelectedUnit, setRepairSelectedUnit] = useState<string | null>(null);
+
+  const dateLabel = formatDateLabel(fleet.startDate, fleet.endDate);
 
   return (
-    <div className="w-full p-6">
-      {/* Page Header */}
-      <div className="flex justify-between items-center gap-4 mb-6 flex-wrap">
-        <div>
-          <h1 className="text-3xl font-bold mb-1">Fleet Overview</h1>
-          <p className="text-muted-foreground text-sm">{organization?.name}</p>
+    <div className="w-full">
+      {/* Sticky Page Header */}
+      <div className="sticky top-0 z-20 bg-background border-b border-border px-6 py-3">
+        <div className="flex items-center justify-between gap-4">
+          {/* Left: title */}
+          <div className="shrink-0">
+            <div className="flex items-center gap-3">
+              <h1 className="text-2xl font-bold leading-none">Fleet Overview</h1>
+              {fleet.isRefetching && (
+                <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Loader2 className="h-3 w-3 animate-spin" /> Updating...
+                </span>
+              )}
+            </div>
+            <p className="text-muted-foreground text-sm mt-0.5">{organization?.name}</p>
+          </div>
+
+          {/* Right: date picker */}
+          <div className="shrink-0">
+            <DateRangePicker
+              startDate={fleet.startDate}
+              endDate={fleet.endDate}
+              onStartDateChange={fleet.setStartDate}
+              onEndDateChange={fleet.setEndDate}
+              contractStartDate={fleet.orgSettings?.contractStartDate ?? undefined}
+            />
+          </div>
         </div>
-        <DateRangePicker
-          startDate={fleet.activeTab === 'telematics' ? fleet.startDate : fleet.repairStartDate}
-          endDate={fleet.activeTab === 'telematics' ? fleet.endDate : fleet.repairEndDate}
-          onStartDateChange={fleet.activeTab === 'telematics' ? fleet.setStartDate : fleet.setRepairStartDate}
-          onEndDateChange={fleet.activeTab === 'telematics' ? fleet.setEndDate : fleet.setRepairEndDate}
-        />
       </div>
+
+      <div className="px-6 pt-4 pb-6">
 
       {fleet.orgSettingsError && (
         <div className="mb-4 px-4 py-3 rounded-lg bg-amber-500/15 border border-amber-500/40 text-amber-800 dark:text-amber-200 text-sm flex items-center justify-between gap-4">
@@ -42,30 +77,44 @@ export default function FleetOverviewPage() {
         </div>
       )}
 
-      {/* KPI Bar */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
-        <KpiCard label="Total Fleet Miles" value={fleet.telematicsLoading ? '—' : fleet.fleetKpis.totalMiles.toLocaleString()} subtext="miles" />
-        <KpiCard label="Fleet Avg MPG" value={fleet.telematicsLoading ? '—' : fleet.fleetKpis.avgMpg} />
-        <KpiCard
-          label="Idle %"
-          value={fleet.telematicsLoading ? '—' : `${fleet.fleetKpis.idlePct}%`}
-          variant={!fleet.telematicsLoading && parseFloat(fleet.fleetKpis.idlePct) > 30 ? 'warning' : 'default'}
-        />
-        <KpiCard label="Idle Fuel" value={fleet.telematicsLoading ? '—' : fleet.fleetKpis.idleFuel.toLocaleString()} subtext="gallons" />
-        <KpiCard label="Total Fuel" value={fleet.telematicsLoading ? '—' : fleet.fleetKpis.totalFuel.toLocaleString()} subtext="gallons" />
-        <KpiCard label="Driving Fuel" value={fleet.telematicsLoading ? '—' : fleet.fleetKpis.drivingFuel.toLocaleString()} subtext="gallons" />
-        <KpiCard label="Est. Fuel Cost" value={fleet.telematicsLoading ? '—' : `$${fleet.fleetKpis.estimatedFuelCost.toLocaleString()}`} />
-        <KpiCard
-          label="Est. Idle Fuel Cost"
-          value={fleet.telematicsLoading ? '—' : `$${fleet.fleetKpis.estimatedIdleFuelCost.toLocaleString()}`}
-          variant={!fleet.telematicsLoading && fleet.fleetKpis.estimatedIdleFuelCost > 500 ? 'warning' : 'default'}
-        />
-        <KpiCard label="Total Repair Jobs" value={fleet.repairsLoading ? '—' : fleet.repairKpis.totalJobs} />
-        <KpiCard
-          label="Jobs with Damage"
-          value={fleet.repairsLoading ? '—' : fleet.repairKpis.damageJobs}
-          variant={!fleet.repairsLoading && fleet.repairKpis.damageJobs > 0 ? 'warning' : 'default'}
-        />
+      {/* Fleet Totals Header + KPI Grid */}
+      <div className="mb-6">
+        <div className="mb-3">
+          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Fleet Totals</h2>
+          <p className="text-xs text-muted-foreground">{dateLabel}</p>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+          {(fleet.telematicsLoading || fleet.repairsLoading) ? (
+            Array.from({ length: 10 }).map((_, i) => <SkeletonKpiCard key={i} />)
+          ) : (
+            <>
+              <KpiCard label="Total Fleet Miles" value={fleet.fleetKpis.totalMiles.toLocaleString()} subtext="miles" />
+              <KpiCard label="Fleet Avg MPG" value={fleet.fleetKpis.avgMpg} />
+              <KpiCard label="Idle %" value={`${fleet.fleetKpis.idlePct}%`} variant="warning" />
+              <KpiCard label="Idle Fuel" value={fleet.fleetKpis.idleFuel.toLocaleString()} subtext="gallons" variant="warning" />
+              <KpiCard label="Total Fuel" value={fleet.fleetKpis.totalFuel.toLocaleString()} subtext="gallons" />
+              <KpiCard label="Driving Fuel" value={fleet.fleetKpis.drivingFuel.toLocaleString()} subtext="gallons" />
+              <KpiCard
+                label="Idle Fuel Cost"
+                value={`$${fleet.fleetKpis.estimatedIdleFuelCost.toLocaleString()}`}
+                subtext={`@ $${(fleet.orgSettings.dieselPricePerGallon ?? 3.85).toFixed(2)}/gal (EIA Midwest)`}
+                variant="warning"
+              />
+              {(() => {
+                const totalCost = fleet.fleetKpis.estimatedFuelCost + fleet.repairKpis.totalRepairSpend;
+                const miles = fleet.fleetKpis.totalMiles;
+                const cpm = miles > 0 ? (totalCost / miles).toFixed(2) : '—';
+                return <KpiCard label="Cost Per Mile" value={cpm === '—' ? '—' : `$${cpm}`} />;
+              })()}
+              <KpiCard label="Total Repair Jobs" value={fleet.repairKpis.totalJobs} />
+              <KpiCard
+                label="Jobs with Damage"
+                value={fleet.repairKpis.damageJobs}
+                variant={fleet.repairKpis.damageJobs > 0 ? 'error' : 'default'}
+              />
+            </>
+          )}
+        </div>
       </div>
 
       {/* Tab Bar */}
@@ -93,44 +142,26 @@ export default function FleetOverviewPage() {
           </button>
         </div>
         {fleet.activeTab === 'telematics' && (
-          <div className="flex items-center gap-4 mb-2">
-            {fleet.orgSettings.tracksDrivers && (
-              <div className="flex rounded-lg border border-border overflow-hidden">
-                <button
-                  className={`px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer ${
-                    fleet.viewMode === 'unit' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground bg-transparent'
-                  }`}
-                  onClick={() => fleet.setViewMode('unit')}
-                >
-                  Unit
-                </button>
-                <button
-                  className={`px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer ${
-                    fleet.viewMode === 'driver' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground bg-transparent'
-                  }`}
-                  onClick={() => fleet.setViewMode('driver')}
-                >
-                  Driver
-                </button>
-              </div>
-            )}
+          <div className="flex items-center gap-2 mb-2">
             <div className="flex rounded-lg border border-border overflow-hidden">
-              <button
-                className={`px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer ${
-                  fleet.telematicsView === 'trends' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground bg-transparent'
-                }`}
-                onClick={() => fleet.setTelematicsView('trends')}
-              >
-                Monthly Trends
-              </button>
-              <button
-                className={`px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer ${
-                  fleet.telematicsView === 'breakdown' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground bg-transparent'
-                }`}
-                onClick={() => fleet.setTelematicsView('breakdown')}
-              >
-                {fleet.viewMode === 'unit' ? 'Unit Breakdown' : 'Driver Breakdown'}
-              </button>
+              {(['overview', 'units', 'drivers'] as const).map((tab) => {
+                if (tab === 'drivers' && !fleet.orgSettings.tracksDrivers) return null;
+                const labels = { overview: 'Fleet Overview', units: 'Units', drivers: 'Drivers' };
+                return (
+                  <button
+                    key={tab}
+                    className={`px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer border-l first:border-l-0 border-border ${
+                      fleet.telematicsView === tab ? 'bg-primary text-primary-foreground' : 'text-muted-foreground bg-transparent hover:bg-accent'
+                    }`}
+                    onClick={() => {
+                      fleet.setTelematicsView(tab);
+                      fleet.setViewMode(tab === 'drivers' ? 'driver' : 'unit');
+                    }}
+                  >
+                    {labels[tab]}
+                  </button>
+                );
+              })}
             </div>
           </div>
         )}
@@ -142,25 +173,13 @@ export default function FleetOverviewPage() {
           units={fleet.repairUnits}
           loading={fleet.repairsLoading}
           error={fleet.repairsError}
-          startDate={fleet.repairStartDate}
-          endDate={fleet.repairEndDate}
+          startDate={fleet.startDate}
+          endDate={fleet.endDate}
+          onUnitSelect={setRepairSelectedUnit}
         />
-      ) : fleet.telematicsView === 'trends' ? (
+      ) : fleet.telematicsView === 'overview' ? (
         <TelematicsTrendsView
           loading={fleet.telematicsLoading}
-          viewMode={fleet.viewMode}
-          onViewModeChange={fleet.setViewMode}
-          tracksDrivers={fleet.orgSettings.tracksDrivers}
-          selectedId={fleet.selectedId}
-          onSelectedIdChange={fleet.setSelectedId}
-          unitMetrics={fleet.unitMetrics}
-          driverMetrics={fleet.driverMetrics}
-          unitOptions={fleet.unitOptions}
-          driverOptions={fleet.driverOptions}
-          selectedUnits={fleet.telematicsSelectedUnits}
-          selectedDrivers={fleet.telematicsSelectedDrivers}
-          onUnitsChange={fleet.setTelematicsSelectedUnits}
-          onDriversChange={fleet.setTelematicsSelectedDrivers}
           monthlyMetrics={fleet.monthlyMetrics}
           fleetTotals={fleet.fleetTotals}
           showYearToggle={fleet.showYearToggle}
@@ -168,19 +187,30 @@ export default function FleetOverviewPage() {
           selectedTableYear={fleet.selectedTableYear}
           onTableYearChange={fleet.setSelectedTableYear}
         />
-      ) : (
+      ) : fleet.telematicsView === 'drivers' ? (
         <TelematicsBreakdownView
-          viewMode={fleet.viewMode}
-          onViewModeChange={fleet.setViewMode}
+          loading={fleet.telematicsLoading}
+          viewMode="driver"
           tracksDrivers={fleet.orgSettings.tracksDrivers}
           unitMetrics={fleet.unitMetrics}
           driverMetrics={fleet.driverMetrics}
           fleetTotals={fleet.fleetTotals}
           selectedId={fleet.selectedId}
           onRowClick={id => fleet.setSelectedId(fleet.selectedId === id ? null : id)}
-          showDriverScorecard={fleet.orgSettings.tracksDrivers}
+        />
+      ) : (
+        <TelematicsBreakdownView
+          loading={fleet.telematicsLoading}
+          viewMode="unit"
+          tracksDrivers={fleet.orgSettings.tracksDrivers}
+          unitMetrics={fleet.unitMetrics}
+          driverMetrics={fleet.driverMetrics}
+          fleetTotals={fleet.fleetTotals}
+          selectedId={fleet.selectedId}
+          onRowClick={id => fleet.setSelectedId(fleet.selectedId === id ? null : id)}
         />
       )}
+      </div>
     </div>
   );
 }

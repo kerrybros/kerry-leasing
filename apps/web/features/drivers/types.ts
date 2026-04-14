@@ -5,7 +5,13 @@ export interface DriverRow {
   avgMpg: number;
   idlePct: number;
   idleFuelGal: number;
+  drivingFuelGal: number;
   totalFuelGal: number;
+  driveTimeHrs: number;
+  idleTimeHrs: number;
+  engineTimeHrs: number;
   estimatedFuelCost: number;
+  safetyViolations: number;
+  hardEvents: number;
   score: number;
 }

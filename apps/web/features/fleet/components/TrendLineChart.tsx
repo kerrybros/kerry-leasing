@@ -2,6 +2,7 @@
 
 import { useMemo, useRef, useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Skeleton } from '@/components/Skeleton';
 import {
   LineChart,
   Line,
@@ -12,6 +13,8 @@ import {
   LabelList,
 } from 'recharts';
 import type { MonthlyMetrics } from '@/features/fleet/types';
+import { CHART_COLORS } from '@/features/fleet/utils/chartColors';
+import { ChartTooltip } from '@/features/fleet/components/ChartTooltip';
 
 const PLACEHOLDER_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -68,38 +71,36 @@ export function TrendLineChart({ title, dataKey, data, loading, labelFormatter }
       <CardContent className="pt-0 relative">
         <div ref={containerRef} style={{ width: '100%', height: 200 }}>
           <LineChart width={dims.w} height={dims.h} data={chartData} margin={{ top: 20, right: 30, left: 10, bottom: 5 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#333" vertical={false} />
+            <CartesianGrid strokeDasharray="3 3" stroke={CHART_COLORS.grid} vertical={false} />
             <XAxis
               dataKey="month"
-              stroke="#888"
+              stroke={CHART_COLORS.axis}
               fontSize={11}
               tickLine={false}
               axisLine={false}
               padding={{ left: 20, right: 20 }}
+              tick={{ fill: CHART_COLORS.tick }}
             />
             <YAxis
-              stroke="#888"
+              stroke={CHART_COLORS.axis}
               fontSize={11}
               tickLine={false}
               axisLine={false}
               domain={hasData ? ['auto', 'auto'] : [0, 100]}
-              width={35}
+              width={50}
+              tick={{ fill: CHART_COLORS.tick }}
+              tickFormatter={(v: number) => v >= 1000 ? `${(v / 1000).toFixed(v % 1000 === 0 ? 0 : 1)}K` : v.toLocaleString()}
             />
             <Tooltip
-              contentStyle={{
-                background: '#1a1a1a',
-                border: '1px solid #333',
-                borderRadius: '6px',
-                color: '#ccc',
-              }}
+              content={<ChartTooltip formatter={(v) => typeof v === 'number' ? v.toLocaleString() : String(v)} />}
             />
             {hasData && (
               <Line
                 type="monotone"
                 dataKey={dataKey}
-                stroke="#d9a528"
+                stroke={CHART_COLORS.idle}
                 strokeWidth={4}
-                dot={{ fill: '#d9a528', r: 5, strokeWidth: 0 }}
+                dot={{ fill: CHART_COLORS.idle, r: 5, strokeWidth: 0 }}
                 activeDot={{ r: 7 }}
               >
                 <LabelList
@@ -107,20 +108,20 @@ export function TrendLineChart({ title, dataKey, data, loading, labelFormatter }
                   position="top"
                   offset={12}
                   formatter={labelFormatter}
-                  style={{ fill: '#999', fontSize: '11px', fontWeight: 700 }}
+                  style={{ fill: 'var(--foreground)', fontSize: '11px', fontWeight: 700 }}
                 />
               </Line>
             )}
           </LineChart>
         </div>
         {loading && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none" style={{ background: 'rgba(0,0,0,0.4)' }}>
-            <span className="text-xs text-muted-foreground animate-pulse">Loading...</span>
+          <div className="absolute inset-0">
+            <Skeleton style={{ height: '100%', borderRadius: 8 }} />
           </div>
         )}
         {!loading && !hasData && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <span className="text-sm font-medium" style={{ color: '#555' }}>No data available</span>
+            <span className="text-sm font-medium text-muted-foreground">No data available</span>
           </div>
         )}
       </CardContent>
