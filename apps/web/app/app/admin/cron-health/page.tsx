@@ -67,6 +67,8 @@ interface CronRunStep {
   recordCount: number;
   skipped: boolean;
   skipReason: string | null;
+  /** HTTP routes for this step (from GET /admin/orgs/cron-runs). */
+  apiPaths?: string[];
 }
 
 interface CronRunPass {
@@ -306,9 +308,23 @@ export default function CronHealthPage() {
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  {p.steps.map((s) => (
-                                    <tr key={s.endpoint} className="border-b border-border/60">
-                                      <td className="py-1 pr-2 font-mono">{s.endpoint}</td>
+                                  {p.steps.map((s, stepIdx) => (
+                                    <tr key={`${s.endpoint}-${stepIdx}`} className="border-b border-border/60 align-top">
+                                      <td className="py-1 pr-2">
+                                        <div className="font-mono">{s.endpoint}</div>
+                                        {s.apiPaths && s.apiPaths.length > 0 ? (
+                                          <details className="mt-1.5">
+                                            <summary className="cursor-pointer list-none text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden text-[11px] underline-offset-2 hover:underline">
+                                              Routes ({s.apiPaths.length})
+                                            </summary>
+                                            <ul className="mt-1.5 pl-4 space-y-0.5 list-disc text-[11px] text-muted-foreground font-mono break-all">
+                                              {s.apiPaths.map((path) => (
+                                                <li key={path}>{path}</li>
+                                              ))}
+                                            </ul>
+                                          </details>
+                                        ) : null}
+                                      </td>
                                       <td className="py-1 pr-2">{s.newCount}</td>
                                       <td className="py-1 pr-2">{s.unchangedCount}</td>
                                       <td className="py-1 pr-2">{s.updatedCount}</td>

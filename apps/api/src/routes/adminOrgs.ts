@@ -16,6 +16,7 @@ import { backdateMotiveData } from '../telematics/motive/backdate.js';
 import { backdateSamsaraData } from '../telematics/samsara/backdate.js';
 import { REPAIR_SHOP_ORG_ID } from '../config/repairShop.js';
 import { CronJobType, ServicePlanMatchType } from '../generated/app-client/index.js';
+import { cronStepApiPaths } from '../lib/cronStepApiPaths.js';
 import { createId } from '@paralleldrive/cuid2';
 import { config } from '../config.js';
 
@@ -577,6 +578,10 @@ router.get('/cron-runs', async (req: AuthRequest, res) => {
       const passes = (report.passes ?? []).map((p) => ({
         ...p,
         orgName: orgNameMap.get(p.clerkOrgId) ?? p.clerkOrgId,
+        steps: (p.steps ?? []).map((s) => ({
+          ...s,
+          apiPaths: cronStepApiPaths(run.job as CronJobType, s.endpoint),
+        })),
       }));
       return {
         id: run.id,
