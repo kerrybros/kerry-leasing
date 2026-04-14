@@ -10,6 +10,7 @@ import { clerkAuthMiddleware, requireOrg, AuthRequest } from '../middleware/auth
 import { getAppPrisma, getRepairPrisma } from '../lib/prisma.js';
 import { REPAIR_SHOP_ORG_ID } from '../config/repairShop.js';
 import { getSamsaraIdleAggregatesByDate } from '../telematics/samsara/idleAggregates.js';
+import { getDieselPricePerGallon } from '../lib/eiaFuelPrice.js';
 
 const router = Router();
 
@@ -41,9 +42,9 @@ router.get('/units', clerkAuthMiddleware, requireOrg, async (req: AuthRequest, r
     const appPrisma = getAppPrisma();
     const repairPrisma = getRepairPrisma();
 
-    // 1. Get all service plan units for this org (all are shown in reports)
-    const servicePlanUnits = await appPrisma.servicePlanUnit.findMany({
-      where: { clerkOrgId },
+    // 1. Get included service plan units for this org (excluded units are hidden from the portal)
+    const servicePlanUnits = await (appPrisma.servicePlanUnit as any).findMany({
+      where: { clerkOrgId, isIncluded: true },
       orderBy: { repairUnitNumber: 'asc' },
     });
 
@@ -86,12 +87,8 @@ router.get('/units', clerkAuthMiddleware, requireOrg, async (req: AuthRequest, r
           telematicsMap.set(rec.vin, rec);
         }
       } else if (providerAccount?.provider === 'SAMSARA') {
-        // Use Samsara raw data table; idle fuel aggregated on read from idling events (assetId = vehicle.id)
-        const records = await appPrisma.samsaraRawData.findMany({
-          where: {
-            clerkOrgId,
-            vin: { in: telematicsVins },
-          },
+        const records = await appPrisma.samsaraVehicleUtilization.findMany({
+          where: { clerkOrgId, vin: { in: telematicsVins } },
           orderBy: { date: 'desc' },
           distinct: ['vin'],
           select: {
@@ -99,26 +96,25 @@ router.get('/units', clerkAuthMiddleware, requireOrg, async (req: AuthRequest, r
             date: true,
             vehicleId: true,
             vehicleName: true,
-            rawResponse: true,
+            distanceMiles: true,
+            engineOnMinutes: true,
+            idleMinutes: true,
+            fuelGallons: true,
+            idleFuelGallons: true,
           },
         });
-        const dates = [...new Set(records.map((r) => r.date))] as string[];
-        const idleByDate = await getSamsaraIdleAggregatesByDate(appPrisma, clerkOrgId, dates);
         for (const rec of records) {
           if (!rec.vin) continue;
-          const converted = (rec.rawResponse as any)?.convertedMetrics || {};
-          const idle = idleByDate.get(rec.date)?.get(rec.vehicleId);
-          const idleFuelGallons = idle ? idle.idleFuelMl / 3785.41 : null;
           telematicsMap.set(rec.vin, {
             vehicleId: null,
             vehicleNumber: rec.vehicleName ?? null,
             vin: rec.vin,
             date: rec.date,
             utilizationPercentage: null,
-            totalDistance: converted.milesDriven || null,
-            idleTime: converted.idleMinutes ? converted.idleMinutes * 60 : null,
-            totalFuel: converted.fuelGallons || null,
-            idleFuel: idleFuelGallons,
+            totalDistance: rec.distanceMiles ?? null,
+            idleTime: rec.idleMinutes != null ? rec.idleMinutes * 60 : null,
+            totalFuel: rec.fuelGallons ?? null,
+            idleFuel: rec.idleFuelGallons ?? null,
           });
         }
       }
@@ -265,10 +261,11 @@ router.get('/units/:identifier', clerkAuthMiddleware, requireOrg, async (req: Au
     const appPrisma = getAppPrisma();
     const repairPrisma = getRepairPrisma();
 
-    // Find the service plan unit (search by VIN or unit number)
-    const servicePlanUnit = await appPrisma.servicePlanUnit.findFirst({
+    // Find the service plan unit (search by VIN or unit number) — excluded units are not accessible
+    let servicePlanUnit = await appPrisma.servicePlanUnit.findFirst({
       where: {
         clerkOrgId,
+        isIncluded: true,
         OR: [
           { telematicsVin: identifier },
           { repairVin: identifier },
@@ -277,21 +274,47 @@ router.get('/units/:identifier', clerkAuthMiddleware, requireOrg, async (req: Au
       },
     });
 
+    // Fetch provider once — used for both the fallback check and telematics queries below
+    const providerAccount = await appPrisma.telematicsProviderAccount.findUnique({
+      where: { clerkOrgId },
+      select: { provider: true },
+    });
+
+    // If no service plan entry but telematics data exists for this VIN, synthesise a
+    // minimal entry so the detail page can still render with whatever data is available.
     if (!servicePlanUnit) {
-      return res.status(404).json({
-        error: 'Not Found',
-        message: 'Unit not found in service plan',
-      });
+      let hasTelematics = false;
+      if (providerAccount?.provider === 'MOTIVE') {
+        const count = await appPrisma.motiveVehicleUtilization.count({ where: { clerkOrgId, vin: identifier } });
+        hasTelematics = count > 0;
+      } else if (providerAccount?.provider === 'SAMSARA') {
+        const count = await appPrisma.samsaraVehicleUtilization.count({ where: { clerkOrgId, vin: identifier } });
+        hasTelematics = count > 0;
+      }
+      if (!hasTelematics) {
+        return res.status(404).json({ error: 'Not Found', message: 'Unit not found' });
+      }
+      console.log(`[Fleet] No service plan entry for ${identifier} — serving telematics-only detail page`);
+      // Synthesise a minimal service plan entry so the rest of the handler works
+      servicePlanUnit = {
+        id: `synthetic-${identifier}`,
+        clerkOrgId,
+        telematicsVin: identifier,
+        repairUnitId: null,
+        repairUnitNumber: null,
+        repairVin: null,
+        repairCustomerId: null,
+        matchType: 'TELEMATICS_ONLY',
+        lastSyncedAt: null,
+        isIncluded: true,
+      } as any;
     }
 
     // 1. Get full telematics history if available
     let telematicsHistory: any[] = [];
+    let liveStats: { odometerMiles: number | null; engineHours: number | null; capturedAt: string | null } | null = null;
+    let safetyEvents: any[] = [];
     if (servicePlanUnit.telematicsVin) {
-      // Get provider for this org
-      const providerAccount = await appPrisma.telematicsProviderAccount.findUnique({
-        where: { clerkOrgId },
-        select: { provider: true },
-      });
 
       if (providerAccount?.provider === 'MOTIVE') {
         telematicsHistory = await appPrisma.motiveVehicleUtilization.findMany({
@@ -302,38 +325,72 @@ router.get('/units/:identifier', clerkAuthMiddleware, requireOrg, async (req: Au
           orderBy: { date: 'desc' },
         });
       } else if (providerAccount?.provider === 'SAMSARA') {
-        const records = await appPrisma.samsaraRawData.findMany({
-          where: {
-            clerkOrgId,
-            vin: servicePlanUnit.telematicsVin,
-          },
+        const records = await appPrisma.samsaraVehicleUtilization.findMany({
+          where: { clerkOrgId, vin: servicePlanUnit.telematicsVin },
           orderBy: { date: 'desc' },
           select: {
             vin: true,
             date: true,
             vehicleId: true,
             vehicleName: true,
-            rawResponse: true,
+            distanceMiles: true,
+            engineOnMinutes: true,
+            idleMinutes: true,
+            fuelGallons: true,
+            idleFuelGallons: true,
           },
         });
-        const dates = [...new Set(records.map((r) => r.date))] as string[];
-        const idleByDate = await getSamsaraIdleAggregatesByDate(appPrisma, clerkOrgId, dates);
-        telematicsHistory = records.map(rec => {
-          const converted = (rec.rawResponse as any)?.convertedMetrics || {};
-          const idle = idleByDate.get(rec.date)?.get(rec.vehicleId);
-          const idleFuelGallons = idle ? idle.idleFuelMl / 3785.41 : null;
-          return {
-            vehicleId: null,
-            vehicleNumber: rec.vehicleName ?? null,
-            vin: rec.vin,
-            date: rec.date,
-            utilizationPercentage: null,
-            totalDistance: converted.milesDriven || null,
-            idleTime: converted.idleMinutes ? converted.idleMinutes * 60 : null,
-            totalFuel: converted.fuelGallons || null,
-            idleFuel: idleFuelGallons,
-          };
+        telematicsHistory = records.map(rec => ({
+          vehicleId: rec.vehicleId ?? null,
+          vehicleNumber: rec.vehicleName ?? null,
+          vin: rec.vin,
+          date: rec.date,
+          utilizationPercentage: null,
+          totalDistance: rec.distanceMiles ?? null,
+          idleTime: rec.idleMinutes != null ? rec.idleMinutes * 60 : null,
+          totalFuel: rec.fuelGallons ?? null,
+          idleFuel: rec.idleFuelGallons ?? null,
+        }));
+
+        // Fetch latest stats snapshot for odometer + engine hours
+        const vehicleMap = await appPrisma.telematicsVehicleMap.findUnique({
+          where: { clerkOrgId_vin: { clerkOrgId, vin: servicePlanUnit.telematicsVin } },
+          select: { providerVehicleId: true },
         });
+        if (vehicleMap?.providerVehicleId) {
+          const snapshot = await appPrisma.samsaraVehicleStatsSnapshot.findFirst({
+            where: { clerkOrgId, vehicleId: vehicleMap.providerVehicleId },
+            orderBy: { capturedAt: 'desc' },
+          });
+          if (snapshot) {
+            const odometerMeters = snapshot.obdOdometerMeters ?? snapshot.gpsOdometerMeters;
+            liveStats = {
+              odometerMiles: odometerMeters != null ? Math.round(odometerMeters / 1609.34) : null,
+              engineHours: snapshot.obdEngineSeconds != null ? parseFloat((snapshot.obdEngineSeconds / 3600).toFixed(1)) : null,
+              capturedAt: snapshot.capturedAt.toISOString(),
+            };
+          }
+
+          // Fetch safety events (last 90 days)
+          const since = new Date();
+          since.setDate(since.getDate() - 90);
+          const sinceStr = since.toISOString().split('T')[0];
+          safetyEvents = await appPrisma.samsaraSafetyEvent.findMany({
+            where: { clerkOrgId, vehicleId: vehicleMap.providerVehicleId, eventDate: { gte: sinceStr } },
+            orderBy: { eventDate: 'desc' },
+            select: {
+              samsaraId: true,
+              behaviorLabel: true,
+              severity: true,
+              maxValue: true,
+              time: true,
+              eventDate: true,
+              driverName: true,
+              lat: true,
+              lon: true,
+            },
+          });
+        }
       }
     }
 
@@ -341,7 +398,9 @@ router.get('/units/:identifier', clerkAuthMiddleware, requireOrg, async (req: Au
     let repairHistory: any[] = [];
     let unitInfo: any = null;
 
-    if (servicePlanUnit.repairVin && !servicePlanUnit.repairUnitId.startsWith('telematics-')) {
+    console.log(`[Fleet] Unit ${identifier}: repairUnitId=${servicePlanUnit.repairUnitId ?? 'null'}, telematicsVin=${servicePlanUnit.telematicsVin ?? 'null'}`);
+
+    if (servicePlanUnit.repairUnitId && !servicePlanUnit.repairUnitId.startsWith('telematics-')) {
       try {
         console.log(`[Fleet] Getting repair data for unit ID: ${servicePlanUnit.repairUnitId}`);
         
@@ -373,31 +432,37 @@ router.get('/units/:identifier', clerkAuthMiddleware, requireOrg, async (req: Au
             `[Fleet] Querying revenue_details for repair shop org: ${REPAIR_SHOP_ORG_ID}, customer: ${customerUnit.customer}, unit: ${customerUnit.number}`
           );
           
-          // Get repair history from revenue_details
-          // Query directly with all filters for efficiency
-          if (customerUnit.number && (customerUnit.customer || servicePlanUnit.repairCustomerId)) {
+          // Get repair history from revenue_details.
+          // Customer filter is applied when available to scope results, but we
+          // still fetch if only the unit number is known — unit numbers are unique
+          // within a repair shop org so cross-customer contamination is unlikely.
+          if (customerUnit.number) {
+            const customerFilter = servicePlanUnit.repairCustomerId
+              ? { customer_external_id: servicePlanUnit.repairCustomerId }
+              : customerUnit.customer
+                ? { customer: customerUnit.customer }
+                : {};
+
             const rows = await repairPrisma.revenue_details.findMany({
               where: {
                 organization_id: REPAIR_SHOP_ORG_ID,
                 unit: customerUnit.number,
-                ...(servicePlanUnit.repairCustomerId
-                  ? { customer_external_id: servicePlanUnit.repairCustomerId }
-                  : customerUnit.customer
-                    ? { customer: customerUnit.customer }
-                    : {}),
+                ...customerFilter,
               },
               orderBy: { invoice_date: 'desc' },
               select: {
                 id: true,
                 invoice_date: true,
-                number: true, // invoice number
-                order: true, // repair order
-                type: true, // line type/category
+                number: true,
+                order: true,
+                type: true,
                 customer_external_id: true,
                 part_description: true,
                 service_description: true,
                 global_service_description: true,
                 complaint_description: true,
+                component: true,
+                system: true,
                 total: true,
                 sales_tax: true,
                 customer: true,
@@ -405,7 +470,6 @@ router.get('/units/:identifier', clerkAuthMiddleware, requireOrg, async (req: Au
               },
             });
 
-            // Map to the shape the frontend expects today
             repairHistory = rows.map((r: any) => ({
               revenue_detail_id: String(r.id),
               invoice_date: toYmd(r.invoice_date),
@@ -418,6 +482,8 @@ router.get('/units/:identifier', clerkAuthMiddleware, requireOrg, async (req: Au
                 r.global_service_description ??
                 r.complaint_description ??
                 null,
+              component: r.component ?? null,
+              system: r.system ?? null,
               line_amt: toNumber(r.total),
               tax_amt: toNumber(r.sales_tax),
               customer: r.customer ?? null,
@@ -426,10 +492,11 @@ router.get('/units/:identifier', clerkAuthMiddleware, requireOrg, async (req: Au
             }));
 
             console.log(
-              `[Fleet] Found ${repairHistory.length} repairs for unit ${customerUnit.number} (customer: ${customerUnit.customer})`
+              `[Fleet] Found ${repairHistory.length} repairs for unit ${customerUnit.number}` +
+              (customerFilter && Object.keys(customerFilter).length ? ` (customer-filtered)` : ` (no customer filter)`)
             );
           } else {
-            console.log('[Fleet] Skipping repairs query: missing unit number or customer name on customer_units row');
+            console.log('[Fleet] Skipping repairs query: no unit number on customer_units row');
           }
         }
       } catch (error) {
@@ -447,10 +514,12 @@ router.get('/units/:identifier', clerkAuthMiddleware, requireOrg, async (req: Au
         lastSyncedAt: servicePlanUnit.lastSyncedAt,
       },
       unitInfo,
+      liveStats,
       telematics: {
         history: telematicsHistory,
         hasData: telematicsHistory.length > 0,
       },
+      safetyEvents,
       repairs: {
         history: repairHistory,
         hasData: repairHistory.length > 0,
@@ -462,6 +531,170 @@ router.get('/units/:identifier', clerkAuthMiddleware, requireOrg, async (req: Au
       error: 'Internal Server Error',
       message: 'Failed to fetch unit details',
     });
+  }
+});
+
+/**
+ * GET /fleet/idle-events
+ * Returns idle events for the org from Samsara or Motive, enriched with unit numbers.
+ * Query params: startDate (YYYY-MM-DD), endDate (YYYY-MM-DD)
+ */
+router.get('/idle-events', clerkAuthMiddleware, requireOrg, async (req: AuthRequest, res) => {
+  try {
+    const clerkOrgId = req.auth!.orgId!;
+    const { startDate, endDate } = req.query as { startDate?: string; endDate?: string };
+    const appPrisma = getAppPrisma();
+
+    const providerAccount = await appPrisma.telematicsProviderAccount.findUnique({
+      where: { clerkOrgId },
+      select: { provider: true },
+    });
+
+    const dateFilter: { gte?: string; lte?: string } = {};
+    if (startDate) dateFilter.gte = startDate;
+    if (endDate) dateFilter.lte = endDate;
+
+    // Get vehicle map for unit number lookup (include vin for Samsara inclusion filtering)
+    const vehicleMaps = await appPrisma.telematicsVehicleMap.findMany({
+      where: { clerkOrgId },
+      select: { providerVehicleId: true, providerVehicleName: true, vin: true },
+    });
+    const vehicleNameById = new Map(vehicleMaps.map(v => [v.providerVehicleId, v.providerVehicleName ?? null]));
+
+    // Get included service plan units only — excluded units are filtered out
+    const servicePlanUnits = await appPrisma.servicePlanUnit.findMany({
+      where: { clerkOrgId, isIncluded: true },
+      select: { telematicsVin: true, repairUnitNumber: true },
+    });
+    const includedVins = new Set(servicePlanUnits.filter(u => u.telematicsVin).map(u => u.telematicsVin!));
+    const unitNumberByVin = new Map(servicePlanUnits.filter(u => u.telematicsVin).map(u => [u.telematicsVin!, u.repairUnitNumber ?? null]));
+
+    let events: any[] = [];
+
+    if (providerAccount?.provider === 'MOTIVE') {
+      const rows = await appPrisma.motiveIdleEvent.findMany({
+        where: { clerkOrgId, ...(Object.keys(dateFilter).length ? { date: dateFilter } : {}) },
+        orderBy: { startTime: 'desc' },
+        select: {
+          motiveEventId: true,
+          vehicleNumber: true,
+          vin: true,
+          startTime: true,
+          endTime: true,
+          date: true,
+          idleFuel: true,
+          lat: true,
+          lon: true,
+          location: true,
+          city: true,
+          state: true,
+        },
+        take: 2000,
+      });
+      events = rows
+        .filter(r => !r.vin || includedVins.has(r.vin))
+        .map(r => {
+          const durationMs = r.startTime && r.endTime
+            ? new Date(r.endTime).getTime() - new Date(r.startTime).getTime()
+            : null;
+          const unitNumber = r.vin ? (unitNumberByVin.get(r.vin) ?? r.vehicleNumber) : r.vehicleNumber;
+          return {
+            id: String(r.motiveEventId),
+            unitNumber: unitNumber ?? null,
+            vin: r.vin ?? null,
+            startTime: r.startTime,
+            date: r.date,
+            durationMinutes: durationMs != null ? Math.round(durationMs / 60000) : null,
+            idleFuelGallons: r.idleFuel ?? null,
+            lat: r.lat ?? null,
+            lon: r.lon ?? null,
+            location: r.location ?? [r.city, r.state].filter(Boolean).join(', ') ?? null,
+          };
+        });
+    } else if (providerAccount?.provider === 'SAMSARA') {
+      const rows = await appPrisma.samsaraIdlingEvent.findMany({
+        where: { clerkOrgId, ...(Object.keys(dateFilter).length ? { eventDate: dateFilter } : {}) },
+        orderBy: { startTime: 'desc' },
+        select: {
+          id: true,
+          assetId: true,
+          startTime: true,
+          eventDate: true,
+          durationMilliseconds: true,
+          fuelConsumedMilliliters: true,
+        },
+        take: 2000,
+      });
+      // Build set of included Samsara assetIds via VIN cross-reference
+      const includedAssetIds = new Set(
+        vehicleMaps.filter(v => v.vin && includedVins.has(v.vin)).map(v => v.providerVehicleId)
+      );
+      events = rows
+        .filter(r => includedAssetIds.size === 0 || includedAssetIds.has(r.assetId))
+        .map(r => ({
+          id: r.id,
+          unitNumber: vehicleNameById.get(r.assetId) ?? r.assetId,
+          vin: null,
+          startTime: r.startTime,
+          date: r.eventDate,
+          durationMinutes: r.durationMilliseconds != null ? Math.round(r.durationMilliseconds / 60000) : null,
+          idleFuelGallons: r.fuelConsumedMilliliters != null ? r.fuelConsumedMilliliters / 3785.41 : null,
+          lat: null,
+          lon: null,
+          location: null,
+        }));
+    }
+
+    // Compute summary stats
+    const totalIdleMinutes = events.reduce((s, e) => s + (e.durationMinutes ?? 0), 0);
+    const totalIdleFuel = events.reduce((s, e) => s + (e.idleFuelGallons ?? 0), 0);
+
+    // Repeat offenders: units with the most idle events
+    const byUnit = new Map<string, { count: number; totalMinutes: number; totalFuel: number }>();
+    events.forEach(e => {
+      const key = e.unitNumber ?? 'Unknown';
+      const cur = byUnit.get(key) ?? { count: 0, totalMinutes: 0, totalFuel: 0 };
+      cur.count++;
+      cur.totalMinutes += e.durationMinutes ?? 0;
+      cur.totalFuel += e.idleFuelGallons ?? 0;
+      byUnit.set(key, cur);
+    });
+    const repeatOffenders = Array.from(byUnit.entries())
+      .map(([unitNumber, stats]) => ({ unitNumber, ...stats }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
+
+    // Longest idle events
+    const longestEvents = [...events]
+      .sort((a, b) => (b.durationMinutes ?? 0) - (a.durationMinutes ?? 0))
+      .slice(0, 10);
+
+    res.json({
+      provider: providerAccount?.provider ?? null,
+      totalEvents: events.length,
+      totalIdleMinutes: Math.round(totalIdleMinutes),
+      totalIdleFuel: parseFloat(totalIdleFuel.toFixed(2)),
+      repeatOffenders,
+      longestEvents,
+      events: events.slice(0, 500),
+    });
+  } catch (error: any) {
+    console.error('[Fleet] Error fetching idle events:', error);
+    res.status(500).json({ error: 'Internal Server Error', message: error.message });
+  }
+});
+
+/**
+ * GET /fleet/config
+ * Returns org-level configuration for the fleet dashboard (e.g. fuel price).
+ * Authenticated — scoped to org.
+ */
+router.get('/config', clerkAuthMiddleware, requireOrg, async (_req: AuthRequest, res) => {
+  try {
+    const dieselPricePerGallon = await getDieselPricePerGallon();
+    res.json({ dieselPricePerGallon });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to load fleet config', message: error.message });
   }
 });
 

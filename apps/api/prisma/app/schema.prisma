@@ -78,37 +78,6 @@ model TelematicsProviderAccount {
   @@map("telematics_provider_accounts")
 }
 
-// SAMSARA Raw Data (source of truth)
-// Stores complete Samsara API responses with typed schema
-model SamsaraRawData {
-  id                       String    @id @default(cuid())
-  clerkOrgId               String    @map("clerk_org_id")
-  vehicleId                String    @map("vehicle_id") // Samsara vehicle ID (matches assetId in idling events)
-  vin                      String?
-  vehicleName              String?   @map("vehicle_name")
-  date                     String    // YYYY-MM-DD
-
-  // Raw fields from Samsara Fuel Energy Reports API — stored in source units
-  distanceTraveledMeters   Float?    @map("distance_traveled_meters")   // raw meters
-  fuelConsumedMl           Float?    @map("fuel_consumed_ml")            // raw milliliters
-  engineRunTimeDurationMs  BigInt?   @map("engine_run_time_duration_ms") // raw milliseconds
-  engineIdleTimeDurationMs BigInt?   @map("engine_idle_time_duration_ms")// raw milliseconds
-  efficiencyMpge           Float?    @map("efficiency_mpge")             // miles per gallon equivalent
-
-  // Full raw API response as audit trail
-  rawResponse              Json      @map("raw_response")
-  processedAt              DateTime? @map("processed_at")
-  createdAt                DateTime  @default(now()) @map("created_at")
-
-  @@unique([clerkOrgId, vehicleId, date])
-  @@index([clerkOrgId])
-  @@index([vehicleId])
-  @@index([vin])
-  @@index([date])
-  @@index([clerkOrgId, date])
-  @@map("samsara_raw_data")
-}
-
 // SAMSARA Idling Events (source table: one row per event, no aggregation)
 // Link to fuel-energy by assetId = vehicle.id and date when combining in API
 model SamsaraIdlingEvent {
@@ -259,9 +228,10 @@ model MotiveIdleEvent {
   endTime           String    @map("end_time")   // ISO 8601
   date              String    // YYYY-MM-DD (derived from start_time)
   
-  // Fuel data
-  vehFuelStart      Float?    @map("veh_fuel_start") // milliliters
-  vehFuelEnd        Float?    @map("veh_fuel_end")   // milliliters
+  // Fuel data (Motive imperial: gallons with X-Metric-Units: false)
+  vehFuelStart      Float?    @map("veh_fuel_start") // gallons at event start
+  vehFuelEnd        Float?    @map("veh_fuel_end")   // gallons at event end
+  idleFuel          Float?    @map("idle_fuel")      // computed: veh_fuel_start - veh_fuel_end (gallons)
   
   // Location data
   lat               Float?
@@ -356,9 +326,9 @@ model MotiveVehicleUtilization {
   // Utilization metrics
   lastLocatedAt           String?   @map("last_located_at") // ISO 8601 timestamp
   utilizationPercentage   Float?    @map("utilization_percentage")
-  idleTime                Int?      @map("idle_time") // seconds
+  idleTime                Int?      @map("idle_time") // minutes (normalized from API seconds)
   idleFuel                Float?    @map("idle_fuel") // gallons
-  drivingTime             Int?      @map("driving_time") // seconds
+  drivingTime             Int?      @map("driving_time") // minutes (normalized from API seconds)
   drivingFuel             Float?    @map("driving_fuel") // gallons
   totalFuel               Float?    @map("total_fuel") // gallons
   totalDistance           Float?    @map("total_distance") // miles
@@ -440,15 +410,19 @@ model ServicePlanUnit {
   repairCustomerId  String?   @map("repair_customer_id")  // customer_units.cust_id
   
   // Telematics matching
-  telematicsVin     String?   @map("telematics_vin")      // Matched telematics VIN
-  matchType         ServicePlanMatchType @default(UNMATCHED) @map("match_type")
-  matchConfidence   Float?    @map("match_confidence")    // 0.0 to 1.0 for auto-matches
+  telematicsVin       String?   @map("telematics_vin")        // Matched telematics VIN
+  telematicsVehicleId String?   @map("telematics_vehicle_id") // Fallback ID for VIN-less telematics vehicles
+  matchType           ServicePlanMatchType @default(UNMATCHED) @map("match_type")
+  matchConfidence     Float?    @map("match_confidence")      // 0.0 to 1.0 for auto-matches
 
   // True when unit came from telematics only (no repair DB record)
   // repairUnitId is a stable cuid in this case, NOT a repair DB ID
   isTelematicsOnly  Boolean   @default(false) @map("is_telematics_only")
 
   // Service plan configuration
+  isIncluded        Boolean   @default(true) @map("is_included")      // Whether this unit appears in the external portal
+  isConfirmed       Boolean   @default(false) @map("is_confirmed")    // Acknowledged as intentionally having no telematics
+  customUnitName    String?   @map("custom_unit_name")                // Admin-set display name override
   notes             String?
   
   // Audit trail
@@ -471,4 +445,209 @@ enum ServicePlanMatchType {
   AUTO          // Automatically matched via VIN
   MANUAL        // Manually matched by admin
   UNMATCHED     // No telematics match
+}
+
+// SAMSARA Vehicle Utilization (normalized, per day per vehicle)
+// Write target for syncFuelEnergyReports. All units converted at write time.
+model SamsaraVehicleUtilization {
+  id              String   @id @default(cuid())
+  clerkOrgId      String   @map("clerk_org_id")
+  vehicleId       String   @map("vehicle_id")
+  vehicleName     String?  @map("vehicle_name")
+  vin             String?
+
+  date            String   // YYYY-MM-DD (EST calendar day)
+
+  // All values in display units — converted from raw API units at write time
+  fuelGallons     Float?   @map("fuel_gallons")       // mL → gal (÷3785.41)
+  distanceMiles   Float?   @map("distance_miles")     // meters → miles (÷1609.34)
+  engineOnMinutes Float?   @map("engine_on_minutes")  // ms → min (÷60000)
+  drivingMinutes  Float?   @map("driving_minutes")    // (engineOn - idle) ms → min
+  idleMinutes     Float?   @map("idle_minutes")       // ms → min
+  idleFuelGallons Float?   @map("idle_fuel_gallons")  // sum from samsara_idling_events (mL → gal)
+  mpg             Float?                               // distanceMiles / fuelGallons
+
+  processedAt     DateTime? @map("processed_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@unique([clerkOrgId, vehicleId, date])
+  @@index([clerkOrgId])
+  @@index([vehicleId])
+  @@index([date])
+  @@index([clerkOrgId, date])
+  @@map("samsara_vehicle_utilization")
+}
+
+// SAMSARA Vehicle Stats Snapshot (OBD + GPS point-in-time)
+// Source: GET /fleet/vehicles/stats
+model SamsaraVehicleStatsSnapshot {
+  id                String   @id @default(cuid())
+  clerkOrgId        String   @map("clerk_org_id")
+  vehicleId         String   @map("vehicle_id")
+  vehicleName       String?  @map("vehicle_name")
+  capturedAt        DateTime @map("captured_at")  // timestamp from API
+
+  obdOdometerMeters  Float?  @map("obd_odometer_meters")
+  obdEngineSeconds   Float?  @map("obd_engine_seconds")
+  gpsOdometerMeters  Float?  @map("gps_odometer_meters")
+
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  @@unique([clerkOrgId, vehicleId, capturedAt])
+  @@index([clerkOrgId])
+  @@index([vehicleId])
+  @@index([capturedAt])
+  @@map("samsara_vehicle_stats_snapshots")
+}
+
+// SAMSARA Safety Events (one row per event)
+// Source: GET /fleet/safety-events
+model SamsaraSafetyEvent {
+  id            String   @id @default(cuid())
+  clerkOrgId    String   @map("clerk_org_id")
+  samsaraId     String   @map("samsara_id")     // Samsara's event ID
+
+  vehicleId     String   @map("vehicle_id")
+  vehicleName   String?  @map("vehicle_name")
+  driverId      String?  @map("driver_id")
+  driverName    String?  @map("driver_name")
+
+  behaviorLabel String   @map("behavior_label") // e.g. "harshAccel", "harshBrake"
+  severity      String?                          // "low", "medium", "high"
+  maxValue      Float?   @map("max_value")
+  time          String                           // ISO 8601
+  eventDate     String   @map("event_date")      // YYYY-MM-DD for range queries
+
+  lat           Float?
+  lon           Float?
+
+  rawResponse   Json?    @map("raw_response")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@unique([clerkOrgId, samsaraId])
+  @@index([clerkOrgId])
+  @@index([vehicleId])
+  @@index([eventDate])
+  @@index([clerkOrgId, eventDate])
+  @@map("samsara_safety_events")
+}
+
+// MOTIVE Scorecard Summaries (per driver per period)
+// Source: GET /v1/scorecard_summary
+// Returns driver performance rollups: hard events, score, km driven
+model MotiveScorecardSummary {
+  id                  String   @id @default(cuid())
+  clerkOrgId          String   @map("clerk_org_id")
+  driverId            Int?     @map("driver_id")
+  driverFirstName     String?  @map("driver_first_name")
+  driverLastName      String?  @map("driver_last_name")
+  driverUsername      String?  @map("driver_username")
+  driverEmail         String?  @map("driver_email")
+  date                String   // YYYY-MM-DD (period date)
+
+  score               Float?
+  numCoachedEvents    Int?     @map("num_coached_events")
+  numHardAccels       Int?     @map("num_hard_accels")
+  numHardBrakes       Int?     @map("num_hard_brakes")
+  numHardCorners      Int?     @map("num_hard_corners")
+  totalKilometers     Float?   @map("total_kilometers")
+
+  rawResponse         Json     @map("raw_response")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  @@unique([clerkOrgId, driverId, date])
+  @@index([clerkOrgId])
+  @@index([driverId])
+  @@index([date])
+  @@map("motive_scorecard_summaries")
+}
+
+// System Config (key-value store for app-wide settings)
+// Used for: diesel_price_per_gallon (EIA weekly fetch), feature flags, etc.
+model SystemConfig {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("system_config")
+}
+
+// SAMSARA Driver Fuel & Energy Reports (per driver per day)
+// Source: GET /v1/fleet/reports/fuel-energy/drivers
+// Tracks per-driver fuel consumption, distance, and idle metrics
+model SamsaraDriverFuelEnergy {
+  id                    String   @id @default(cuid())
+  clerkOrgId            String   @map("clerk_org_id")
+
+  // Driver identifiers
+  driverId              String   @map("driver_id")       // Samsara driver ID
+  driverName            String?  @map("driver_name")
+  driverExternalId      String?  @map("driver_external_id")
+
+  // Date
+  date                  String   // YYYY-MM-DD
+
+  // Distance
+  totalDistanceMiles    Float?   @map("total_distance_miles")
+
+  // Fuel
+  totalFuelUsedGallons  Float?   @map("total_fuel_used_gallons")
+  engineIdleFuelGallons Float?   @map("engine_idle_fuel_gallons")
+
+  // Time
+  engineRunTimeMs       BigInt?  @map("engine_run_time_ms")
+  engineIdleTimeMs      BigInt?  @map("engine_idle_time_ms")
+
+  rawResponse           Json?    @map("raw_response")
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  @@unique([clerkOrgId, driverId, date])
+  @@index([clerkOrgId])
+  @@index([clerkOrgId, date])
+  @@map("samsara_driver_fuel_energy")
+}
+
+// SAMSARA Driver Efficiency Reports (per driver per day)
+// Source: GET /v1/fleet/efficiency/drivers
+// Tracks safety scores, harsh events, and driving efficiency per driver
+model SamsaraDriverEfficiency {
+  id                    String   @id @default(cuid())
+  clerkOrgId            String   @map("clerk_org_id")
+
+  // Driver identifiers
+  driverId              String   @map("driver_id")
+  driverName            String?  @map("driver_name")
+  driverExternalId      String?  @map("driver_external_id")
+
+  // Date
+  date                  String   // YYYY-MM-DD
+
+  // Safety / Efficiency scores
+  overallSafetyScore    Float?   @map("overall_safety_score")
+  speedingScore         Float?   @map("speeding_score")
+  harshBrakingScore     Float?   @map("harsh_braking_score")
+  harshAccelScore       Float?   @map("harsh_accel_score")
+
+  // Event counts
+  harshBrakingCount     Int?     @map("harsh_braking_count")
+  harshAccelCount       Int?     @map("harsh_accel_count")
+  harshTurnCount        Int?     @map("harsh_turn_count")
+  speedingCount         Int?     @map("speeding_count")
+
+  // Distance driven (miles)
+  totalDistanceMiles    Float?   @map("total_distance_miles")
+
+  rawResponse           Json?    @map("raw_response")
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  @@unique([clerkOrgId, driverId, date])
+  @@index([clerkOrgId])
+  @@index([clerkOrgId, date])
+  @@map("samsara_driver_efficiency")
 }

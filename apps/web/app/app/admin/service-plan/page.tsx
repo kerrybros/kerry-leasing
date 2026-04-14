@@ -8,6 +8,7 @@ import { useServicePlanQuery, useOrgSettingsQuery, keys } from '@/hooks/useDataQ
 import { KpiCard } from '@/components/KpiCard';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
   Select,
   SelectContent,
@@ -23,6 +24,14 @@ interface Toast {
   message: string;
 }
 
+interface TelematicsVehicle {
+  vin: string | null;
+  vehicleNumber: string | null;
+  vehicleId: string | null;
+  isMatched: boolean;
+  matchedTo: string | null;
+}
+
 let toastId = 0;
 
 function useToasts() {
@@ -35,16 +44,27 @@ function useToasts() {
   return { toasts, addToast: add };
 }
 
-function matchTypeBadge(type: 'AUTO' | 'MANUAL' | 'UNMATCHED') {
+function sourceBadge(type: 'AUTO' | 'MANUAL' | 'UNMATCHED', isTelematicsOnly: boolean, isConfirmed: boolean) {
+  if (isTelematicsOnly) return (
+    <Badge variant="outline" className="border-blue-400 text-blue-600 dark:text-blue-400">Telematics Only</Badge>
+  );
   if (type === 'AUTO') return (
-    <Badge variant="default" className="bg-green-600 hover:bg-green-600">Auto</Badge>
+    <Badge variant="default" className="bg-green-600 hover:bg-green-600">Matched on VIN</Badge>
   );
   if (type === 'MANUAL') return (
-    <Badge variant="secondary">Manual</Badge>
+    <Badge variant="secondary">Manual Match</Badge>
+  );
+  if (isConfirmed) return (
+    <Badge variant="outline" className="border-muted-foreground text-muted-foreground">Confirmed No Match</Badge>
   );
   return (
-    <Badge variant="outline" className="border-amber-400 text-amber-600 dark:text-amber-400">Unmatched</Badge>
+    <Badge variant="outline" className="border-amber-400 text-amber-600 dark:text-amber-400">Repair Only</Badge>
   );
+}
+
+/** Key used to identify a vehicle in the match dropdown */
+function vehicleKey(v: TelematicsVehicle): string {
+  return v.vin ?? `id:${v.vehicleId}`;
 }
 
 export default function AdminServicePlanPage() {
@@ -56,10 +76,27 @@ export default function AdminServicePlanPage() {
   const servicePlanQuery = useServicePlanQuery();
   const orgSettingsQuery = useOrgSettingsQuery();
 
-  const [filter, setFilter] = useState<'all' | 'unmatched'>('all');
-  const [availableVins, setAvailableVins] = useState<string[]>([]);
+  const [filter, setFilter] = useState<'all' | 'included' | 'matched' | 'unmatched' | 'confirmed' | 'excluded'>('all');
+  const [sortCol, setSortCol] = useState<'name' | 'repair' | 'telematics' | 'source' | 'inPlan' | null>(null);
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+
+  function handleSort(col: typeof sortCol) {
+    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortCol(col); setSortDir('asc'); }
+  }
+  const [availableVehicles, setAvailableVehicles] = useState<TelematicsVehicle[]>([]);
   const [matchingUnitId, setMatchingUnitId] = useState<string | null>(null);
-  const [matchingVin, setMatchingVin] = useState('');
+  const [matchingKey, setMatchingKey] = useState('');
+
+  // Telematics-only → repair matching state
+  interface RepairUnit { id: string; repairUnitNumber: string | null; repairVin: string | null; customUnitName: string | null; }
+  const [availableRepairUnits, setAvailableRepairUnits] = useState<RepairUnit[]>([]);
+  const [mergingUnitId, setMergingUnitId] = useState<string | null>(null);
+  const [mergeRepairId, setMergeRepairId] = useState('');
+
+  // Inline name editing state: unitId → current draft value
+  const [editingNameId, setEditingNameId] = useState<string | null>(null);
+  const [editingNameValue, setEditingNameValue] = useState('');
 
   const units = servicePlanQuery.data?.units ?? [];
   const summary = servicePlanQuery.data?.summary ?? null;
@@ -83,14 +120,49 @@ export default function AdminServicePlanPage() {
     },
   });
 
-  const matchMutation = useMutation({
-    mutationFn: async ({ unitId, telematicsVin }: { unitId: string; telematicsVin: string }) => {
+  const [pendingInclusionIds, setPendingInclusionIds] = useState<Set<string>>(new Set());
+
+  const inclusionMutation = useMutation({
+    mutationFn: async ({ unitId, isIncluded }: { unitId: string; isIncluded: boolean }) => {
       const api = await getApi();
-      await api.put(`/admin/service-plan/units/${unitId}/match`, { telematicsVin });
+      await api.put(`/admin/service-plan/units/${unitId}/inclusion`, { isIncluded });
+    },
+    onMutate: async ({ unitId, isIncluded }) => {
+      setPendingInclusionIds(prev => new Set([...prev, unitId]));
+      await queryClient.cancelQueries({ queryKey: keys.servicePlan(orgId) });
+      const previous = queryClient.getQueryData(keys.servicePlan(orgId));
+      queryClient.setQueryData(keys.servicePlan(orgId), (old: any) => {
+        if (!old?.units) return old;
+        return { ...old, units: old.units.map((u: any) => u.id === unitId ? { ...u, isIncluded } : u) };
+      });
+      return { previous };
+    },
+    onError: (err: unknown, _, context: any) => {
+      if (context?.previous) queryClient.setQueryData(keys.servicePlan(orgId), context.previous);
+      addToast('error', err instanceof Error ? err.message : 'Failed to update unit');
+    },
+    onSuccess: (_, { isIncluded }) => {
+      addToast('success', isIncluded ? 'Unit added to plan.' : 'Unit excluded from plan.');
+    },
+    onSettled: (_d, _e, { unitId }) => {
+      setPendingInclusionIds(prev => { const s = new Set(prev); s.delete(unitId); return s; });
+      queryClient.invalidateQueries({ queryKey: keys.servicePlan(orgId) });
+    },
+  });
+
+  const matchMutation = useMutation({
+    mutationFn: async ({ unitId, key }: { unitId: string; key: string }) => {
+      const api = await getApi();
+      const vehicle = availableVehicles.find(v => vehicleKey(v) === key);
+      const body = vehicle?.vin
+        ? { telematicsVin: vehicle.vin }
+        : { telematicsVehicleId: vehicle?.vehicleId };
+      await api.put(`/admin/service-plan/units/${unitId}/match`, body);
     },
     onSuccess: () => {
       addToast('success', 'Unit matched successfully.');
       setMatchingUnitId(null);
+      setMatchingKey('');
       queryClient.invalidateQueries({ queryKey: keys.servicePlan(orgId) });
     },
     onError: (err: unknown) => {
@@ -112,28 +184,150 @@ export default function AdminServicePlanPage() {
     },
   });
 
-  const loadAvailableVins = async () => {
+  const applySuggestionMutation = useMutation({
+    mutationFn: async ({ unitId, telematicsVin }: { unitId: string; telematicsVin: string }) => {
+      const api = await getApi();
+      await api.put(`/admin/service-plan/units/${unitId}/match`, { telematicsVin });
+    },
+    onSuccess: () => {
+      addToast('success', 'Match applied.');
+      queryClient.invalidateQueries({ queryKey: keys.servicePlan(orgId) });
+    },
+    onError: (err: unknown) => {
+      addToast('error', err instanceof Error ? err.message : 'Failed to apply match');
+    },
+  });
+
+  const confirmMutation = useMutation({
+    mutationFn: async ({ unitId, isConfirmed }: { unitId: string; isConfirmed: boolean }) => {
+      const api = await getApi();
+      await api.put(`/admin/service-plan/units/${unitId}/confirm`, { isConfirmed });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: keys.servicePlan(orgId) });
+    },
+    onError: (err: unknown) => {
+      addToast('error', err instanceof Error ? err.message : 'Failed to update unit');
+    },
+  });
+
+  const mergeMutation = useMutation({
+    mutationFn: async ({ telematicsUnitId, repairUnitId }: { telematicsUnitId: string; repairUnitId: string }) => {
+      const api = await getApi();
+      await api.post(`/admin/service-plan/units/${telematicsUnitId}/merge`, { repairUnitId });
+    },
+    onSuccess: () => {
+      addToast('success', 'Units merged successfully.');
+      setMergingUnitId(null);
+      setMergeRepairId('');
+      queryClient.invalidateQueries({ queryKey: keys.servicePlan(orgId) });
+    },
+    onError: (err: unknown) => {
+      addToast('error', err instanceof Error ? err.message : 'Failed to merge units');
+    },
+  });
+
+  const loadAvailableRepairUnits = async () => {
     try {
       const api = await getApi();
-      const data = await api.get<{ vins: string[] }>('/admin/service-plan/available-vins');
-      setAvailableVins(data.vins ?? []);
+      const data = await api.get<{ units: { id: string; repairUnitNumber: string | null; repairVin: string | null; customUnitName: string | null }[] }>('/admin/service-plan/available-repair-units');
+      setAvailableRepairUnits(data.units ?? []);
     } catch {
-      setAvailableVins([]);
+      setAvailableRepairUnits([]);
+    }
+  };
+
+  const startMerging = (unitId: string) => {
+    setMergingUnitId(unitId);
+    setMergeRepairId('');
+    if (availableRepairUnits.length === 0) loadAvailableRepairUnits();
+  };
+
+  const nameMutation = useMutation({
+    mutationFn: async ({ unitId, customUnitName }: { unitId: string; customUnitName: string | null }) => {
+      const api = await getApi();
+      await api.put(`/admin/service-plan/units/${unitId}/name`, { customUnitName });
+    },
+    onSuccess: () => {
+      setEditingNameId(null);
+      queryClient.invalidateQueries({ queryKey: keys.servicePlan(orgId) });
+    },
+    onError: (err: unknown) => {
+      addToast('error', err instanceof Error ? err.message : 'Failed to save name');
+    },
+  });
+
+  const loadAvailableVehicles = async () => {
+    try {
+      const api = await getApi();
+      const data = await api.get<{ vins: TelematicsVehicle[] }>('/admin/service-plan/available-vins');
+      setAvailableVehicles(data.vins ?? []);
+    } catch {
+      setAvailableVehicles([]);
     }
   };
 
   const startMatching = (unitId: string) => {
     setMatchingUnitId(unitId);
-    setMatchingVin('');
-    if (availableVins.length === 0) loadAvailableVins();
+    setMatchingKey('');
+    if (availableVehicles.length === 0) loadAvailableVehicles();
   };
 
-  const autoCount = units.filter(u => u.matchType === 'AUTO').length;
-  const manualCount = units.filter(u => u.matchType === 'MANUAL').length;
-  const unmatchedCount = summary?.unmatched ?? 0;
-  const filteredUnits = filter === 'unmatched'
-    ? units.filter(u => u.matchType === 'UNMATCHED')
-    : units;
+  const startEditingName = (unitId: string, currentName: string) => {
+    setEditingNameId(unitId);
+    setEditingNameValue(currentName);
+  };
+
+  // A true match requires both a repair record AND a telematics record.
+  // Telematics-only units are never "matched" regardless of their stored matchType.
+  // Confirmed units are acknowledged as intentionally having no telematics (e.g. trailers).
+  const isMatched = (u: any) => !u.isTelematicsOnly && u.matchType !== 'UNMATCHED';
+  const isConfirmedUnit = (u: any) => !isMatched(u) && !!u.isConfirmed;
+  // "Unmatched" = needs attention: not matched, not confirmed
+  const isUnmatched = (u: any) => !isMatched(u) && !u.isConfirmed;
+
+  const autoCount = units.filter(u => !u.isTelematicsOnly && u.matchType === 'AUTO').length;
+  const manualCount = units.filter(u => !u.isTelematicsOnly && u.matchType === 'MANUAL').length;
+  const unmatchedCount = units.filter(isUnmatched).length;
+  const confirmedCount = units.filter(isConfirmedUnit).length;
+  const excludedCount = units.filter(u => !(u as any).isIncluded).length;
+  const includedCount = units.filter(u => (u as any).isIncluded).length;
+  const matchedCount = units.filter(isMatched).length;
+  const filteredUnits = (() => {
+    const base = filter === 'included'
+      ? units.filter(u => (u as any).isIncluded)
+      : filter === 'matched'
+      ? units.filter(isMatched)
+      : filter === 'unmatched'
+      ? units.filter(isUnmatched)
+      : filter === 'confirmed'
+      ? units.filter(isConfirmedUnit)
+      : filter === 'excluded'
+      ? units.filter(u => !(u as any).isIncluded)
+      : units;
+
+    if (!sortCol) return base;
+
+    const key = (u: any): string => {
+      if (sortCol === 'name') return (u.customUnitName ?? u.repairUnitNumber ?? u.telematicsData?.vehicleNumber ?? '').toLowerCase();
+      if (sortCol === 'repair') return (u.isTelematicsOnly ? '' : (u.repairUnitNumber ?? '')).toLowerCase();
+      if (sortCol === 'telematics') return (u.telematicsData?.vehicleNumber ?? '').toLowerCase();
+      if (sortCol === 'source') {
+        if (u.isTelematicsOnly) return 'telematics only';
+        if (u.matchType === 'AUTO') return 'matched on vin';
+        if (u.matchType === 'MANUAL') return 'manual match';
+        if (u.isConfirmed) return 'confirmed no match';
+        return 'repair only';
+      }
+      if (sortCol === 'inPlan') return u.isIncluded ? 'a' : 'b';
+      return '';
+    };
+
+    return [...base].sort((a, b) => {
+      const cmp = key(a).localeCompare(key(b), undefined, { numeric: true });
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+  })();
 
   const isLoading = servicePlanQuery.isLoading || orgSettingsQuery.isLoading;
 
@@ -173,11 +367,12 @@ export default function AdminServicePlanPage() {
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
             <KpiCard label="Total Units" value={summary?.total ?? 0} />
-            <KpiCard label="Auto-Matched" value={autoCount} variant="success" />
-            <KpiCard label="Manually Matched" value={manualCount} />
-            <KpiCard label="Unmatched" value={unmatchedCount} variant={unmatchedCount > 0 ? 'warning' : 'default'} />
+            <KpiCard label="Matched on VIN" value={autoCount} variant="success" />
+            <KpiCard label="Manual Match" value={manualCount} />
+            <KpiCard label="Unmatched" value={unmatchedCount} />
+            <KpiCard label="Excluded" value={excludedCount} variant={excludedCount > 0 ? 'warning' : 'default'} />
           </div>
 
           <div className="flex flex-wrap gap-3 items-center mb-4">
@@ -202,12 +397,44 @@ export default function AdminServicePlanPage() {
                 All ({units.length})
               </Button>
               <Button
+                variant={filter === 'included' ? 'default' : 'ghost'}
+                size="sm"
+                className="rounded-none border-0 border-l border-border"
+                onClick={() => setFilter('included')}
+              >
+                Included ({includedCount})
+              </Button>
+              <Button
+                variant={filter === 'matched' ? 'default' : 'ghost'}
+                size="sm"
+                className="rounded-none border-0 border-l border-border"
+                onClick={() => setFilter('matched')}
+              >
+                Matched ({matchedCount})
+              </Button>
+              <Button
                 variant={filter === 'unmatched' ? 'default' : 'ghost'}
                 size="sm"
                 className="rounded-none border-0 border-l border-border"
                 onClick={() => setFilter('unmatched')}
               >
                 Unmatched ({unmatchedCount})
+              </Button>
+              <Button
+                variant={filter === 'confirmed' ? 'default' : 'ghost'}
+                size="sm"
+                className="rounded-none border-0 border-l border-border"
+                onClick={() => setFilter('confirmed')}
+              >
+                Confirmed ({confirmedCount})
+              </Button>
+              <Button
+                variant={filter === 'excluded' ? 'default' : 'ghost'}
+                size="sm"
+                className="rounded-none border-0 border-l border-border"
+                onClick={() => setFilter('excluded')}
+              >
+                Excluded ({excludedCount})
               </Button>
             </div>
           </div>
@@ -217,95 +444,349 @@ export default function AdminServicePlanPage() {
               <table className="w-full">
                 <thead className="bg-muted border-b border-border">
                   <tr>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Unit Number</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Repair VIN</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Telematics VIN</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Match Type</th>
+                    {([
+                      ['name', 'Unit Name'],
+                      ['repair', 'Repair System'],
+                      ['telematics', 'Telematics'],
+                      ['source', 'Source'],
+                      ['inPlan', 'In Plan'],
+                    ] as const).map(([col, label]) => (
+                      <th
+                        key={col}
+                        onClick={() => handleSort(col)}
+                        className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground transition-colors"
+                      >
+                        <span className="inline-flex items-center gap-1">
+                          {label}
+                          <span className="text-[10px]">
+                            {sortCol === col ? (sortDir === 'asc' ? '▲' : '▼') : '↕'}
+                          </span>
+                        </span>
+                      </th>
+                    ))}
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
                   {filteredUnits.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">
-                        {filter === 'unmatched'
+                      <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
+                        {filter === 'included'
+                          ? 'No included units.'
+                          : filter === 'matched'
+                          ? 'No matched units.'
+                          : filter === 'confirmed'
+                          ? 'No confirmed units.'
+                          : filter === 'unmatched'
                           ? 'No unmatched units.'
+                          : filter === 'excluded'
+                          ? 'No excluded units.'
                           : 'No units found. Click Refresh Units to import from the repair database.'}
                       </td>
                     </tr>
                   ) : (
-                    filteredUnits.map(unit => (
-                      <tr
-                        key={unit.id}
-                        className={`hover:bg-accent/50 transition-colors ${unit.matchType === 'UNMATCHED' ? 'bg-amber-50/40 dark:bg-amber-900/10 border-l-2 border-l-amber-400' : ''}`}
-                      >
-                        <td className="px-4 py-3 text-sm font-semibold text-foreground">
-                          {unit.repairUnitNumber || <span className="text-muted-foreground italic">N/A</span>}
-                        </td>
-                        <td className="px-4 py-3 text-xs font-mono text-muted-foreground">
-                          {unit.repairVin || '—'}
-                        </td>
-                        <td className="px-4 py-3 text-xs font-mono text-muted-foreground">
-                          {unit.telematicsVin || '—'}
-                        </td>
-                        <td className="px-4 py-3">
-                          {matchTypeBadge(unit.matchType)}
-                        </td>
-                        <td className="px-4 py-3">
-                          {unit.matchType === 'UNMATCHED' ? (
-                            matchingUnitId === unit.id ? (
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <Select value={matchingVin} onValueChange={v => setMatchingVin(v ?? '')}>
-                                  <SelectTrigger className="h-8 text-xs w-[200px]">
-                                    <SelectValue placeholder="Select VIN..." />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {availableVins.map(v => (
-                                      <SelectItem key={v} value={v} className="text-xs font-mono">{v}</SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                                <Button
-                                  size="sm"
-                                  onClick={() => matchMutation.mutate({ unitId: unit.id, telematicsVin: matchingVin })}
-                                  disabled={!matchingVin || matchMutation.isPending}
-                                  className="h-8"
+                    filteredUnits.map(unit => {
+                      const u = unit as any;
+                      const customName = u.customUnitName as string | null;
+                      // For telematics-only units, repairUnitNumber holds the telematics vehicle name — not a repair record
+                      const repairName = !u.isTelematicsOnly ? (u.repairUnitNumber as string | null) : null;
+                      const telematicsName = (u.telematicsData?.vehicleNumber ?? null) as string | null;
+                      const displayName = customName ?? repairName ?? telematicsName;
+                      const namesMismatch = !customName && repairName && telematicsName && repairName !== telematicsName;
+                      const isEditingName = editingNameId === unit.id;
+
+                      return (
+                        <tr
+                          key={unit.id}
+                          className={`hover:bg-accent/50 transition-colors ${!u.isIncluded ? 'bg-amber-50/40 dark:bg-amber-900/10 border-l-2 border-l-amber-400' : ''}`}
+                        >
+                          {/* Unit Name — editable */}
+                          <td className="px-4 py-3 min-w-[160px]">
+                            {isEditingName ? (
+                              <div className="flex items-center gap-1.5">
+                                <Input
+                                  className="h-7 text-sm w-36"
+                                  value={editingNameValue}
+                                  onChange={e => setEditingNameValue(e.target.value)}
+                                  onKeyDown={e => {
+                                    if (e.key === 'Enter') nameMutation.mutate({ unitId: unit.id, customUnitName: editingNameValue || null });
+                                    if (e.key === 'Escape') setEditingNameId(null);
+                                  }}
+                                  autoFocus
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => nameMutation.mutate({ unitId: unit.id, customUnitName: editingNameValue || null })}
+                                  disabled={nameMutation.isPending}
+                                  className="text-primary hover:text-primary/80 disabled:opacity-50"
+                                  title="Save"
                                 >
-                                  {matchMutation.isPending ? 'Saving...' : 'Match'}
-                                </Button>
+                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                  </svg>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingNameId(null)}
+                                  className="text-muted-foreground hover:text-foreground"
+                                  title="Cancel"
+                                >
+                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                  </svg>
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex items-start gap-1.5 group">
+                                <div>
+                                  <span className="text-sm font-semibold text-foreground">
+                                    {displayName ?? <span className="text-muted-foreground italic font-normal">No name</span>}
+                                  </span>
+                                  {customName && (
+                                    <div className="text-xs text-muted-foreground">custom</div>
+                                  )}
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => startEditingName(unit.id, customName ?? repairName ?? telematicsName ?? '')}
+                                  className="mt-0.5 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground transition-opacity"
+                                  title="Edit unit name"
+                                >
+                                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                                  </svg>
+                                </button>
+                              </div>
+                            )}
+                          </td>
+
+                          {/* Repair System */}
+                          <td className="px-4 py-3">
+                            {!u.isTelematicsOnly && repairName ? (
+                              <div>
+                                <div className="text-sm text-foreground">{repairName}</div>
+                                {u.repairVin && (
+                                  <div className="text-xs font-mono text-muted-foreground">{u.repairVin}</div>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">—</span>
+                            )}
+                          </td>
+
+                          {/* Telematics */}
+                          <td className="px-4 py-3">
+                            {telematicsName || u.telematicsVin ? (
+                              <div>
+                                {telematicsName && (
+                                  <div className={`text-sm ${namesMismatch ? 'text-amber-600 dark:text-amber-400' : 'text-foreground'}`}>
+                                    {telematicsName}
+                                    {namesMismatch && (
+                                      <span className="ml-1 text-xs" title="Telematics name differs from repair unit number">⚠</span>
+                                    )}
+                                  </div>
+                                )}
+                                {u.telematicsVin && (
+                                  <div className="text-xs font-mono text-muted-foreground">{u.telematicsVin}</div>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">—</span>
+                            )}
+                          </td>
+
+                          {/* Source / match status */}
+                          <td className="px-4 py-3">
+                            {sourceBadge(unit.matchType, u.isTelematicsOnly, u.isConfirmed)}
+                          </td>
+
+                          {/* In Plan toggle */}
+                          <td className="px-4 py-3">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (pendingInclusionIds.has(unit.id)) return;
+                                inclusionMutation.mutate({ unitId: unit.id, isIncluded: !u.isIncluded });
+                              }}
+                              disabled={pendingInclusionIds.has(unit.id)}
+                              title={u.isIncluded ? 'Included in plan — click to exclude' : 'Excluded from plan — click to include'}
+                              className={`inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                                u.isIncluded
+                                  ? 'bg-green-100 text-green-700 hover:bg-red-50 hover:text-red-600 dark:bg-green-900/30 dark:text-green-400'
+                                  : 'bg-muted text-muted-foreground hover:bg-green-50 hover:text-green-700'
+                              }`}
+                            >
+                              {pendingInclusionIds.has(unit.id) ? '...' : u.isIncluded ? 'Included' : 'Excluded'}
+                            </button>
+                          </td>
+
+                          {/* Actions */}
+                          <td className="px-4 py-3">
+                            {isConfirmedUnit(u) ? (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => confirmMutation.mutate({ unitId: unit.id, isConfirmed: false })}
+                                disabled={confirmMutation.isPending}
+                                className="h-8 text-muted-foreground hover:text-foreground"
+                                title="Un-confirm — move back to unmatched so it can be matched or re-confirmed"
+                              >
+                                Un-confirm
+                              </Button>
+                            ) : isUnmatched(u) && !u.isTelematicsOnly ? (
+                              matchingUnitId === unit.id ? (
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <Select value={matchingKey} onValueChange={v => setMatchingKey(v ?? '')}>
+                                    <SelectTrigger className="h-8 text-xs w-[240px]">
+                                      <SelectValue placeholder="Select telematics vehicle..." />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {availableVehicles.length === 0 && (
+                                        <div className="px-3 py-2 text-xs text-muted-foreground">Loading vehicles...</div>
+                                      )}
+                                      {availableVehicles.map(v => {
+                                        const key = vehicleKey(v);
+                                        return (
+                                          <SelectItem key={key} value={key} className="text-xs">
+                                            <div className="flex flex-col">
+                                              <span className="font-medium">
+                                                {v.vehicleNumber ?? 'Unknown vehicle'}
+                                                {v.isMatched && (
+                                                  <span className="ml-1.5 text-muted-foreground">(matched)</span>
+                                                )}
+                                              </span>
+                                              {v.vin && (
+                                                <span className="font-mono text-muted-foreground">{v.vin}</span>
+                                              )}
+                                            </div>
+                                          </SelectItem>
+                                        );
+                                      })}
+                                    </SelectContent>
+                                  </Select>
+                                  <Button
+                                    size="sm"
+                                    onClick={() => matchMutation.mutate({ unitId: unit.id, key: matchingKey })}
+                                    disabled={!matchingKey || matchMutation.isPending}
+                                    className="h-8"
+                                  >
+                                    {matchMutation.isPending ? 'Saving...' : 'Match'}
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => { setMatchingUnitId(null); setMatchingKey(''); }}
+                                    className="h-8"
+                                  >
+                                    Cancel
+                                  </Button>
+                                </div>
+                              ) : (
+                                <div className="flex flex-col gap-1.5">
+                                  {u.suggestedMatch?.telematicsVin && (
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-xs text-amber-600 dark:text-amber-400 font-medium">
+                                        Possible match: {u.suggestedMatch.vehicleNumber}
+                                      </span>
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() => applySuggestionMutation.mutate({ unitId: unit.id, telematicsVin: u.suggestedMatch!.telematicsVin })}
+                                        disabled={applySuggestionMutation.isPending}
+                                        className="h-7 text-xs border-amber-400 text-amber-700 hover:bg-amber-50 dark:border-amber-500 dark:text-amber-400 dark:hover:bg-amber-950"
+                                      >
+                                        Use Match
+                                      </Button>
+                                    </div>
+                                  )}
+                                  <div className="flex items-center gap-2">
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => startMatching(unit.id)}
+                                      className="h-8 border-primary text-primary hover:bg-primary/10"
+                                    >
+                                      Match Vehicle
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      onClick={() => confirmMutation.mutate({ unitId: unit.id, isConfirmed: true })}
+                                      disabled={confirmMutation.isPending}
+                                      className="h-8 text-muted-foreground hover:text-foreground"
+                                      title="Mark as confirmed — intentionally has no telematics"
+                                    >
+                                      Confirm
+                                    </Button>
+                                  </div>
+                                </div>
+                              )
+                            ) : isMatched(u) ? (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => unmatchMutation.mutate(unit.id)}
+                                disabled={unmatchMutation.isPending}
+                                className="h-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                                title="Unmatch — removes the telematics link so you can re-match manually or re-sync"
+                              >
+                                {unmatchMutation.isPending ? 'Removing...' : 'Unmatch'}
+                              </Button>
+                            ) : u.isTelematicsOnly ? (
+                              mergingUnitId === unit.id ? (
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <Select value={mergeRepairId} onValueChange={v => setMergeRepairId(v ?? '')}>
+                                    <SelectTrigger className="h-8 text-xs w-[200px]">
+                                      <SelectValue placeholder="Select repair unit..." />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {availableRepairUnits.length === 0 && (
+                                        <div className="px-3 py-2 text-xs text-muted-foreground">Loading units...</div>
+                                      )}
+                                      {availableRepairUnits.map(r => (
+                                        <SelectItem key={r.id} value={r.id} className="text-xs">
+                                          <div className="flex flex-col">
+                                            <span className="font-medium">{r.customUnitName ?? r.repairUnitNumber ?? r.id}</span>
+                                            {r.repairVin && <span className="font-mono text-muted-foreground">{r.repairVin}</span>}
+                                          </div>
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                  <Button
+                                    size="sm"
+                                    onClick={() => mergeMutation.mutate({ telematicsUnitId: unit.id, repairUnitId: mergeRepairId })}
+                                    disabled={!mergeRepairId || mergeMutation.isPending}
+                                    className="h-8"
+                                  >
+                                    {mergeMutation.isPending ? 'Merging...' : 'Merge'}
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => { setMergingUnitId(null); setMergeRepairId(''); }}
+                                    className="h-8"
+                                  >
+                                    Cancel
+                                  </Button>
+                                </div>
+                              ) : (
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  onClick={() => setMatchingUnitId(null)}
-                                  className="h-8"
+                                  onClick={() => startMerging(unit.id)}
+                                  className="h-8 border-primary text-primary hover:bg-primary/10"
                                 >
-                                  Cancel
+                                  Match to Repair
                                 </Button>
-                              </div>
+                              )
                             ) : (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => startMatching(unit.id)}
-                                className="h-8 border-primary text-primary hover:bg-primary/10"
-                              >
-                                Match VIN
-                              </Button>
-                            )
-                          ) : (
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => unmatchMutation.mutate(unit.id)}
-                              disabled={unmatchMutation.isPending}
-                              className="h-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                            >
-                              {unmatchMutation.isPending ? 'Removing...' : 'Unmatch'}
-                            </Button>
-                          )}
-                        </td>
-                      </tr>
-                    ))
+                              <span className="text-xs text-muted-foreground">—</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>
