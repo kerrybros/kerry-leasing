@@ -48,36 +48,44 @@ export default async function HomePage() {
 
       {/* Hero */}
       <section className="relative z-10 flex-1 flex flex-col items-center justify-center text-center px-6 py-16">
-        <div className="max-w-2xl mx-auto flex flex-col items-center gap-10">
+        <div className="max-w-3xl mx-auto flex flex-col items-center gap-12">
 
-          {/* Logo card — the hero centrepiece */}
-          <div
-            className="w-full rounded-2xl px-10 py-8 flex flex-col items-center gap-6 shadow-2xl shadow-black/40"
-            style={{
-              background: 'rgba(255,255,255,0.97)',
-              border: '1px solid rgba(255,255,255,0.15)',
-            }}
-          >
-            {/* Top gold accent */}
-            <div className="w-12 h-1 rounded-full" style={{ background: '#d9a528' }} />
-
-            <div className="flex flex-col sm:flex-row items-center gap-6 sm:gap-10">
+          {/* Logos — bare on dark background with backglow */}
+          <div className="flex flex-col sm:flex-row items-center gap-10 sm:gap-16">
+            {/* KL logo with white glow */}
+            <div className="relative flex items-center justify-center">
+              <div
+                className="absolute inset-0 rounded-full blur-2xl"
+                style={{ background: 'rgba(255,255,255,0.18)', transform: 'scale(1.4)' }}
+              />
               <Image
                 src="/logos/Kerry Leasing Logo.png"
                 alt="Kerry Leasing"
-                width={200}
-                height={68}
-                className="h-14 w-auto object-contain"
+                width={280}
+                height={96}
+                className="relative h-20 w-auto object-contain"
                 priority
+                style={{ filter: 'brightness(0) invert(1)' }}
               />
-              <div className="w-px h-14 hidden sm:block" style={{ background: '#e5e7eb' }} />
-              <div className="h-px w-20 sm:hidden" style={{ background: '#e5e7eb' }} />
+            </div>
+
+            {/* Divider */}
+            <div className="w-px h-16 hidden sm:block" style={{ background: 'rgba(255,255,255,0.15)' }} />
+            <div className="h-px w-16 sm:hidden" style={{ background: 'rgba(255,255,255,0.15)' }} />
+
+            {/* KB logo with white glow */}
+            <div className="relative flex items-center justify-center">
+              <div
+                className="absolute inset-0 rounded-full blur-2xl"
+                style={{ background: 'rgba(255,255,255,0.18)', transform: 'scale(1.4)' }}
+              />
               <Image
                 src="/logos/Kerry Brothers Truck Repair Logo Transpaent.png"
                 alt="Kerry Brothers Truck Repair"
-                width={240}
-                height={82}
-                className="h-16 w-auto object-contain"
+                width={320}
+                height={110}
+                className="relative h-24 w-auto object-contain"
+                style={{ filter: 'brightness(0) invert(1)' }}
               />
             </div>
           </div>
