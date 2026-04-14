@@ -16,6 +16,7 @@ export type OrgSettings = {
   telematicsDashboardUrl: string | null;
   telematicsDashboardUsername: string | null;
   telematicsDashboardPassword: string | null;
+  dieselPricePerGallon: number | null;
 };
 
 export type VehicleUtilization = {
@@ -60,6 +61,18 @@ export type FleetUnitsResponse = {
   total: number;
 };
 
+export type SafetyEvent = {
+  samsaraId: string;
+  behaviorLabel: string;
+  severity: string | null;
+  maxValue: number | null;
+  time: string;
+  eventDate: string;
+  driverName: string | null;
+  lat: number | null;
+  lon: number | null;
+};
+
 export type UnitDetailResponse = {
   servicePlan: {
     id: string;
@@ -79,10 +92,16 @@ export type UnitDetailResponse = {
     licensePlate: string | null;
     customerId: string;
   } | null;
+  liveStats: {
+    odometerMiles: number | null;
+    engineHours: number | null;
+    capturedAt: string | null;
+  } | null;
   telematics: {
     history: VehicleUtilization[];
     hasData: boolean;
   };
+  safetyEvents: SafetyEvent[];
   repairs: {
     history: Array<{
       revenue_detail_id: string;
@@ -100,6 +119,32 @@ export type UnitDetailResponse = {
     }>;
     hasData: boolean;
   };
+};
+
+export type ScorecardDriver = {
+  driverId: number;
+  driverName: string;
+  rank: number;
+  score: number;
+  grade: string;
+  totalMiles: number;
+  avgMpg: number;
+  idlePct: number;
+  idleFuelGal: number;
+  idleTimeMin: number;
+  driveTimeHrs: number;
+  totalFuelGal: number;
+  drivingFuelGal: number;
+  hardEvents: number;
+  hardEventBreakdown?: { hardAccels: number; hardBrakes: number; hardCorners: number };
+  subScores: { idle: number; mpg: number; utilization: number; fuelEconomy: number; safety: number };
+};
+
+export type DriverScorecardResponse = {
+  data: ScorecardDriver[];
+  provider: string | null;
+  fleetAvgMpg: number;
+  period: { startDate: string; endDate: string };
 };
 
 export type RepairsResponse = {
@@ -139,6 +184,8 @@ export const keys = {
     ['unit-detail', orgId, vin] as const,
   servicePlan: (orgId: string) =>
     ['service-plan', orgId] as const,
+  driverScorecard: (orgId: string | undefined, startDate?: string, endDate?: string) =>
+    ['driver-scorecard', orgId, startDate, endDate] as const,
 };
 
 // --- Hooks ---
@@ -153,7 +200,6 @@ export function useOrgSettingsQuery() {
       return api.get<OrgSettings>('/org/settings');
     },
     enabled: !!organization?.id,
-    staleTime: 5 * 60 * 1000,
   });
 }
 
@@ -167,7 +213,6 @@ export function useFleetUnitsQuery() {
       return api.get<FleetUnitsResponse>('/fleet/units');
     },
     enabled: !!organization?.id,
-    staleTime: 2 * 60 * 1000,
   });
 }
 
@@ -196,7 +241,6 @@ export function useVehicleUtilizationQuery(
       return resp.data;
     },
     enabled: !!organization?.id,
-    staleTime: 2 * 60 * 1000,
   });
 }
 
@@ -224,7 +268,6 @@ export function useDriverUtilizationQuery(
       return resp.data;
     },
     enabled: !!organization?.id && enabled,
-    staleTime: 2 * 60 * 1000,
   });
 }
 
@@ -238,7 +281,6 @@ export function useRepairsQuery() {
       return api.get<RepairsResponse>('/repairs');
     },
     enabled: !!organization?.id,
-    staleTime: 2 * 60 * 1000,
   });
 }
 
@@ -252,7 +294,6 @@ export function useUnitDetailQuery(vin: string) {
       return api.get<UnitDetailResponse>(`/fleet/units/${vin}`);
     },
     enabled: !!organization?.id && !!vin,
-    staleTime: 2 * 60 * 1000,
   });
 }
 
@@ -262,6 +303,11 @@ export type ServicePlanUnit = {
   repairUnitNumber: string | null;
   repairVin: string | null;
   telematicsVin: string | null;
+  telematicsVehicleId: string | null;
+  customUnitName: string | null;
+  isTelematicsOnly: boolean;
+  isIncluded: boolean;
+  isConfirmed: boolean;
   matchType: 'AUTO' | 'MANUAL' | 'UNMATCHED';
   matchConfidence: number | null;
   notes: string | null;
@@ -269,6 +315,10 @@ export type ServicePlanUnit = {
     vehicleNumber: string;
     lastDataDate: string;
     hasTelematicsData: boolean;
+  } | null;
+  suggestedMatch?: {
+    telematicsVin: string;
+    vehicleNumber: string;
   } | null;
 };
 
@@ -293,6 +343,45 @@ export function useServicePlanQuery() {
       );
     },
     enabled: !!organization?.id,
-    staleTime: 2 * 60 * 1000,
+  });
+}
+
+export function useServicePlanSummaryQuery() {
+  const { getApi } = useApiClient();
+  const { organization } = useOrganization();
+  return useQuery({
+    queryKey: ['service-plan-summary', organization?.id],
+    queryFn: async () => {
+      const api = await getApi();
+      return api.get<{ units: ServicePlanUnit[]; summary: ServicePlanSummary }>(
+        '/admin/service-plan/units?pageSize=1&page=1'
+      );
+    },
+    enabled: !!organization?.id,
+  });
+}
+
+/**
+ * Driver scorecard — weighted composite score per driver for the given date range.
+ * Currently Motive-only. Returns empty data for Samsara orgs.
+ */
+export function useDriverScorecardQuery(
+  enabled = true,
+  startDate?: string,
+  endDate?: string
+) {
+  const { getApi } = useApiClient();
+  const { organization } = useOrganization();
+  return useQuery({
+    queryKey: keys.driverScorecard(organization?.id, startDate, endDate),
+    queryFn: async (): Promise<DriverScorecardResponse> => {
+      const api = await getApi();
+      const params = new URLSearchParams();
+      if (startDate) params.set('startDate', startDate);
+      if (endDate) params.set('endDate', endDate);
+      const qs = params.toString() ? `?${params.toString()}` : '';
+      return api.get<DriverScorecardResponse>(`/telematics/normalized/driver-scorecard${qs}`);
+    },
+    enabled: !!organization?.id && enabled,
   });
 }
