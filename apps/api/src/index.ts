@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import compression from 'compression';
 import rateLimit from 'express-rate-limit';
 import { config } from './config.js';
 import routes from './routes/index.js';
@@ -11,6 +12,7 @@ import { assertRepairDbSafety } from './safety/repairDbSafety.js';
 const app = express();
 
 // Middleware
+app.use(compression());
 app.use(
   cors({
     origin: config.cors.allowedOrigins,

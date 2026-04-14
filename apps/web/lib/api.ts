@@ -27,7 +27,6 @@ export async function apiRequest<T>(
     const response = await fetch(`${API_URL}${endpoint}`, {
     ...options,
     headers,
-    cache: 'no-store'
   });
 
   if (!response.ok) {
@@ -47,7 +46,6 @@ export const createApiClient = (token: string | null, customHeaders: Record<stri
     apiRequest<T>(endpoint, token, { 
       method: 'GET',
       headers: customHeaders,
-      cache: 'no-store'
     }),
 
   post: <T>(endpoint: string, data?: unknown) =>

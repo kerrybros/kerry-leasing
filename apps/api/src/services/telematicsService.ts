@@ -121,6 +121,17 @@ export class TelematicsService {
         clerkOrgId: orgId,
         date: { gte: startDate, lte: endDate },
       },
+      select: {
+        vehicleId: true,
+        vehicleNumber: true,
+        vin: true,
+        date: true,
+        totalDistance: true,
+        idleTime: true,
+        drivingTime: true,
+        totalFuel: true,
+        idleFuel: true,
+      },
       orderBy: [{ date: 'desc' }, { vehicleId: 'asc' }],
     });
 
@@ -163,6 +174,17 @@ export class TelematicsService {
       where: {
         clerkOrgId: orgId,
         date: { gte: startDate, lte: endDate },
+      },
+      select: {
+        driverId: true,
+        driverFirstName: true,
+        driverLastName: true,
+        date: true,
+        utilization: true,
+        drivingTime: true,
+        idleTime: true,
+        drivingFuel: true,
+        idleFuel: true,
       },
       orderBy: [{ date: 'desc' }, { driverId: 'asc' }],
     });
@@ -225,6 +247,17 @@ export class TelematicsService {
         clerkOrgId: orgId,
         date: { gte: startDate, lte: endDate },
       },
+      select: {
+        vehicleId: true,
+        vehicleName: true,
+        vin: true,
+        date: true,
+        distanceMiles: true,
+        idleMinutes: true,
+        drivingMinutes: true,
+        fuelGallons: true,
+        idleFuelGallons: true,
+      },
       orderBy: [{ date: 'desc' }, { vehicleId: 'asc' }],
     });
 
@@ -286,6 +319,17 @@ export class TelematicsService {
     // 1. Driver utilization records for the period
     const driverRows = await appPrisma.motiveDriverUtilization.findMany({
       where: { clerkOrgId: orgId, date: { gte: startDate, lte: endDate } },
+      select: {
+        driverId: true,
+        driverFirstName: true,
+        driverLastName: true,
+        date: true,
+        utilization: true,
+        drivingTime: true,
+        idleTime: true,
+        drivingFuel: true,
+        idleFuel: true,
+      },
     });
 
     if (driverRows.length === 0) {
