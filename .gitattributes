@@ -1,0 +1,17 @@
+# Store text files as LF in the repo; avoid CRLF churn on Windows / OneDrive.
+# Recommended local setting: git config core.autocrlf false
+* text=auto eol=lf
+
+# Binary — never line-ending normalize
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+*.eot binary
+*.ttf binary
+*.otf binary
