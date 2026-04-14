@@ -1,292 +1,344 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { ArrowRight, X } from 'lucide-react';
+import { Skeleton } from '@/components/Skeleton';
 import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  LabelList,
+  BarChart, Bar, XAxis, YAxis, Tooltip, LabelList, ResponsiveContainer,
 } from 'recharts';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 import type { UnitMetrics, DriverMetrics, FleetTotals } from '@/features/fleet/types';
-
+import { CHART_COLORS } from '@/features/fleet/utils/chartColors';
 interface TelematicsBreakdownViewProps {
+  loading?: boolean;
   viewMode: 'unit' | 'driver';
-  onViewModeChange: (mode: 'unit' | 'driver') => void;
   tracksDrivers: boolean;
   unitMetrics: UnitMetrics[];
   driverMetrics: DriverMetrics[];
   fleetTotals: FleetTotals;
   selectedId: string | number | null;
   onRowClick: (id: string | number) => void;
-  showDriverScorecard: boolean;
+}
+
+type SortKey = 'label' | 'totalMiles' | 'avgMpg' | 'idlePercentage' | 'idleFuel' | 'idleTimeMinutes' | 'totalFuelGal' | 'drivingFuelGal' | 'driveTimeHrs';
+
+function CompactBar({
+  title,
+  data,
+  dataKey,
+  color,
+  formatter,
+  onBarClick,
+}: {
+  title: string;
+  data: (UnitMetrics & { label: string } | DriverMetrics & { label: string })[];
+  dataKey: string;
+  color: string;
+  formatter?: (v: unknown) => string;
+  onBarClick?: (item: UnitMetrics | DriverMetrics) => void;
+}) {
+  const chartH = Math.max(80, data.length * 24);
+  return (
+    <div className="rounded-lg border border-border bg-card overflow-hidden">
+      <div className="px-2.5 pt-2 pb-0.5">
+        <p className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">{title}</p>
+      </div>
+      <div style={{ height: chartH }} className="px-0 pb-1">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={data} layout="vertical" margin={{ top: 0, right: 48, left: 0, bottom: 0 }}>
+            <XAxis type="number" hide />
+            <YAxis
+              type="category"
+              dataKey="label"
+              width={72}
+              fontSize={9}
+              tickLine={false}
+              axisLine={false}
+              tick={{ fill: CHART_COLORS.tick }}
+            />
+            <Tooltip active={false} />
+            <Bar
+              dataKey={dataKey}
+              fill={color}
+              radius={[0, 2, 2, 0]}
+              isAnimationActive={false}
+              barSize={13}
+              cursor={onBarClick ? 'pointer' : undefined}
+              onClick={onBarClick ? (d) => onBarClick(d as unknown as UnitMetrics | DriverMetrics) : undefined}
+            >
+              <LabelList
+                dataKey={dataKey}
+                position="right"
+                formatter={formatter}
+                style={{ fill: 'var(--foreground)', fontSize: 9, fontWeight: 600 }}
+              />
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
 }
 
 export function TelematicsBreakdownView({
+  loading,
   viewMode,
-  onViewModeChange,
-  tracksDrivers,
   unitMetrics,
   driverMetrics,
   fleetTotals,
   selectedId,
   onRowClick,
-  showDriverScorecard,
 }: TelematicsBreakdownViewProps) {
   const router = useRouter();
+  const [sortKey, setSortKey] = useState<SortKey>('totalMiles');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
-  const topIdleUnits = [...unitMetrics]
-    .sort((a, b) => parseFloat(b.idlePercentage) - parseFloat(a.idlePercentage))
-    .slice(0, 5);
-
-  const topMpgUnits = [...unitMetrics]
-    .sort((a, b) => parseFloat(b.avgMpg) - parseFloat(a.avgMpg))
-    .slice(0, 5);
-
-  return (
-    <div className="flex flex-col gap-6">
-      <div className="grid lg:grid-cols-12 gap-6 h-[600px]">
-        {/* LEFT COLUMN — KPI SUMMARY */}
-        <div className="lg:col-span-3 flex flex-col gap-4 h-full">
-          <Card className="flex flex-col items-center justify-center flex-1">
-            <CardContent className="pt-6 text-center">
-              <p className="text-sm font-medium uppercase tracking-wide text-muted-foreground mb-2">Idle %</p>
-              <p className="text-4xl font-bold text-amber-500">{fleetTotals.idlePercentage}%</p>
-            </CardContent>
-          </Card>
-          <Card className="flex flex-col items-center justify-center flex-1">
-            <CardContent className="pt-6 text-center">
-              <p className="text-sm font-medium uppercase tracking-wide text-muted-foreground mb-2">Idle Fuel</p>
-              <p className="text-4xl font-bold text-destructive">{fleetTotals.totalIdleFuel.toLocaleString()}</p>
-              <p className="text-xs text-muted-foreground mt-1">gallons</p>
-            </CardContent>
-          </Card>
-          <Card className="flex flex-col items-center justify-center flex-1">
-            <CardContent className="pt-6 text-center">
-              <p className="text-sm font-medium uppercase tracking-wide text-muted-foreground mb-2">Idle Time</p>
-              <p className="text-4xl font-bold text-primary">{fleetTotals.totalIdleTime.toLocaleString()}</p>
-              <p className="text-xs text-muted-foreground mt-1">minutes</p>
-            </CardContent>
-          </Card>
+  if (loading) {
+    return (
+      <div className="flex gap-4">
+        <div className="w-[250px] shrink-0 flex flex-col gap-2">
+          {[1, 2, 3, 4].map(i => <Skeleton key={i} style={{ height: 180, borderRadius: 8 }} />)}
         </div>
-
-        {/* RIGHT COLUMN — BREAKDOWN TABLE */}
-        <div className="lg:col-span-9 flex flex-col h-full">
-          <Card className="flex flex-col h-full overflow-hidden">
-            <CardHeader className="pb-2 flex-row items-center justify-between space-y-0">
-              <CardTitle className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                {viewMode === 'unit' ? 'Unit Breakdown' : 'Driver Breakdown'}
-              </CardTitle>
-              {tracksDrivers && (
-                <div className="flex rounded-md border border-border overflow-hidden">
-                  <Button
-                    variant={viewMode === 'unit' ? 'default' : 'ghost'}
-                    size="sm"
-                    className="rounded-none border-0 h-7 px-3 text-xs"
-                    onClick={() => onViewModeChange('unit')}
-                  >
-                    Unit
-                  </Button>
-                  <Button
-                    variant={viewMode === 'driver' ? 'default' : 'ghost'}
-                    size="sm"
-                    className="rounded-none border-0 border-l border-border h-7 px-3 text-xs"
-                    onClick={() => onViewModeChange('driver')}
-                  >
-                    Driver
-                  </Button>
-                </div>
-              )}
-            </CardHeader>
-            <CardContent className="p-0 flex-1 overflow-auto">
-              <Table>
-                <TableHeader className="sticky top-0 z-10">
-                  <TableRow className="bg-muted hover:bg-muted">
-                    <TableHead className="text-muted-foreground font-semibold uppercase tracking-wide text-xs">
-                      {viewMode === 'unit' ? 'Unit' : 'Driver'}
-                    </TableHead>
-                    <TableHead className="text-muted-foreground font-semibold uppercase tracking-wide text-xs">MPG</TableHead>
-                    <TableHead className="text-muted-foreground font-semibold uppercase tracking-wide text-xs">Miles</TableHead>
-                    <TableHead className="text-muted-foreground font-semibold uppercase tracking-wide text-xs">Idle %</TableHead>
-                    <TableHead className="text-muted-foreground font-semibold uppercase tracking-wide text-xs">Idle Fuel</TableHead>
-                    <TableHead className="text-muted-foreground font-semibold uppercase tracking-wide text-xs">Idle (min)</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  <TableRow className="bg-primary/10 font-bold border-b-2">
-                    <TableCell className="font-bold">Total</TableCell>
-                    <TableCell className="font-bold">{fleetTotals.avgMpg}</TableCell>
-                    <TableCell className="font-bold">{fleetTotals.totalMiles.toLocaleString()}</TableCell>
-                    <TableCell className="font-bold">{fleetTotals.idlePercentage}%</TableCell>
-                    <TableCell className="font-bold">{fleetTotals.totalIdleFuel.toLocaleString()}</TableCell>
-                    <TableCell className="font-bold">{fleetTotals.totalIdleTime.toLocaleString()}</TableCell>
-                  </TableRow>
-                  {viewMode === 'unit'
-                    ? unitMetrics.map(unit => (
-                        <TableRow
-                          key={unit.vin}
-                          onClick={() => onRowClick(unit.vin)}
-                          className="cursor-pointer"
-                          style={{
-                            background: selectedId === unit.vin ? 'hsl(var(--accent))' : undefined,
-                            borderLeft: selectedId === unit.vin ? '3px solid hsl(var(--primary))' : '3px solid transparent',
-                          }}
-                        >
-                          <TableCell className="font-semibold">{unit.unitNumber}</TableCell>
-                          <TableCell>{unit.avgMpg}</TableCell>
-                          <TableCell>{Math.round(unit.totalMiles).toLocaleString()}</TableCell>
-                          <TableCell className="font-semibold">{unit.idlePercentage}%</TableCell>
-                          <TableCell>{unit.idleFuel.toLocaleString()}</TableCell>
-                          <TableCell>{unit.idleTimeMinutes.toLocaleString()}</TableCell>
-                        </TableRow>
-                      ))
-                    : driverMetrics.map(driver => (
-                        <TableRow
-                          key={driver.driverId}
-                          onClick={() => onRowClick(driver.driverId)}
-                          className="cursor-pointer"
-                          style={{
-                            background: selectedId === driver.driverId ? 'hsl(var(--accent))' : undefined,
-                            borderLeft: selectedId === driver.driverId ? '3px solid hsl(var(--primary))' : '3px solid transparent',
-                          }}
-                        >
-                          <TableCell className="font-semibold">{driver.driverName}</TableCell>
-                          <TableCell>{driver.avgMpg}</TableCell>
-                          <TableCell>{Math.round(driver.totalMiles).toLocaleString()}</TableCell>
-                          <TableCell className="font-semibold">{driver.idlePercentage}%</TableCell>
-                          <TableCell>{driver.idleFuel.toLocaleString()}</TableCell>
-                          <TableCell>{driver.idleTimeMinutes.toLocaleString()}</TableCell>
-                        </TableRow>
-                      ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
+        <div className="flex-1 flex flex-col gap-2">
+          {Array.from({ length: 10 }).map((_, i) => (
+            <Skeleton key={i} style={{ height: 32, borderRadius: 6 }} />
+          ))}
         </div>
       </div>
+    );
+  }
 
-      {/* Top/Bottom Performers */}
-      {viewMode === 'unit' && unitMetrics.length > 0 && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Worst Idlers */}
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                Worst Idlers (Top 5)
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="h-[240px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={topIdleUnits} layout="vertical" margin={{ top: 4, right: 50, left: 8, bottom: 4 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" horizontal={false} />
-                    <XAxis type="number" stroke="hsl(var(--muted-foreground))" fontSize={11} tickLine={false} axisLine={false} unit="%" />
-                    <YAxis
-                      type="category"
-                      dataKey="unitNumber"
-                      width={80}
-                      stroke="hsl(var(--muted-foreground))"
-                      fontSize={11}
-                      tickLine={false}
-                      axisLine={false}
-                      tick={{ fill: 'hsl(var(--muted-foreground))' }}
-                    />
-                    <Tooltip
-                      contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 6 }}
-                      formatter={(v: unknown) => [`${v}%`, 'Idle %'] as [string, string]}
-                    />
-                    <Bar
-                      dataKey="idlePercentage"
-                      fill="#ef4444"
-                      radius={[0, 3, 3, 0]}
-                      isAnimationActive={false}
-                      onClick={(data) => {
-                        const d = data as { vin?: string };
-                        if (d?.vin) router.push(`/app/units/${d.vin}`);
-                      }}
-                    >
-                      <LabelList
-                        dataKey="idlePercentage"
-                        position="right"
-                        formatter={(v: unknown) => `${v}%`}
-                        style={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }}
-                      />
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-              <p className="text-xs text-muted-foreground mt-2">Click a bar to view unit detail.</p>
-            </CardContent>
-          </Card>
+  const isUnit = viewMode === 'unit';
+  const metrics = isUnit ? unitMetrics : driverMetrics;
 
-          {/* Best MPG */}
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                Best MPG (Top 5)
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="h-[240px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={topMpgUnits} layout="vertical" margin={{ top: 4, right: 50, left: 8, bottom: 4 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" horizontal={false} />
-                    <XAxis type="number" stroke="hsl(var(--muted-foreground))" fontSize={11} tickLine={false} axisLine={false} />
-                    <YAxis
-                      type="category"
-                      dataKey="unitNumber"
-                      width={80}
-                      stroke="hsl(var(--muted-foreground))"
-                      fontSize={11}
-                      tickLine={false}
-                      axisLine={false}
-                      tick={{ fill: 'hsl(var(--muted-foreground))' }}
-                    />
-                    <Tooltip
-                      contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 6 }}
-                      formatter={(v: unknown) => [v as string, 'MPG'] as [string, string]}
-                    />
-                    <Bar
-                      dataKey="avgMpg"
-                      fill="#22c55e"
-                      radius={[0, 3, 3, 0]}
-                      isAnimationActive={false}
-                      onClick={(data) => {
-                        const d = data as { vin?: string };
-                        if (d?.vin) router.push(`/app/units/${d.vin}`);
-                      }}
-                    >
-                      <LabelList
-                        dataKey="avgMpg"
-                        position="right"
-                        style={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }}
-                      />
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
+  const getLabel = (m: UnitMetrics | DriverMetrics) =>
+    isUnit ? (m as UnitMetrics).unitNumber : (m as DriverMetrics).driverName;
+
+  const TOP_N = Math.min(10, metrics.length);
+
+  const withLabel = <T extends UnitMetrics | DriverMetrics>(arr: T[]) =>
+    arr.map(m => ({ ...m, label: getLabel(m) }));
+
+  const topIdlers = withLabel(
+    [...metrics].sort((a, b) => parseFloat(b.idlePercentage) - parseFloat(a.idlePercentage)).slice(0, TOP_N)
+  );
+  const bestMpg = withLabel(
+    [...metrics].sort((a, b) => parseFloat(b.avgMpg) - parseFloat(a.avgMpg)).slice(0, TOP_N)
+  );
+  const mostMiles = withLabel(
+    [...metrics].sort((a, b) => b.totalMiles - a.totalMiles).slice(0, TOP_N)
+  );
+  const mostIdleFuel = withLabel(
+    [...metrics].sort((a, b) => b.idleFuel - a.idleFuel).slice(0, TOP_N)
+  );
+
+  const sorted = [...metrics].sort((a, b) => {
+    let av: number | string, bv: number | string;
+    if (sortKey === 'label') { av = getLabel(a); bv = getLabel(b); }
+    else if (sortKey === 'avgMpg' || sortKey === 'idlePercentage') {
+      av = parseFloat(a[sortKey]); bv = parseFloat(b[sortKey]);
+    } else {
+      av = (a as unknown as Record<string, number>)[sortKey] ?? 0;
+      bv = (b as unknown as Record<string, number>)[sortKey] ?? 0;
+    }
+    if (av < bv) return sortDir === 'asc' ? -1 : 1;
+    if (av > bv) return sortDir === 'asc' ? 1 : -1;
+    return 0;
+  });
+
+  const handleSort = (key: SortKey) => {
+    if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortKey(key); setSortDir('desc'); }
+  };
+
+  const SortIcon = ({ k }: { k: SortKey }) =>
+    sortKey === k ? (
+      <span className="ml-0.5 opacity-60 text-[8px]">{sortDir === 'desc' ? '▼' : '▲'}</span>
+    ) : null;
+
+  // Format minutes → "Xh Ym"
+  const fmtMins = (mins: number) => {
+    const h = Math.floor(mins / 60);
+    const m = Math.round(mins % 60);
+    return h > 0 ? `${h}h ${m}m` : `${m}m`;
+  };
+
+  // Format decimal hours → "Xh Ym"
+  const fmtHrs = (hrs: number) => fmtMins(hrs * 60);
+
+  type NavConfirm = { label: string; href: string } | null;
+  const [navConfirm, setNavConfirm] = useState<NavConfirm>(null);
+
+  useEffect(() => {
+    if (!navConfirm) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setNavConfirm(null); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [navConfirm]);
+
+  const handleItemClick = (m: UnitMetrics | DriverMetrics) => {
+    const label = isUnit ? (m as UnitMetrics).unitNumber : (m as DriverMetrics).driverName;
+    const href = isUnit
+      ? `/app/units/${(m as UnitMetrics).unitNumber ?? (m as UnitMetrics).vin}`
+      : `/app/drivers/${(m as DriverMetrics).driverId}`;
+    setNavConfirm({ label, href });
+  };
+
+  if (metrics.length === 0) {
+    return (
+      <div className="text-center py-16 text-muted-foreground text-sm">
+        No {isUnit ? 'unit' : 'driver'} data for the selected date range.
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex gap-3">
+      {/* Left: 4 compact performer charts */}
+      <div className="w-[250px] shrink-0 flex flex-col gap-2">
+        <CompactBar
+          title="Worst Idlers"
+          data={topIdlers}
+          dataKey="idlePercentage"
+          color="#ef4444"
+          formatter={(v) => `${v}%`}
+          onBarClick={handleItemClick}
+        />
+        <CompactBar
+          title="Best MPG"
+          data={bestMpg}
+          dataKey="avgMpg"
+          color={CHART_COLORS.success}
+          formatter={(v) => `${v}`}
+          onBarClick={handleItemClick}
+        />
+        <CompactBar
+          title="Highest Miles Driven"
+          data={mostMiles}
+          dataKey="totalMiles"
+          color={CHART_COLORS.idle}
+          formatter={(v) => Math.round(Number(v)).toLocaleString()}
+          onBarClick={handleItemClick}
+        />
+        <CompactBar
+          title="Most Idle Fuel"
+          data={mostIdleFuel}
+          dataKey="idleFuel"
+          color="#f59e0b"
+          formatter={(v) => `${Number(v).toLocaleString()} gal`}
+          onBarClick={handleItemClick}
+        />
+      </div>
+
+      {/* Right: full sortable table */}
+      <div className="flex-1 min-w-0 overflow-x-auto rounded-lg border border-border self-start">
+        <Table>
+          <TableHeader>
+            <TableRow className="bg-muted hover:bg-muted">
+              {[
+                { k: 'label' as SortKey, label: isUnit ? 'Unit' : 'Driver' },
+                { k: 'totalMiles' as SortKey, label: 'Miles Driven' },
+                { k: 'avgMpg' as SortKey, label: 'MPG' },
+                { k: 'totalFuelGal' as SortKey, label: 'Total Fuel' },
+                { k: 'drivingFuelGal' as SortKey, label: 'Drive Fuel' },
+                { k: 'idlePercentage' as SortKey, label: 'Idle %' },
+                { k: 'idleFuel' as SortKey, label: 'Idle Fuel' },
+                { k: 'idleTimeMinutes' as SortKey, label: 'Idle Time' },
+                { k: 'driveTimeHrs' as SortKey, label: 'Drive Time' },
+              ].map(({ k, label }) => (
+                <TableHead
+                  key={k}
+                  className="text-muted-foreground font-semibold uppercase tracking-wide text-[10px] px-3 py-2 h-auto cursor-pointer select-none whitespace-nowrap"
+                  onClick={() => handleSort(k)}
+                >
+                  {label}<SortIcon k={k} />
+                </TableHead>
+              ))}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {sorted.map(m => {
+              const id = isUnit ? (m as UnitMetrics).vin : (m as DriverMetrics).driverId;
+              const isSelected = selectedId === id;
+              const idlePct = parseFloat(m.idlePercentage);
+              return (
+                <TableRow
+                  key={String(id)}
+                  className="cursor-pointer hover:bg-accent/50 transition-colors"
+                  style={{
+                    background: isSelected ? 'var(--accent)' : undefined,
+                    borderLeft: isSelected ? '3px solid var(--primary)' : '3px solid transparent',
+                  }}
+                  onClick={() => { onRowClick(id); handleItemClick(m); }}
+                >
+                  <TableCell className="font-semibold text-[12px] px-3 py-2">{getLabel(m)}</TableCell>
+                  <TableCell className="text-[12px] px-3 py-2 tabular-nums">{Math.round(m.totalMiles).toLocaleString()}</TableCell>
+                  <TableCell className="text-[12px] px-3 py-2 tabular-nums">{m.avgMpg}</TableCell>
+                  <TableCell className="text-[12px] px-3 py-2 tabular-nums">{m.totalFuelGal.toLocaleString()}</TableCell>
+                  <TableCell className="text-[12px] px-3 py-2 tabular-nums">{m.drivingFuelGal.toLocaleString()}</TableCell>
+                  <TableCell className={`text-[12px] px-3 py-2 tabular-nums font-semibold ${idlePct > 35 ? 'text-destructive' : idlePct > 25 ? 'text-amber-600 dark:text-amber-400' : ''}`}>
+                    {m.idlePercentage}%
+                  </TableCell>
+                  <TableCell className="text-[12px] px-3 py-2 tabular-nums">{m.idleFuel.toLocaleString()}</TableCell>
+                  <TableCell className="text-[12px] px-3 py-2 tabular-nums">{fmtMins(m.idleTimeMinutes)}</TableCell>
+                  <TableCell className="text-[12px] px-3 py-2 tabular-nums">{fmtHrs(m.driveTimeHrs)}</TableCell>
+                </TableRow>
+              );
+            })}
+            <TableRow className="bg-muted/50 font-bold border-t-2 border-border hover:bg-muted/50">
+              <TableCell className="font-bold text-[11px] px-3 py-2">Total</TableCell>
+              <TableCell className="font-bold text-[11px] px-3 py-2 tabular-nums">{Math.round(fleetTotals.totalMiles).toLocaleString()}</TableCell>
+              <TableCell className="font-bold text-[11px] px-3 py-2 tabular-nums">{fleetTotals.avgMpg}</TableCell>
+              <TableCell className="font-bold text-[11px] px-3 py-2 tabular-nums">{Math.round(fleetTotals.totalFuel).toLocaleString()}</TableCell>
+              <TableCell className="font-bold text-[11px] px-3 py-2 tabular-nums">{Math.round(fleetTotals.totalDrivingFuel).toLocaleString()}</TableCell>
+              <TableCell className="font-bold text-[11px] px-3 py-2 tabular-nums">{fleetTotals.idlePercentage}%</TableCell>
+              <TableCell className="font-bold text-[11px] px-3 py-2 tabular-nums">{Math.round(fleetTotals.totalIdleFuel).toLocaleString()}</TableCell>
+              <TableCell className="font-bold text-[11px] px-3 py-2 tabular-nums">{fmtMins(Math.round(fleetTotals.totalIdleTime))}</TableCell>
+              <TableCell className="font-bold text-[11px] px-3 py-2 tabular-nums">{fmtMins(Math.round(fleetTotals.totalDrivingTime / 60))}</TableCell>
+            </TableRow>
+          </TableBody>
+        </Table>
+      </div>
+
+      {/* Nav confirm popup */}
+      {navConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          onClick={() => setNavConfirm(null)}
+        >
+          <div
+            className="bg-card border border-border rounded-xl shadow-xl p-5 w-72 flex flex-col gap-4"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <p className="text-base font-bold leading-tight">
+                  Open {isUnit ? 'unit' : 'driver'} details page
+                </p>
+                <p className="text-sm text-muted-foreground mt-0.5">{navConfirm.label}</p>
               </div>
-              {showDriverScorecard && (
-                <div className="mt-2">
-                  <Button variant="outline" size="sm" onClick={() => router.push('/app/drivers')}>
-                    View Driver Scorecard
-                  </Button>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+              <button onClick={() => setNavConfirm(null)} className="text-muted-foreground hover:text-foreground cursor-pointer mt-0.5">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setNavConfirm(null)}
+                className="flex-1 h-8 text-xs font-medium rounded-md border border-border text-muted-foreground hover:bg-accent transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => window.open(navConfirm.href, '_blank')}
+                className="flex-1 h-8 text-xs font-medium rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                Open <ArrowRight className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

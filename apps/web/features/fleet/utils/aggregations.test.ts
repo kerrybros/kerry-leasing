@@ -23,6 +23,7 @@ const makeVehicle = (overrides: Partial<VehicleUtilization> = {}): VehicleUtiliz
   drivingTime: 32400,  // 9 hrs
   totalFuel: 100,
   idleFuel: 5,
+  drivingFuel: null,
   ...overrides,
 });
 
@@ -34,6 +35,7 @@ const makeDriver = (overrides: Partial<DriverUtilization> = {}): DriverUtilizati
   totalDistance: 300,
   idleTime: 1800,
   drivingTime: 18000,
+  utilization: null,
   drivingFuel: 60,
   idleFuel: 3,
   ...overrides,

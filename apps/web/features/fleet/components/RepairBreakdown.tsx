@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   BarChart,
   Bar,
+  Cell,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -17,6 +18,7 @@ import {
   Line,
   LabelList,
 } from 'recharts';
+import { CHART_COLORS, TOOLTIP_STYLE } from '@/features/fleet/utils/chartColors';
 
 // Types used by repair breakdown and modal (exported for fleet page state)
 export type RepairLineSummary = {
@@ -74,31 +76,28 @@ function RepairDetailsModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={onClose}>
       <div
-        className="bg-bg-card rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col border border-border"
+        className="bg-card rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col border border-border"
         onClick={e => e.stopPropagation()}
       >
-        <div className="p-4 border-b border-border flex justify-between items-center bg-bg-tertiary">
+        <div className="p-4 border-b border-border flex justify-between items-center bg-muted">
           <div>
-            <h3 className="text-lg font-bold text-text-primary">Repair Details</h3>
-            <div className="text-sm text-text-secondary mt-1">
-              Unit: <span className="font-semibold text-text-primary">{invoice.unitNumber}</span>
+            <h3 className="text-lg font-bold">Repair Details</h3>
+            <div className="text-sm text-muted-foreground mt-1">
+              Unit: <span className="font-semibold text-foreground">{invoice.unitNumber}</span>
               {' '}• Repair Completed Date: {new Date(invoice.invoiceDate).toLocaleDateString()}
-              {isDamageInvoice(invoice) && (
-                <Badge variant="destructive" className="ml-2">Damage</Badge>
-              )}
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-2 hover:bg-bg-hover rounded-lg transition-colors text-text-secondary hover:text-text-primary"
+            className="p-2 hover:bg-accent rounded-lg transition-colors text-muted-foreground hover:text-foreground"
           >
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
         </div>
-        <div className="p-6 overflow-y-auto">
-          <h4 className="text-sm font-bold text-text-secondary uppercase tracking-wider mb-3">Service Lines</h4>
+        <div className="p-6 overflow-y-auto bg-card">
+          <h4 className="text-sm font-bold text-muted-foreground uppercase tracking-wider mb-3">Service Lines</h4>
           <div className="space-y-3">
             {invoice.lines
               .filter((line: RepairLineSummary) => line.description && line.description !== '(No description)')
@@ -108,16 +107,16 @@ function RepairDetailsModal({
                   className={`p-4 rounded-lg border flex flex-col gap-1 ${
                     isDamageLine(line)
                       ? 'bg-destructive/5 border-destructive/30'
-                      : 'bg-bg-secondary border-border'
+                      : 'bg-muted/50 border-border'
                   }`}
                 >
                   <div className="flex items-center gap-2">
-                    <span className="font-semibold text-text-primary">{line.description}</span>
+                    <span className="font-semibold text-foreground">{line.description}</span>
                     {isDamageLine(line) && (
                       <Badge variant="destructive">Damage</Badge>
                     )}
                   </div>
-                  <div className="text-sm text-text-secondary">
+                  <div className="text-sm text-muted-foreground">
                     {line.component || 'N/A'} / {line.system || 'N/A'}
                   </div>
                 </div>
@@ -138,16 +137,20 @@ export function RepairBreakdown({
   error,
   startDate,
   endDate,
+  onUnitSelect,
 }: {
   units: RepairUnitSummary[];
   loading: boolean;
   error: string | null;
   startDate: string;
   endDate: string;
+  onUnitSelect?: (unit: string | null) => void;
 }) {
   const [selectedInvoice, setSelectedInvoice] = useState<RepairInvoiceWithUnit | null>(null);
   const [selectedMatrixUnit, setSelectedMatrixUnit] = useState<string | null>(null);
   const [unitSearchQuery, setUnitSearchQuery] = useState('');
+  const [jobsSortKey, setJobsSortKey] = useState<'unit' | 'count' | 'damageCount'>('unit');
+  const [jobsSortDir, setJobsSortDir] = useState<'asc' | 'desc'>('asc');
 
   const dateFilteredUnits = useMemo(() => {
     return units
@@ -214,10 +217,33 @@ export function RepairBreakdown({
     return { rows: data, grandTotal, grandDamage };
   }, [dateFilteredUnits]);
 
+  const sortedJobRows = useMemo(() => {
+    const rows = [...jobsData.rows];
+    rows.sort((a, b) => {
+      let cmp = 0;
+      if (jobsSortKey === 'unit') cmp = a.unitNumber.localeCompare(b.unitNumber, undefined, { numeric: true });
+      else if (jobsSortKey === 'count') cmp = a.count - b.count;
+      else cmp = a.damageCount - b.damageCount;
+      return jobsSortDir === 'asc' ? cmp : -cmp;
+    });
+    return rows;
+  }, [jobsData.rows, jobsSortKey, jobsSortDir]);
+
+  const handleJobsSort = (key: 'unit' | 'count' | 'damageCount') => {
+    if (jobsSortKey === key) setJobsSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setJobsSortKey(key); setJobsSortDir(key === 'unit' ? 'asc' : 'desc'); }
+  };
+
+  // Source for charts — respects the selected unit filter
+  const chartSourceUnits = useMemo(() => {
+    if (!selectedMatrixUnit) return dateFilteredUnits;
+    return dateFilteredUnits.filter(u => u.unitNumber === selectedMatrixUnit);
+  }, [dateFilteredUnits, selectedMatrixUnit]);
+
   // Component/System breakdown data
   const categoryBreakdown = useMemo(() => {
     const map = new Map<string, { count: number; isDamage: boolean }>();
-    dateFilteredUnits.forEach(u => {
+    chartSourceUnits.forEach(u => {
       u.invoices.forEach(inv => {
         inv.lines.forEach(line => {
           if (!line.component && !line.system) return;
@@ -233,12 +259,12 @@ export function RepairBreakdown({
       .map(([category, { count, isDamage }]) => ({ category, count, isDamage }))
       .sort((a, b) => b.count - a.count)
       .slice(0, 12);
-  }, [dateFilteredUnits]);
+  }, [chartSourceUnits]);
 
   // Repair frequency trend (jobs per month)
   const repairTrend = useMemo(() => {
     const monthMap = new Map<string, number>();
-    dateFilteredUnits.forEach(u => {
+    chartSourceUnits.forEach(u => {
       const seen = new Set<string>();
       u.invoices.forEach(inv => {
         const jobId = inv.orderNumber || inv.invoiceNumber;
@@ -256,14 +282,12 @@ export function RepairBreakdown({
           .toLocaleString('default', { month: 'short', year: '2-digit' });
         return { month: label, count };
       });
-  }, [dateFilteredUnits]);
+  }, [chartSourceUnits]);
 
   const handleMatrixClick = (unitNumber: string) => {
-    if (selectedMatrixUnit === unitNumber) {
-      setSelectedMatrixUnit(null);
-    } else {
-      setSelectedMatrixUnit(unitNumber);
-    }
+    const next = selectedMatrixUnit === unitNumber ? null : unitNumber;
+    setSelectedMatrixUnit(next);
+    onUnitSelect?.(next ? next.split(' - ')[0] : null);
   };
 
   if (loading) {
@@ -289,38 +313,53 @@ export function RepairBreakdown({
       {/* Main two-panel layout */}
       <div style={{ display: 'flex', gap: 16, height: 480 }}>
         {/* LEFT: Unit job count list */}
-        <div style={{ width: 260, flexShrink: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRadius: 6, border: '1px solid #333' }} className="bg-card">
-          <div className="bg-primary-dark text-white" style={{ padding: '8px 0 6px', flexShrink: 0, textAlign: 'center', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+        <div style={{ width: 340, flexShrink: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRadius: 6 }} className="bg-card border border-border">
+          <div className="bg-muted text-foreground border-b border-border" style={{ padding: '8px 0 6px', flexShrink: 0, textAlign: 'center', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
             Number of Jobs Done
           </div>
           <div style={{ flex: 1, overflowY: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
-                <tr style={{ position: 'sticky', top: 0, zIndex: 2, background: '#1a1500', color: 'white' }}>
-                  <th style={{ textAlign: 'center', fontSize: 10, fontWeight: 600, textTransform: 'uppercase', padding: '5px 8px', borderBottom: '1px solid rgba(255,255,255,0.2)', borderRight: '1px solid rgba(255,255,255,0.15)', background: 'inherit' }}>Unit</th>
-                  <th style={{ textAlign: 'center', fontSize: 10, fontWeight: 600, textTransform: 'uppercase', padding: '5px 8px', width: 55, borderBottom: '1px solid rgba(255,255,255,0.2)', borderRight: '1px solid rgba(255,255,255,0.15)', background: 'inherit' }}>Jobs</th>
-                  <th style={{ textAlign: 'center', fontSize: 10, fontWeight: 600, textTransform: 'uppercase', padding: '5px 8px', width: 55, borderBottom: '1px solid rgba(255,255,255,0.2)', background: 'inherit' }}>Dmg</th>
+                <tr className="bg-muted text-foreground sticky top-0 z-[2]">
+                  {(['unit', 'count', 'damageCount'] as const).map((key, idx) => {
+                    const labels = ['Unit', 'Jobs', 'Damage'];
+                    const widths = [undefined, 60, 80];
+                    const isActive = jobsSortKey === key;
+                    return (
+                      <th
+                        key={key}
+                        onClick={() => handleJobsSort(key)}
+                        className={`border-b border-border ${idx < 2 ? 'border-r border-r-border' : ''} ${key === 'damageCount' ? 'text-destructive' : ''} select-none`}
+                        style={{ textAlign: 'center', fontSize: 10, fontWeight: 600, textTransform: 'uppercase', padding: '5px 8px', width: widths[idx], cursor: 'pointer', userSelect: 'none' }}
+                      >
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, justifyContent: 'center' }}>
+                          {labels[idx]}
+                          {isActive && <span style={{ fontSize: 9, lineHeight: 1 }}>{jobsSortDir === 'asc' ? '▲' : '▼'}</span>}
+                        </span>
+                      </th>
+                    );
+                  })}
                 </tr>
               </thead>
               <tbody>
-                {jobsData.rows.length === 0 ? (
+                {sortedJobRows.length === 0 ? (
                   <tr><td colSpan={3} style={{ textAlign: 'center', padding: 16, fontSize: 12 }} className="text-muted-foreground">No data</td></tr>
                 ) : (
-                  jobsData.rows.map((row) => (
+                  sortedJobRows.map((row) => (
                     <tr
                       key={row.unitNumber}
                       onClick={() => handleMatrixClick(row.unitNumber)}
                       style={{
                         cursor: 'pointer',
                         fontSize: 12,
-                        background: selectedMatrixUnit === row.unitNumber ? 'hsl(var(--accent))' : undefined,
-                        borderLeft: selectedMatrixUnit === row.unitNumber ? '3px solid hsl(var(--primary))' : '3px solid transparent',
+                        background: selectedMatrixUnit === row.unitNumber ? 'var(--accent)' : undefined,
+                        borderLeft: selectedMatrixUnit === row.unitNumber ? '3px solid var(--primary)' : '3px solid transparent',
                       }}
                       className="hover:bg-accent/30"
                     >
-                      <td style={{ padding: '3px 8px', fontWeight: 700, borderBottom: '1px solid #333', borderRight: '1px solid #2a2a2a' }}>{row.unitNumber.split(' - ')[0]}</td>
-                      <td style={{ padding: '3px 8px', fontWeight: 700, textAlign: 'center', width: 55, borderBottom: '1px solid #333', borderRight: '1px solid #2a2a2a' }}>{row.count}</td>
-                      <td style={{ padding: '3px 8px', textAlign: 'center', width: 55, borderBottom: '1px solid #333' }}>
+                      <td className="border-b border-border border-r border-r-border" style={{ padding: '3px 8px', fontWeight: 700 }}>{row.unitNumber.split(' - ')[0]}</td>
+                      <td className="border-b border-border border-r border-r-border" style={{ padding: '3px 8px', fontWeight: 700, textAlign: 'center', width: 60 }}>{row.count}</td>
+                      <td className="border-b border-border" style={{ padding: '3px 8px', textAlign: 'center', width: 80 }}>
                         {row.damageCount > 0 ? (
                           <span className="text-destructive" style={{ fontWeight: 600 }}>{row.damageCount}</span>
                         ) : (
@@ -332,10 +371,12 @@ export function RepairBreakdown({
                 )}
               </tbody>
               <tfoot>
-                <tr style={{ position: 'sticky', bottom: 0, zIndex: 2, background: '#1a1500', color: 'white' }}>
-                  <td style={{ padding: '5px 8px', fontWeight: 700, fontSize: 12, borderTop: '1px solid rgba(255,255,255,0.1)', borderRight: '1px solid rgba(255,255,255,0.15)', background: 'inherit' }}>Total</td>
-                  <td style={{ padding: '5px 8px', fontWeight: 700, fontSize: 12, textAlign: 'center', width: 55, borderTop: '1px solid rgba(255,255,255,0.1)', borderRight: '1px solid rgba(255,255,255,0.15)', background: 'inherit' }}>{jobsData.grandTotal}</td>
-                  <td style={{ padding: '5px 8px', fontWeight: 700, fontSize: 12, textAlign: 'center', width: 55, borderTop: '1px solid rgba(255,255,255,0.1)', background: 'inherit' }}>{jobsData.grandDamage > 0 ? jobsData.grandDamage : '—'}</td>
+                <tr className="bg-muted text-foreground sticky bottom-0 z-[2]">
+                  <td className="border-t border-border border-r border-r-border" style={{ padding: '5px 8px', fontWeight: 700, fontSize: 12 }}>Total</td>
+                  <td className="border-t border-border border-r border-r-border" style={{ padding: '5px 8px', fontWeight: 700, fontSize: 12, textAlign: 'center', width: 60 }}>{jobsData.grandTotal}</td>
+                  <td className="border-t border-border" style={{ padding: '5px 8px', fontWeight: 700, fontSize: 12, textAlign: 'center', width: 80 }}>
+                    <span className={jobsData.grandDamage > 0 ? 'text-destructive' : ''}>{jobsData.grandDamage > 0 ? jobsData.grandDamage : '—'}</span>
+                  </td>
                 </tr>
               </tfoot>
             </table>
@@ -343,13 +384,13 @@ export function RepairBreakdown({
         </div>
 
         {/* RIGHT: Invoice list */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRadius: 6, border: '1px solid #333' }} className="bg-card">
-          <div className="bg-primary-dark text-white" style={{ padding: '10px 12px 8px', flexShrink: 0 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-              <span style={{ fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRadius: 6 }} className="bg-card border border-border">
+          <div className="bg-muted border-b border-border" style={{ padding: '8px 12px 6px', flexShrink: 0 }}>
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', marginBottom: 6, position: 'relative' }}>
+              <span className="text-foreground" style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                 {selectedMatrixUnit ? `Repairs: Unit ${selectedMatrixUnit.split(' - ')[0]}` : 'All Repairs'}
               </span>
-              <span style={{ fontSize: 12, opacity: 0.8 }}>{invoices.length} repairs</span>
+              <span className="text-muted-foreground" style={{ fontSize: 11, position: 'absolute', right: 0 }}>{invoices.length} repairs</span>
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
               <input
@@ -358,14 +399,16 @@ export function RepairBreakdown({
                 value={unitSearchQuery}
                 onChange={(e) => setUnitSearchQuery(e.target.value)}
                 onClick={(e) => e.stopPropagation()}
-                style={{ flex: 1, padding: '5px 10px', borderRadius: 4, fontSize: 13, background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', color: 'white', outline: 'none' }}
+                className="bg-background text-foreground border border-border placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                style={{ flex: 1, padding: '4px 8px', borderRadius: 4, fontSize: 12 }}
               />
               {selectedMatrixUnit && (
                 <button
                   onClick={() => setSelectedMatrixUnit(null)}
-                  style={{ fontSize: 11, background: 'rgba(255,255,255,0.2)', color: 'white', padding: '5px 10px', borderRadius: 4, border: 'none', cursor: 'pointer' }}
+                  className="bg-accent text-accent-foreground hover:bg-accent/80"
+                  style={{ fontSize: 10, padding: '4px 8px', borderRadius: 4, border: 'none', cursor: 'pointer' }}
                 >
-                  Clear Filter
+                  Clear
                 </button>
               )}
             </div>
@@ -373,43 +416,39 @@ export function RepairBreakdown({
           <div style={{ flex: 1, overflowY: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
-                <tr className="bg-primary-dark text-white" style={{ position: 'sticky', top: 0, zIndex: 1 }}>
-                  <th style={{ textAlign: 'center', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', padding: '6px 10px', width: '20%', borderBottom: '1px solid rgba(255,255,255,0.2)', borderRight: '1px solid rgba(255,255,255,0.15)' }}>Date</th>
-                  <th style={{ textAlign: 'center', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', padding: '6px 10px', width: '15%', borderBottom: '1px solid rgba(255,255,255,0.2)', borderRight: '1px solid rgba(255,255,255,0.15)' }}>Unit</th>
-                  <th style={{ textAlign: 'center', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', padding: '6px 10px', borderBottom: '1px solid rgba(255,255,255,0.2)', borderRight: '1px solid rgba(255,255,255,0.15)' }}>Description</th>
-                  <th style={{ textAlign: 'center', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', padding: '6px 10px', width: 90, borderBottom: '1px solid rgba(255,255,255,0.2)' }}>Action</th>
+                <tr className="bg-muted text-foreground sticky top-0 z-[2]">
+                  <th className="border-b border-border border-r border-r-border" style={{ textAlign: 'center', fontSize: 10, fontWeight: 600, textTransform: 'uppercase', padding: '5px 8px' }}>Date</th>
+                  <th className="border-b border-border border-r border-r-border" style={{ textAlign: 'center', fontSize: 10, fontWeight: 600, textTransform: 'uppercase', padding: '5px 8px' }}>Unit</th>
+                  <th className="border-b border-border" style={{ textAlign: 'center', fontSize: 10, fontWeight: 600, textTransform: 'uppercase', padding: '5px 8px', width: 80 }}>Action</th>
                 </tr>
               </thead>
               <tbody>
                 {invoices.length === 0 ? (
-                  <tr><td colSpan={4} style={{ textAlign: 'center', padding: 32, fontSize: 13 }} className="text-muted-foreground">
+                  <tr><td colSpan={3} style={{ textAlign: 'center', padding: 16, fontSize: 12 }} className="text-muted-foreground">
                     {units.length === 0 ? 'No repair data available' : 'No invoices found for selected filters'}
                   </td></tr>
                 ) : (
                   invoices.map((inv) => {
-                    const parts = inv.unitNumber.split(' - ');
-                    const unitNum = parts[0];
-                    const unitDesc = parts.slice(1).join(' - ') || '';
+                    const unitNum = inv.unitNumber.split(' - ')[0];
                     const isDmg = isDamageInvoice(inv);
                     return (
                       <tr
                         key={`${inv.unitNumber}-${inv.invoiceNumber}-${inv.invoiceDate}`}
-                        style={{ fontSize: 12, background: isDmg ? 'rgba(220,38,38,0.05)' : undefined }}
+                        style={{ fontSize: 12, background: isDmg ? 'color-mix(in oklch, var(--destructive) 5%, transparent)' : undefined }}
                         className={isDmg ? 'hover:bg-destructive/10' : 'hover:bg-accent/30'}
                       >
-                        <td style={{ padding: '5px 10px', width: '20%', borderBottom: '1px solid #333', borderRight: '1px solid #2a2a2a' }}>{new Date(inv.invoiceDate).toLocaleDateString()}</td>
-                        <td style={{ padding: '5px 10px', width: '15%', fontWeight: 700, borderBottom: '1px solid #333', borderRight: '1px solid #2a2a2a' }}>
+                        <td className="border-b border-border border-r border-r-border" style={{ padding: '3px 8px', whiteSpace: 'nowrap' }}>{new Date(inv.invoiceDate).toLocaleDateString()}</td>
+                        <td className="border-b border-border border-r border-r-border" style={{ padding: '3px 8px', fontWeight: 700, whiteSpace: 'nowrap' }}>
                           {unitNum}
-                          {isDmg && <Badge variant="destructive" className="ml-1 text-[10px] px-1 py-0 leading-tight">DMG</Badge>}
+                          {isDmg && <Badge variant="destructive" className="ml-1 text-[10px] px-1 py-0 leading-tight">Damage</Badge>}
                         </td>
-                        <td style={{ padding: '5px 10px', borderBottom: '1px solid #333', borderRight: '1px solid #2a2a2a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 0 }} className="text-muted-foreground">{unitDesc}</td>
-                        <td style={{ padding: '5px 10px', width: 90, textAlign: 'center', borderBottom: '1px solid #333' }}>
+                        <td className="border-b border-border" style={{ padding: '3px 8px', width: 80, textAlign: 'center', whiteSpace: 'nowrap' }}>
                           <button
                             onClick={() => setSelectedInvoice(inv)}
-                            style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, border: '1px solid #444', background: 'transparent', color: 'inherit', cursor: 'pointer' }}
-                            className="hover:bg-accent"
+                            className="border border-border hover:bg-accent text-foreground"
+                            style={{ fontSize: 11, padding: '1px 6px', borderRadius: 3, background: 'transparent', cursor: 'pointer' }}
                           >
-                            View Details
+                            Details
                           </button>
                         </td>
                       </tr>
@@ -433,54 +472,59 @@ export function RepairBreakdown({
               </CardTitle>
             </CardHeader>
             <CardContent>
-            <div style={{ height: 340 }}>
+            <div style={{ height: Math.max(260, categoryBreakdown.length * 26 + 20) }} className="[&_.recharts-wrapper]:outline-none [&_svg]:outline-none">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart
                   data={categoryBreakdown}
                   layout="vertical"
-                  margin={{ top: 4, right: 40, left: 8, bottom: 4 }}
+                  margin={{ top: 2, right: 44, left: 4, bottom: 2 }}
                 >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#333" horizontal={false} />
                   <XAxis
                     type="number"
-                    stroke="#888"
-                    fontSize={11}
+                    stroke={CHART_COLORS.axis}
+                    fontSize={10}
                     tickLine={false}
                     axisLine={false}
-                    tick={{ fill: '#888' }}
+                    tick={{ fill: CHART_COLORS.tick }}
+                    width={60}
                   />
                   <YAxis
                     type="category"
                     dataKey="category"
-                    width={180}
-                    stroke="#888"
-                    fontSize={11}
+                    width={210}
+                    stroke={CHART_COLORS.axis}
+                    fontSize={9.5}
                     tickLine={false}
                     axisLine={false}
-                    tick={{ fill: '#aaa' }}
+                    tick={{ fill: CHART_COLORS.tick }}
+                    tickFormatter={(v: string) => v.length > 34 ? v.slice(0, 33) + '…' : v}
                   />
                   <Tooltip
-                    contentStyle={{
-                      background: '#1a1a1a',
-                      border: '1px solid #444',
-                      borderRadius: 4,
-                      color: '#ccc',
-                    }}
-                    formatter={(value) => [value as string, 'Line Items']}
+                    contentStyle={TOOLTIP_STYLE}
+                    formatter={(value) => [Number(value).toLocaleString(), 'Line Items']}
                   />
                   <Bar
                     dataKey="count"
-                    radius={[0, 3, 3, 0]}
+                    radius={[0, 2, 2, 0]}
                     isAnimationActive={false}
-                    fill="#d9a528"
+                    fill={CHART_COLORS.idle}
+                    barSize={13}
                   >
                     {categoryBreakdown.map((entry, index) => (
-                      <rect key={index} fill={entry.isDamage ? '#ef4444' : '#d9a528'} />
+                      <Cell
+                        key={index}
+                        fill={
+                          entry.isDamage || entry.category.toLowerCase().includes('damage')
+                            ? '#ef4444'
+                            : CHART_COLORS.idle
+                        }
+                      />
                     ))}
                     <LabelList
                       dataKey="count"
                       position="right"
-                      style={{ fill: '#aaa', fontSize: 11 }}
+                      style={{ fill: CHART_COLORS.tick, fontSize: 10 }}
+                      formatter={(value: unknown) => (value as number).toLocaleString()}
                     />
                   </Bar>
                 </BarChart>
@@ -488,11 +532,11 @@ export function RepairBreakdown({
             </div>
             <div className="flex items-center gap-4 text-xs text-muted-foreground border-t border-border pt-3 mt-1">
               <span className="flex items-center gap-1">
-                <span className="inline-block w-3 h-3 rounded-sm bg-primary"></span>
+                <span className="inline-block w-3 h-3 rounded-sm" style={{ background: CHART_COLORS.idle }}></span>
                 Standard
               </span>
               <span className="flex items-center gap-1">
-                <span className="inline-block w-3 h-3 rounded-sm bg-destructive"></span>
+                <span className="inline-block w-3 h-3 rounded-sm bg-[#ef4444]"></span>
                 Damage-flagged
               </span>
             </div>
@@ -507,48 +551,43 @@ export function RepairBreakdown({
               </CardTitle>
             </CardHeader>
             <CardContent>
-            <div style={{ height: 340 }}>
+            <div style={{ height: 340 }} className="[&_.recharts-wrapper]:outline-none [&_svg]:outline-none">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={repairTrend} margin={{ top: 20, right: 30, left: 10, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#333" vertical={false} />
+                  <CartesianGrid strokeDasharray="3 3" stroke={CHART_COLORS.grid} vertical={false} />
                   <XAxis
                     dataKey="month"
-                    stroke="#888"
+                    stroke={CHART_COLORS.axis}
                     fontSize={11}
                     tickLine={false}
                     axisLine={false}
-                    tick={{ fill: '#aaa' }}
+                    tick={{ fill: CHART_COLORS.tick }}
                   />
                   <YAxis
-                    stroke="#888"
+                    stroke={CHART_COLORS.axis}
                     fontSize={11}
                     tickLine={false}
                     axisLine={false}
                     width={30}
-                    tick={{ fill: '#aaa' }}
+                    tick={{ fill: CHART_COLORS.tick }}
                   />
                   <Tooltip
-                    contentStyle={{
-                      background: '#1a1a1a',
-                      border: '1px solid #444',
-                      borderRadius: 4,
-                      color: '#ccc',
-                    }}
-                    formatter={(value) => [value as string, 'Jobs']}
+                    contentStyle={TOOLTIP_STYLE}
+                    formatter={(value) => [Number(value).toLocaleString(), 'Jobs']}
                   />
                   <Line
                     type="monotone"
                     dataKey="count"
-                    stroke="#d9a528"
+                    stroke={CHART_COLORS.idle}
                     strokeWidth={4}
-                    dot={{ fill: '#d9a528', r: 5, strokeWidth: 0 }}
+                    dot={{ fill: CHART_COLORS.idle, r: 5, strokeWidth: 0 }}
                     activeDot={{ r: 7 }}
                   >
                     <LabelList
                       dataKey="count"
                       position="top"
                       offset={10}
-                      style={{ fill: '#aaa', fontSize: 11, fontWeight: 600 }}
+                      style={{ fill: CHART_COLORS.tick, fontSize: 11, fontWeight: 600 }}
                     />
                   </Line>
                 </LineChart>

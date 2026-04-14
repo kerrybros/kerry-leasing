@@ -30,7 +30,7 @@ function isDamageRepairLine(line: RepairLine): boolean {
   );
 }
 
-export function useUnitData(vin: string) {
+export function useUnitData(vin: string, startDate?: string, endDate?: string) {
   const { organization } = useOrganization();
   const unitQuery = useUnitDetailQuery(vin);
   const orgSettingsQuery = useOrgSettingsQuery();
@@ -38,6 +38,7 @@ export function useUnitData(vin: string) {
   const vehicleUtilQuery = useVehicleUtilizationQuery();
 
   const loading = unitQuery.isLoading;
+  const isRefetching = unitQuery.isFetching && !unitQuery.isLoading;
   const error = (unitQuery.error as Error | null)?.message ?? null;
   const unitData = unitQuery.data;
 
@@ -56,8 +57,22 @@ export function useUnitData(vin: string) {
     };
   }, [unitData, vin, organization?.name]);
 
-  const telematicsData = useMemo(() => unitData?.telematics.history ?? [], [unitData]);
+  // All raw records from the API — never filtered
+  const rawTelematicsData = useMemo(() => unitData?.telematics.history ?? [], [unitData]);
+
+  // Date-filtered view — used for all KPI and chart computations
+  const telematicsData = useMemo(() => {
+    if (!startDate && !endDate) return rawTelematicsData;
+    return rawTelematicsData.filter(d => {
+      if (startDate && d.date < startDate) return false;
+      if (endDate && d.date > endDate) return false;
+      return true;
+    });
+  }, [rawTelematicsData, startDate, endDate]);
+
   const repairLines: RepairLine[] = useMemo(() => unitData?.repairs.history ?? [], [unitData]);
+  const liveStats = useMemo(() => unitData?.liveStats ?? null, [unitData]);
+  const safetyEvents = useMemo(() => unitData?.safetyEvents ?? [], [unitData]);
 
   const repairJobs = useMemo(() => {
     const map = new Map<string, RepairLine[]>();
@@ -105,15 +120,10 @@ export function useUnitData(vin: string) {
   }, [repairLines]);
 
   const overviewSummary = useMemo(() => {
-    const today = new Date();
-    const cutOff = new Date();
-    cutOff.setDate(today.getDate() - 30);
-    const cutOffDate = cutOff.toISOString().split('T')[0];
-    const recent = telematicsData.filter(d => d.date >= cutOffDate);
-    const totalMiles = recent.reduce((s, d) => s + (d.totalDistance || 0), 0);
-    const totalIdleTime = recent.reduce((s, d) => s + (d.idleTime || 0), 0);
-    const totalFuel = recent.reduce((s, d) => s + (d.totalFuel || 0), 0);
-    const idleFuel = recent.reduce((s, d) => s + (d.idleFuel || 0), 0);
+    const totalMiles = telematicsData.reduce((s, d) => s + (d.totalDistance || 0), 0);
+    const totalIdleTime = telematicsData.reduce((s, d) => s + (d.idleTime || 0), 0);
+    const totalFuel = telematicsData.reduce((s, d) => s + (d.totalFuel || 0), 0);
+    const idleFuel = telematicsData.reduce((s, d) => s + (d.idleFuel || 0), 0);
     const avgMpg = totalFuel > 0 ? totalMiles / totalFuel : 0;
     const idleHours = totalIdleTime / 3600;
     return { totalMiles, avgMpg, idleHours, totalFuel, idleFuel };
@@ -150,22 +160,42 @@ export function useUnitData(vin: string) {
           idlePercentage: engineOn > 0 ? parseFloat(((data.totalIdleTime / engineOn) * 100).toFixed(2)) : 0,
           idleFuel: Math.round(data.totalIdleFuel),
           idleTimeMinutes: Math.round(data.totalIdleTime / 60),
+          totalFuel: parseFloat(data.totalFuel.toFixed(2)),
+          drivingFuel: parseFloat(Math.max(0, data.totalFuel - data.totalIdleFuel).toFixed(2)),
         };
       });
   }, [telematicsData]);
 
+  // Compute all-time totals directly from raw records to avoid rounding errors
+  // from the monthly aggregation step (which rounds avgMpg to 2 decimal places).
   const totals = useMemo(() => {
-    return monthlyMetrics.reduce((acc, m) => ({
-      totalMiles: acc.totalMiles + m.totalMiles,
-      totalIdleFuel: acc.totalIdleFuel + m.idleFuel,
-      totalIdleTime: acc.totalIdleTime + m.idleTimeMinutes,
-      totalFuel: acc.totalFuel + (m.totalMiles / (m.avgMpg || 1)),
-    }), { totalMiles: 0, totalIdleFuel: 0, totalIdleTime: 0, totalFuel: 0 });
-  }, [monthlyMetrics]);
+    let totalMiles = 0, totalFuel = 0, totalIdleFuel = 0;
+    let totalIdleTimeSec = 0, totalDrivingTimeSec = 0;
+    telematicsData.forEach(d => {
+      totalMiles     += d.totalDistance || 0;
+      totalFuel      += d.totalFuel     || 0;
+      totalIdleFuel  += d.idleFuel      || 0;
+      totalIdleTimeSec   += d.idleTime    || 0;
+      totalDrivingTimeSec += d.drivingTime || 0;
+    });
+    return {
+      totalMiles: Math.round(totalMiles),
+      totalFuel,
+      totalIdleFuel: Math.round(totalIdleFuel),
+      totalIdleTime: Math.round(totalIdleTimeSec / 60),   // minutes for display
+      totalIdleTimeSec,
+      totalDrivingTimeSec,
+    };
+  }, [telematicsData]);
 
-  const overallAvgMpg = totals.totalFuel > 0 ? (totals.totalMiles / totals.totalFuel).toFixed(2) : '0.00';
-  const overallIdlePercentage = telematicsData.length > 0
-    ? ((totals.totalIdleTime * 60) / (telematicsData.length * 86400) * 100).toFixed(2)
+  const overallAvgMpg = totals.totalFuel > 0
+    ? (totals.totalMiles / totals.totalFuel).toFixed(2)
+    : '0.00';
+
+  // Idle % = idle engine-on time / total engine-on time (not % of calendar day)
+  const engineOnSec = totals.totalIdleTimeSec + totals.totalDrivingTimeSec;
+  const overallIdlePercentage = engineOnSec > 0
+    ? ((totals.totalIdleTimeSec / engineOnSec) * 100).toFixed(2)
     : '0.00';
 
   const fleetAvg = useMemo(() => {
@@ -202,8 +232,10 @@ export function useUnitData(vin: string) {
 
   return {
     loading,
+    isRefetching,
     error,
     unit,
+    rawTelematicsData,
     telematicsData,
     repairLines,
     repairJobs,
@@ -217,5 +249,7 @@ export function useUnitData(vin: string) {
     overallIdlePercentage,
     vsFleet,
     isDamageRepairLine,
+    liveStats,
+    safetyEvents,
   };
 }

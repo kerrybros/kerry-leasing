@@ -2,15 +2,22 @@
 
 import Link from 'next/link';
 import { CalendarClock, Settings, FileText, FileSpreadsheet, Wrench, Radio, AlertTriangle, CheckCircle } from 'lucide-react';
-import { useOrgSettingsQuery } from '@/hooks/useDataQueries';
+import { useOrgSettingsQuery, useServicePlanSummaryQuery } from '@/hooks/useDataQueries';
 import { useOrganization } from '@clerk/nextjs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
-function getDaysUntilRenewal(startDate: string | null, termYears: number | null): number | null {
+function getRenewalDate(startDate: string | null, termYears: number | null): Date | null {
   if (!startDate || !termYears) return null;
   const start = new Date(startDate);
-  const renewal = new Date(start);
-  renewal.setFullYear(renewal.getFullYear() + termYears);
+  // Renewal is the 1st of the month following the contract end date
+  const end = new Date(start);
+  end.setFullYear(end.getFullYear() + termYears);
+  return new Date(end.getFullYear(), end.getMonth() + 1, 1);
+}
+
+function getDaysUntilRenewal(startDate: string | null, termYears: number | null): number | null {
+  const renewal = getRenewalDate(startDate, termYears);
+  if (!renewal) return null;
   const today = new Date();
   const diff = renewal.getTime() - today.getTime();
   return Math.ceil(diff / (1000 * 60 * 60 * 24));
@@ -21,16 +28,14 @@ function formatDate(dateStr: string | null): string {
   return new Date(dateStr).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
 }
 
-function getRenewalDate(startDate: string | null, termYears: number | null): string {
-  if (!startDate || !termYears) return '—';
-  const start = new Date(startDate);
-  const renewal = new Date(start);
-  renewal.setFullYear(renewal.getFullYear() + termYears);
+function formatRenewalDate(startDate: string | null, termYears: number | null): string {
+  const renewal = getRenewalDate(startDate, termYears);
+  if (!renewal) return '—';
   return renewal.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
 }
 
 const quickLinks = [
-  { label: 'Org Settings',  href: '/app/admin/org-settings', icon: Settings,       description: 'Customer info, contract term, service URL' },
+  { label: 'Customer Settings',  href: '/app/admin/org-settings', icon: Settings,       description: 'Customer info, contract term, service URL' },
   { label: 'Service Plan',  href: '/app/admin/service-plan',  icon: Wrench,         description: 'Units on the lease program' },
   { label: 'Telematics',    href: '/app/admin/telematics',    icon: Radio,          description: 'Telematics provider configuration' },
   { label: 'Contract',      href: '/app/admin/contract',      icon: FileText,       description: 'Active contract and version history' },
@@ -39,7 +44,11 @@ const quickLinks = [
 
 export default function AdminOverviewPage() {
   const { data: orgSettings, isLoading } = useOrgSettingsQuery();
+  const { data: servicePlanData, isLoading: isPlanLoading } = useServicePlanSummaryQuery();
   const { organization } = useOrganization();
+
+  const planSummary = servicePlanData?.summary;
+  const unmatchedCount = planSummary?.unmatched ?? 0;
 
   const daysUntilRenewal = getDaysUntilRenewal(
     orgSettings?.contractStartDate ?? null,
@@ -82,7 +91,7 @@ export default function AdminOverviewPage() {
               <div className="flex flex-col gap-2">
                 <p className="text-sm text-muted-foreground">Contract term not configured.</p>
                 <Link href="/app/admin/org-settings" className="text-sm text-primary underline-offset-4 hover:underline">
-                  Configure in Org Settings →
+                  Configure in Customer Settings →
                 </Link>
               </div>
             ) : (
@@ -97,7 +106,7 @@ export default function AdminOverviewPage() {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Renewal date</span>
-                  <span className="font-medium">{getRenewalDate(orgSettings.contractStartDate, orgSettings.contractTermYears)}</span>
+                  <span className="font-medium">{formatRenewalDate(orgSettings.contractStartDate, orgSettings.contractTermYears)}</span>
                 </div>
                 <div className={`flex items-center gap-1.5 mt-2 font-semibold ${renewalColor}`}>
                   {renewalIcon}
@@ -145,6 +154,56 @@ export default function AdminOverviewPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Service Plan Status */}
+      <Card className={unmatchedCount > 0 ? 'border-amber-400 dark:border-amber-500' : ''}>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center justify-between text-base">
+            <span className="flex items-center gap-2">
+              <Wrench className="h-4 w-4" />
+              Service Plan
+            </span>
+            {unmatchedCount > 0 && (
+              <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400">
+                <AlertTriangle className="h-3 w-3" />
+                {unmatchedCount} unit{unmatchedCount !== 1 ? 's' : ''} need attention
+              </span>
+            )}
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {isPlanLoading ? (
+            <p className="text-sm text-muted-foreground">Loading...</p>
+          ) : !planSummary ? (
+            <p className="text-sm text-muted-foreground">No service plan data. <Link href="/app/admin/service-plan" className="text-primary hover:underline underline-offset-4">Set up service plan →</Link></p>
+          ) : (
+            <div className="flex flex-col gap-2 text-sm">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Total units</span>
+                <span className="font-medium">{planSummary.total}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Matched</span>
+                <span className="font-medium text-green-600 dark:text-green-400">{planSummary.matched}</span>
+              </div>
+              {unmatchedCount > 0 && (
+                <div className="flex justify-between">
+                  <span className="text-amber-600 dark:text-amber-400">Unmatched</span>
+                  <span className="font-medium text-amber-600 dark:text-amber-400">{unmatchedCount}</span>
+                </div>
+              )}
+              <div className="mt-1 pt-2 border-t border-border">
+                <Link
+                  href="/app/admin/service-plan"
+                  className="text-xs text-primary hover:underline underline-offset-4"
+                >
+                  {unmatchedCount > 0 ? 'Review unmatched units →' : 'Manage service plan →'}
+                </Link>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Quick Links */}
       <Card>
