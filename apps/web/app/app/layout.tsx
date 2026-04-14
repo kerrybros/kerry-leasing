@@ -20,7 +20,7 @@ import {
   SidebarMenuItem,
   SidebarProvider,
 } from '@/components/ui/sidebar';
-import { Truck, Settings, Users, Wrench, CalendarClock, MessageSquare, Building2, Activity } from 'lucide-react';
+import { Truck, Settings, Users, Wrench, CalendarClock, MessageSquare, Building2, Activity, ClipboardCheck, Map } from 'lucide-react';
 
 const defaultOrgSettings = {
   tracksDrivers: true,
@@ -83,6 +83,20 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       label: 'Users',
       icon: Users,
       active: !!pathname?.includes('/team'),
+    },
+    {
+      href: '/app/whiparound',
+      label: 'Whiparound',
+      icon: ClipboardCheck,
+      active: !!pathname?.includes('/whiparound'),
+      hidden: !isAdmin,
+    },
+    {
+      href: '/app/idle-map',
+      label: 'Idle Map',
+      icon: Map,
+      active: !!pathname?.includes('/idle-map'),
+      hidden: !isAdmin,
     },
   ].filter((item) => !item.hidden), [pathname, isAdmin, showDrivers]);
 
