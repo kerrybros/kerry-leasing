@@ -108,12 +108,19 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         {/* Logo — full logo when expanded, small "KL" square when collapsed */}
         <SidebarHeader className="py-3 px-2">
           <Link href="/app/fleet" className="no-underline block">
-            <div className="bg-white rounded-lg px-2 py-2 flex items-center justify-center">
+            <div className="bg-white rounded-lg px-3 py-2 flex flex-col items-center gap-1.5">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/logos/Kerry Leasing Logo.png"
+                alt="Kerry Leasing"
+                style={{ height: 28, width: 'auto', display: 'block' }}
+              />
+              <div style={{ height: 1, width: '100%', background: '#e5e7eb' }} />
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src="/logos/Kerry Brothers Truck Repair Logo Transpaent.png"
                 alt="Kerry Brothers Truck Repair"
-                style={{ height: 36, width: 'auto', display: 'block' }}
+                style={{ height: 28, width: 'auto', display: 'block' }}
               />
             </div>
           </Link>
