@@ -141,7 +141,8 @@ export async function syncSamsaraOrgForDate(
   console.log(
     statsResult.skipped
       ? `  ⏭  Vehicle stats: skipped (${statsResult.skipReason})`
-      : `  ✓ Vehicle stats: ${statsResult.recordCount} vehicles, ${statsResult.errorCount} errors`
+      : `  ✓ Vehicle stats: ${statsResult.recordCount} vehicles — ${statsResult.newCount} inserted, ${statsResult.unchangedCount} unchanged, ` +
+          `${statsResult.updatedCount} updated, ${statsResult.errorCount} errors`
   );
 
   // 4. Safety events

@@ -66,12 +66,16 @@ export interface SamsaraVehiclesResponse {
 // =====================================================
 // SYNC RESULT TRACKING
 // =====================================================
+/** Per-endpoint sync summary. Counts are DB semantics: newCount = rows inserted, unchangedCount = no write needed, updatedCount = row updated. */
 export interface SyncResult {
   endpoint: string;
   date: string;
   recordCount: number;
+  /** Rows inserted (created) in this step. */
   newCount: number;
+  /** Rows updated (existing row changed). */
   updatedCount: number;
+  /** Rows that already matched desired state (no write). */
   unchangedCount: number;
   errorCount: number;
   errors: Array<{

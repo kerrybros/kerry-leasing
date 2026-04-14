@@ -7,7 +7,7 @@
  * Types: obdOdometerMeters, obdEngineSeconds, gpsOdometerMeters
  *
  * Stored raw (source units) in samsara_vehicle_stats_snapshots.
- * Called daily; each call inserts a new snapshot row.
+ * Uniqueness: clerkOrgId + vehicleId + capturedAt (from Samsara stat timestamps).
  */
 
 import { appPrisma } from '../../../lib/prisma.js';
@@ -27,6 +27,28 @@ interface VehicleStatsRow {
   obdOdometerMeters?: StatEntry;
   obdEngineSeconds?: StatEntry;
   gpsOdometerMeters?: StatEntry;
+}
+
+function snapshotPayloadEqual(
+  existing: {
+    vehicleName: string;
+    obdOdometerMeters: number | null;
+    obdEngineSeconds: number | null;
+    gpsOdometerMeters: number | null;
+  },
+  next: {
+    vehicleName: string;
+    obdOdometerMeters: number | null;
+    obdEngineSeconds: number | null;
+    gpsOdometerMeters: number | null;
+  }
+): boolean {
+  return (
+    existing.vehicleName === next.vehicleName &&
+    existing.obdOdometerMeters === next.obdOdometerMeters &&
+    existing.obdEngineSeconds === next.obdEngineSeconds &&
+    existing.gpsOdometerMeters === next.gpsOdometerMeters
+  );
 }
 
 export async function syncSamsaraVehicleStats(
@@ -56,7 +78,6 @@ export async function syncSamsaraVehicleStats(
 
     for (const v of vehicles) {
       try {
-        // Use the most recent timestamp available across stat types
         const time =
           v.obdOdometerMeters?.time ||
           v.obdEngineSeconds?.time ||
@@ -65,7 +86,14 @@ export async function syncSamsaraVehicleStats(
 
         const capturedAt = new Date(time);
 
-        await appPrisma.samsaraVehicleStatsSnapshot.upsert({
+        const payload = {
+          vehicleName: v.name,
+          obdOdometerMeters: v.obdOdometerMeters?.value ?? null,
+          obdEngineSeconds: v.obdEngineSeconds?.value ?? null,
+          gpsOdometerMeters: v.gpsOdometerMeters?.value ?? null,
+        };
+
+        const existing = await appPrisma.samsaraVehicleStatsSnapshot.findUnique({
           where: {
             clerkOrgId_vehicleId_capturedAt: {
               clerkOrgId,
@@ -73,22 +101,27 @@ export async function syncSamsaraVehicleStats(
               capturedAt,
             },
           },
-          create: {
-            clerkOrgId,
-            vehicleId: v.id,
-            vehicleName: v.name,
-            capturedAt,
-            obdOdometerMeters: v.obdOdometerMeters?.value ?? null,
-            obdEngineSeconds: v.obdEngineSeconds?.value ?? null,
-            gpsOdometerMeters: v.gpsOdometerMeters?.value ?? null,
-          },
-          update: {
-            obdOdometerMeters: v.obdOdometerMeters?.value ?? null,
-            obdEngineSeconds: v.obdEngineSeconds?.value ?? null,
-            gpsOdometerMeters: v.gpsOdometerMeters?.value ?? null,
-          },
         });
-        result.newCount++;
+
+        if (!existing) {
+          await appPrisma.samsaraVehicleStatsSnapshot.create({
+            data: {
+              clerkOrgId,
+              vehicleId: v.id,
+              capturedAt,
+              ...payload,
+            },
+          });
+          result.newCount++;
+        } else if (snapshotPayloadEqual(existing, payload)) {
+          result.unchangedCount++;
+        } else {
+          await appPrisma.samsaraVehicleStatsSnapshot.update({
+            where: { id: existing.id },
+            data: payload,
+          });
+          result.updatedCount++;
+        }
       } catch (err: any) {
         result.errorCount++;
         result.errors.push({ recordId: v.id, error: err.message });
@@ -98,7 +131,8 @@ export async function syncSamsaraVehicleStats(
 
     console.log(
       `[Samsara] Vehicle stats snapshot complete: ${result.recordCount} vehicles, ` +
-      `${result.errorCount} errors`
+        `${result.newCount} inserted, ${result.unchangedCount} unchanged, ${result.updatedCount} updated, ` +
+        `${result.errorCount} errors`
     );
     return result;
   } catch (err: any) {

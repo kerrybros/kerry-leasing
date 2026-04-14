@@ -243,7 +243,7 @@ export default function CronHealthPage() {
           <div className="mt-10">
             <h2 className="text-lg font-semibold mb-2">Recent cron runs</h2>
             <p className="text-sm text-muted-foreground mb-4">
-              Per-step new / unchanged / updated counts from the last telematics daily jobs. Expand a row for details.
+              Per-step database outcomes: rows inserted, left unchanged (no write), or updated. Expand a row for details.
             </p>
             {runsLoading ? (
               <Skeleton style={{ height: 120, borderRadius: 8 }} />
@@ -298,8 +298,8 @@ export default function CronHealthPage() {
                                 <thead>
                                   <tr className="text-left text-muted-foreground border-b border-border">
                                     <th className="py-1 pr-2">Step</th>
-                                    <th className="py-1 pr-2">New</th>
-                                    <th className="py-1 pr-2">Same</th>
+                                    <th className="py-1 pr-2">Insert</th>
+                                    <th className="py-1 pr-2">Unchanged</th>
                                     <th className="py-1 pr-2">Updated</th>
                                     <th className="py-1 pr-2">Err</th>
                                     <th className="py-1">Note</th>
