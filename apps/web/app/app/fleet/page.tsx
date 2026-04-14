@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useTransition } from 'react';
 import { useOrganization } from '@clerk/nextjs';
 import { DateRangePicker } from '@/components/DateRangePicker';
 import { KpiCard, SkeletonKpiCard } from '@/components/KpiCard';
@@ -27,6 +27,7 @@ export default function FleetOverviewPage() {
   const { organization } = useOrganization();
   const fleet = useFleetData();
   const [repairSelectedUnit, setRepairSelectedUnit] = useState<string | null>(null);
+  const [, startTransition] = useTransition();
 
   const dateLabel = formatDateLabel(fleet.startDate, fleet.endDate);
 
@@ -126,17 +127,17 @@ export default function FleetOverviewPage() {
                 ? 'text-primary border-b-[3px] border-primary'
                 : 'text-muted-foreground hover:text-foreground'
             }`}
-            onClick={() => fleet.setActiveTab('telematics')}
-          >
-            Telematics
-          </button>
+            onClick={() => startTransition(() => fleet.setActiveTab('telematics'))}
+            >
+              Telematics
+            </button>
           <button
             className={`px-4 py-2 text-sm font-medium transition-colors cursor-pointer ${
               fleet.activeTab === 'repairs'
                 ? 'text-primary border-b-[3px] border-primary'
                 : 'text-muted-foreground hover:text-foreground'
             }`}
-            onClick={() => fleet.setActiveTab('repairs')}
+            onClick={() => startTransition(() => fleet.setActiveTab('repairs'))}
           >
             Repair Data
           </button>
@@ -153,10 +154,10 @@ export default function FleetOverviewPage() {
                     className={`px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer border-l first:border-l-0 border-border ${
                       fleet.telematicsView === tab ? 'bg-primary text-primary-foreground' : 'text-muted-foreground bg-transparent hover:bg-accent'
                     }`}
-                    onClick={() => {
+                    onClick={() => startTransition(() => {
                       fleet.setTelematicsView(tab);
                       fleet.setViewMode(tab === 'drivers' ? 'driver' : 'unit');
-                    }}
+                    })}
                   >
                     {labels[tab]}
                   </button>
@@ -196,7 +197,7 @@ export default function FleetOverviewPage() {
           driverMetrics={fleet.driverMetrics}
           fleetTotals={fleet.fleetTotals}
           selectedId={fleet.selectedId}
-          onRowClick={id => fleet.setSelectedId(fleet.selectedId === id ? null : id)}
+          onRowClick={id => startTransition(() => fleet.setSelectedId(fleet.selectedId === id ? null : id))}
         />
       ) : (
         <TelematicsBreakdownView
@@ -207,7 +208,7 @@ export default function FleetOverviewPage() {
           driverMetrics={fleet.driverMetrics}
           fleetTotals={fleet.fleetTotals}
           selectedId={fleet.selectedId}
-          onRowClick={id => fleet.setSelectedId(fleet.selectedId === id ? null : id)}
+          onRowClick={id => startTransition(() => fleet.setSelectedId(fleet.selectedId === id ? null : id))}
         />
       )}
       </div>

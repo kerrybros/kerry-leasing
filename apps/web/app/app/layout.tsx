@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { UserButton, OrganizationSwitcher, useAuth } from '@clerk/nextjs';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import Image from 'next/image';
@@ -43,7 +43,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   const showDrivers = orgSettings.tracksDrivers;
 
-  const navItems = [
+  const navItems = useMemo(() => [
     {
       href: '/app/fleet',
       label: 'Fleet',
@@ -84,7 +84,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       icon: Users,
       active: !!pathname?.includes('/team'),
     },
-  ].filter((item) => !item.hidden);
+  ].filter((item) => !item.hidden), [pathname, isAdmin, showDrivers]);
 
   return (
     <SidebarProvider
@@ -118,7 +118,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                     <SidebarMenuButton
                       render={<Link href={item.href} />}
                       isActive={item.active}
-                      tooltip={item.label}
                     >
                       <item.icon />
                       <span>{item.label}</span>
@@ -141,7 +140,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                     <SidebarMenuButton
                       render={<Link href="/app/admin/overview" />}
                       isActive={!!pathname?.includes('/admin') && !pathname?.includes('/admin/customers')}
-                      tooltip="Admin"
                     >
                       <Settings />
                       <span>Admin</span>
@@ -151,7 +149,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                     <SidebarMenuButton
                       render={<Link href="/app/admin/customers" />}
                       isActive={!!pathname?.includes('/admin/customers')}
-                      tooltip="Customers"
                     >
                       <Building2 />
                       <span>Customers</span>
@@ -161,7 +158,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                     <SidebarMenuButton
                       render={<Link href="/app/admin/cron-health" />}
                       isActive={!!pathname?.includes('/admin/cron-health')}
-                      tooltip="Cron Health"
                     >
                       <Activity />
                       <span>Cron Health</span>
