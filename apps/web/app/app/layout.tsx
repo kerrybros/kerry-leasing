@@ -3,7 +3,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { UserButton, OrganizationSwitcher, useAuth } from '@clerk/nextjs';
 import { ThemeToggle } from '@/components/ThemeToggle';
-import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useOrgSettingsQuery } from '@/hooks/useDataQueries';
@@ -107,16 +106,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     >
       <Sidebar collapsible="none">
         {/* Logo — full logo when expanded, small "KL" square when collapsed */}
-        <SidebarHeader className="py-3 px-3">
+        <SidebarHeader className="py-3 px-2">
           <Link href="/app/fleet" className="no-underline block">
-            <div className="flex items-center px-2 py-1.5 bg-white rounded-lg overflow-hidden">
-              <Image
+            <div className="bg-white rounded-lg px-2 py-2 flex items-center justify-center">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
                 src="/logos/Kerry Brothers Truck Repair Logo Transpaent.png"
                 alt="Kerry Brothers Truck Repair"
-                width={120}
-                height={40}
-                className="h-7 w-auto object-contain"
-                priority
+                style={{ height: 36, width: 'auto', display: 'block' }}
               />
             </div>
           </Link>
