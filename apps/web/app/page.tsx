@@ -61,9 +61,9 @@ export default async function HomePage() {
               <Image
                 src="/logos/Kerry Leasing Logo.png"
                 alt="Kerry Leasing"
-                width={280}
-                height={96}
-                className="relative h-20 w-auto object-contain"
+                width={560}
+                height={192}
+                className="relative h-40 w-auto object-contain"
                 priority
                 style={{ filter: 'brightness(0) invert(1)' }}
               />
@@ -82,9 +82,9 @@ export default async function HomePage() {
               <Image
                 src="/logos/Kerry Brothers Truck Repair Logo Transpaent.png"
                 alt="Kerry Brothers Truck Repair"
-                width={320}
-                height={110}
-                className="relative h-24 w-auto object-contain"
+                width={640}
+                height={220}
+                className="relative h-48 w-auto object-contain"
                 style={{ filter: 'brightness(0) invert(1)' }}
               />
             </div>
