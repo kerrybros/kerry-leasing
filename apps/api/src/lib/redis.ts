@@ -53,20 +53,15 @@ export function getRedis(): Redis | null {
 }
 
 /**
- * Cache-aside helper. Always falls back to loader() if Redis is unavailable.
- *
- * @param key      Redis key
- * @param ttlSecs  TTL in seconds
- * @param loader   Function that fetches the value from the source (DB)
+ * Cache-aside with hit metadata (for logging / response headers).
  */
-export async function cacheGetOrSet<T>(
+export async function cacheGetOrSetMeta<T>(
   key: string,
   ttlSecs: number,
   loader: () => Promise<T>
-): Promise<T> {
+): Promise<{ value: T; hit: boolean }> {
   const redis = getRedis();
 
-  // Attempt cache read
   if (redis) {
     try {
       const raw = await redis.get(key);
@@ -74,21 +69,18 @@ export async function cacheGetOrSet<T>(
         if (config.nodeEnv === 'development') {
           console.log(`[Redis] HIT  ${key}`);
         }
-        return JSON.parse(raw) as T;
+        return { value: JSON.parse(raw) as T, hit: true };
       }
       if (config.nodeEnv === 'development') {
         console.log(`[Redis] MISS ${key}`);
       }
     } catch (err: any) {
       console.error(`[Redis] Read error for key "${key}":`, err.message);
-      // Fall through to loader
     }
   }
 
-  // Fetch from DB
   const value = await loader();
 
-  // Write to cache (non-blocking — failure is logged but doesn't affect response)
   if (redis) {
     redis
       .setex(key, ttlSecs, JSON.stringify(value))
@@ -97,6 +89,18 @@ export async function cacheGetOrSet<T>(
       );
   }
 
+  return { value, hit: false };
+}
+
+/**
+ * Cache-aside helper. Always falls back to loader() if Redis is unavailable.
+ */
+export async function cacheGetOrSet<T>(
+  key: string,
+  ttlSecs: number,
+  loader: () => Promise<T>
+): Promise<T> {
+  const { value } = await cacheGetOrSetMeta(key, ttlSecs, loader);
   return value;
 }
 

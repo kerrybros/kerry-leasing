@@ -11,16 +11,36 @@
  * - customer name from APP DB config (per KL org)
  * - invoice_date >= contractStartDate (and optional query range)
  */
+import { createHash } from 'crypto';
 import { Router } from 'express';
 import { clerkAuthMiddleware, requireOrg, AuthRequest } from '../middleware/auth.js';
 import { getAppPrisma, getRepairPrisma } from '../lib/prisma.js';
 import { REPAIR_SHOP_ORG_ID } from '../config/repairShop.js';
-import { TtlCache } from '../lib/ttlCache.js';
+import { cacheGetOrSetMeta } from '../lib/redis.js';
+import { config } from '../config.js';
 import { RepairsQuerySchema, PaginationSchema, parseQuery } from '../lib/validate.js';
 
 const router = Router();
-const TEN_HOURS_MS = 10 * 60 * 60 * 1000;
-const repairsCache = new TtlCache<any>(TEN_HOURS_MS, 500);
+/** Same window as before: 10h TTL for the raw revenue_details rows (shared across API instances). */
+const REPAIRS_RAW_TTL_SECS = 10 * 60 * 60;
+
+function repairsRawRedisKey(
+  klOrgId: string,
+  customerName: string,
+  effectiveFromYmd: string,
+  toYmdValue: string,
+  allowedUnitNumbers: string[]
+): string {
+  const env = config.nodeEnv === 'production' ? 'prod' : 'dev';
+  const payload = JSON.stringify({
+    customer: customerName,
+    from: effectiveFromYmd,
+    to: toYmdValue,
+    units: [...allowedUnitNumbers].sort(),
+  });
+  const h = createHash('sha256').update(payload).digest('hex').slice(0, 24);
+  return `${env}:repairs:raw:${klOrgId}:${h}`;
+}
 
 function isYmd(value: unknown): value is string {
   return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value);
@@ -31,8 +51,13 @@ function parseYmdToDate(value: string): Date {
   return new Date(value);
 }
 
-function toYmd(date: Date | null | undefined): string | null {
-  if (!date) return null;
+function toYmd(date: Date | string | null | undefined): string | null {
+  if (date == null) return null;
+  if (typeof date === 'string') {
+    const d = new Date(date);
+    return Number.isNaN(d.getTime()) ? null : d.toISOString().split('T')[0] || null;
+  }
+  if (!(date instanceof Date)) return null;
   return date.toISOString().split('T')[0] || null;
 }
 
@@ -40,6 +65,63 @@ function toNumber(value: unknown): number {
   if (value == null) return 0;
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
+}
+
+/** Plain shape safe for JSON → Redis → JSON (Prisma Decimal / Date do not round-trip reliably). */
+type RepairsRawRow = {
+  id: number;
+  unit: string | null;
+  number: string | null;
+  invoice_date: string | null;
+  order: string | null;
+  shop: string | null;
+  service_description: string | null;
+  global_service_description: string | null;
+  part_description: string | null;
+  complaint_description: string | null;
+  type: string | null;
+  total: number;
+  sales_tax: number;
+  component: string | null;
+  system: string | null;
+};
+
+type RevenueDetailSelected = {
+  id: number;
+  unit: string | null;
+  number: string | null;
+  invoice_date: Date | null;
+  order: string | null;
+  shop: string | null;
+  service_description: string | null;
+  global_service_description: string | null;
+  part_description: string | null;
+  complaint_description: string | null;
+  type: string | null;
+  total: unknown;
+  sales_tax: unknown;
+  component: string | null;
+  system: string | null;
+};
+
+function toRepairsRawRows(rows: RevenueDetailSelected[]): RepairsRawRow[] {
+  return rows.map((r) => ({
+    id: r.id,
+    unit: r.unit,
+    number: r.number,
+    invoice_date: r.invoice_date ? r.invoice_date.toISOString().split('T')[0]! : null,
+    order: r.order,
+    shop: r.shop,
+    service_description: r.service_description,
+    global_service_description: r.global_service_description,
+    part_description: r.part_description,
+    complaint_description: r.complaint_description,
+    type: r.type,
+    total: toNumber(r.total),
+    sales_tax: toNumber(r.sales_tax),
+    component: r.component,
+    system: r.system,
+  }));
 }
 
 router.get('/', clerkAuthMiddleware, requireOrg, async (req: AuthRequest, res) => {
@@ -116,45 +198,56 @@ router.get('/', clerkAuthMiddleware, requireOrg, async (req: AuthRequest, res) =
     const fromDate = parseYmdToDate(effectiveFromYmd);
     const toDate = parseYmdToDate(toYmdValue);
 
-    const cacheKey = `repairs:${klOrgId}:${config.customerName.toLowerCase()}:${effectiveFromYmd}:${toYmdValue}`;
-    const { value: rows, hit } = await repairsCache.getOrSet(cacheKey, async () => {
-      return await repairPrisma.revenue_details.findMany({
-        where: {
-          organization_id: REPAIR_SHOP_ORG_ID,
-          invoice_date: {
-            not: null,
-            gte: fromDate,
-            lte: toDate,
+    const cacheKey = repairsRawRedisKey(
+      klOrgId,
+      config.customerName,
+      effectiveFromYmd,
+      toYmdValue,
+      allowedUnitNumbers
+    );
+    const { value: rows, hit } = await cacheGetOrSetMeta<RepairsRawRow[]>(
+      cacheKey,
+      REPAIRS_RAW_TTL_SECS,
+      async () => {
+        const raw = await repairPrisma.revenue_details.findMany({
+          where: {
+            organization_id: REPAIR_SHOP_ORG_ID,
+            invoice_date: {
+              not: null,
+              gte: fromDate,
+              lte: toDate,
+            },
+            customer: {
+              equals: config.customerName,
+              mode: 'insensitive',
+            },
+            // Filter by units included in the service plan
+            unit: {
+              in: allowedUnitNumbers,
+            },
           },
-          customer: {
-            equals: config.customerName,
-            mode: 'insensitive',
+          select: {
+            id: true,
+            unit: true,
+            number: true, // invoice number
+            invoice_date: true,
+            order: true,
+            shop: true,
+            service_description: true,
+            global_service_description: true,
+            part_description: true,
+            complaint_description: true,
+            type: true,
+            total: true,
+            sales_tax: true,
+            component: true,
+            system: true,
           },
-          // Filter by units included in the service plan
-          unit: {
-            in: allowedUnitNumbers,
-          },
-        },
-        select: {
-          id: true,
-          unit: true,
-          number: true, // invoice number
-          invoice_date: true,
-          order: true,
-          shop: true,
-          service_description: true,
-          global_service_description: true,
-          part_description: true,
-          complaint_description: true,
-          type: true,
-          total: true,
-          sales_tax: true,
-          component: true,
-          system: true,
-        },
-        orderBy: [{ unit: 'asc' }, { invoice_date: 'desc' }, { number: 'asc' }],
-      });
-    });
+          orderBy: [{ unit: 'asc' }, { invoice_date: 'desc' }, { number: 'asc' }],
+        });
+        return toRepairsRawRows(raw as RevenueDetailSelected[]);
+      }
+    );
 
     type LineAgg = {
       description: string;
