@@ -1,0 +1,13 @@
+---
+description: Repo workflow — CONTRIBUTING.md, PR hygiene, TODO.md updates
+alwaysApply: true
+---
+
+# Project workflow (Kerry Leasing monorepo)
+
+- **Human process:** Follow [CONTRIBUTING.md](../../CONTRIBUTING.md) for branches, PRs, migrations, and doc hygiene.
+- **TODO.md:** When adding/removing placeholder or “coming soon” routes under `apps/web/app/`, or changing major telematics/integration scope, update [TODO.md](../../TODO.md) in the **same change** (or same PR).
+- **PRs:** Use [.github/PULL_REQUEST_TEMPLATE.md](../../.github/PULL_REQUEST_TEMPLATE.md) on GitHub; keep commits focused and messages clear.
+- **Prisma:** App DB schema changes need migrations under `apps/api/prisma/app/migrations` and generate as documented in README/CONTRIBUTING.
+
+When unsure, extend CONTRIBUTING.md with new subsections rather than only chat-only conventions.

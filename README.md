@@ -2,6 +2,8 @@
 
 Multi-tenant SaaS portal for fleet management with hardened auth and dual-database architecture.
 
+**Contributing:** See [CONTRIBUTING.md](./CONTRIBUTING.md) (workflow, PRs, migrations, keeping [TODO.md](./TODO.md) current).
+
 ## Architecture
 
 **Frontend**: Next.js 14 (App Router) + Clerk Auth  
