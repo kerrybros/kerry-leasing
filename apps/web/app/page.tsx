@@ -33,31 +33,13 @@ export default async function HomePage() {
         }}
       />
 
-      {/* Header */}
-      <header className="relative z-10 border-b" style={{ borderColor: 'rgba(255,255,255,0.07)' }}>
-        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="bg-white rounded-xl px-4 py-2.5 flex items-center gap-4 shadow-lg shadow-black/30">
-            <Image
-              src="/logos/Kerry Leasing Logo.png"
-              alt="Kerry Leasing"
-              width={140}
-              height={48}
-              className="h-8 w-auto object-contain"
-              priority
-            />
-            <div className="w-px h-8 bg-gray-200" />
-            <Image
-              src="/logos/Kerry Brothers Truck Repair Logo Transpaent.png"
-              alt="Kerry Brothers Truck Repair"
-              width={160}
-              height={55}
-              className="h-9 w-auto object-contain"
-            />
-          </div>
+      {/* Header — minimal, just Sign In */}
+      <header className="relative z-10">
+        <div className="max-w-6xl mx-auto px-6 py-5 flex items-center justify-end">
           <Link
             href="/sign-in"
-            className="inline-flex items-center px-5 py-2 rounded-lg text-sm font-semibold transition-colors"
-            style={{ background: '#d9a528', color: '#0f1923' }}
+            className="inline-flex items-center px-5 py-2 rounded-lg text-sm font-semibold transition-opacity hover:opacity-85"
+            style={{ background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.75)', border: '1px solid rgba(255,255,255,0.1)' }}
           >
             Sign In
           </Link>
@@ -65,27 +47,58 @@ export default async function HomePage() {
       </header>
 
       {/* Hero */}
-      <section className="relative z-10 flex-1 flex flex-col items-center justify-center text-center px-6 py-28">
-        <div className="max-w-3xl mx-auto space-y-7">
-          {/* Gold accent bar */}
-          <div className="flex justify-center">
-            <div className="w-10 h-1 rounded-full" style={{ background: '#d9a528' }} />
+      <section className="relative z-10 flex-1 flex flex-col items-center justify-center text-center px-6 py-16">
+        <div className="max-w-2xl mx-auto flex flex-col items-center gap-10">
+
+          {/* Logo card — the hero centrepiece */}
+          <div
+            className="w-full rounded-2xl px-10 py-8 flex flex-col items-center gap-6 shadow-2xl shadow-black/40"
+            style={{
+              background: 'rgba(255,255,255,0.97)',
+              border: '1px solid rgba(255,255,255,0.15)',
+            }}
+          >
+            {/* Top gold accent */}
+            <div className="w-12 h-1 rounded-full" style={{ background: '#d9a528' }} />
+
+            <div className="flex flex-col sm:flex-row items-center gap-6 sm:gap-10">
+              <Image
+                src="/logos/Kerry Leasing Logo.png"
+                alt="Kerry Leasing"
+                width={200}
+                height={68}
+                className="h-14 w-auto object-contain"
+                priority
+              />
+              <div className="w-px h-14 hidden sm:block" style={{ background: '#e5e7eb' }} />
+              <div className="h-px w-20 sm:hidden" style={{ background: '#e5e7eb' }} />
+              <Image
+                src="/logos/Kerry Brothers Truck Repair Logo Transpaent.png"
+                alt="Kerry Brothers Truck Repair"
+                width={240}
+                height={82}
+                className="h-16 w-auto object-contain"
+              />
+            </div>
           </div>
-          <h1 className="text-5xl sm:text-6xl font-bold tracking-tight leading-tight text-white">
-            Your fleet.<br />One portal.
-          </h1>
-          <p className="text-base" style={{ color: 'rgba(255,255,255,0.45)' }}>
-            Telematics · Repairs · Driver Performance
-          </p>
-          <div>
-            <Link
-              href="/sign-in"
-              className="inline-flex items-center px-10 py-3.5 rounded-lg text-base font-semibold transition-opacity hover:opacity-90"
-              style={{ background: '#d9a528', color: '#0f1923' }}
-            >
-              Sign In
-            </Link>
+
+          {/* Headline + CTA */}
+          <div className="space-y-4">
+            <h1 className="text-5xl sm:text-6xl font-bold tracking-tight leading-tight text-white">
+              Your fleet.<br />One portal.
+            </h1>
+            <p className="text-sm uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.4)' }}>
+              Telematics · Repairs · Driver Performance
+            </p>
           </div>
+
+          <Link
+            href="/sign-in"
+            className="inline-flex items-center px-12 py-3.5 rounded-lg text-base font-semibold transition-opacity hover:opacity-90"
+            style={{ background: '#d9a528', color: '#0f1923' }}
+          >
+            Sign In
+          </Link>
         </div>
       </section>
 
