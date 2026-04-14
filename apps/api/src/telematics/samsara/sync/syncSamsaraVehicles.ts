@@ -105,6 +105,8 @@ export async function syncSamsaraVehicles(
     );
     return result;
   } catch (err: any) {
+    // Let typed API errors (auth, rate-limit, server) propagate to the orchestrator
+    if (err?.name?.startsWith('Telematics')) throw err;
     result.errorCount = 1;
     result.errors.push({ recordId: 'roster', error: err.message });
     console.error(`[Samsara] syncSamsaraVehicles error:`, err.message);

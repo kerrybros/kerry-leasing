@@ -106,22 +106,10 @@ export async function syncSamsaraSafetyEvents(
     );
     return result;
   } catch (err: any) {
-    const msg = err?.message ?? String(err);
-    // Same token often works for fuel/vehicles but returns 401 for /fleet/safety-events when
-    // the API token is missing Safety scope or the org has no Safety product — don't fail the whole org.
-    if (msg.includes('401') || msg.includes('authentication failed')) {
-      result.skipped = true;
-      result.skipReason =
-        'Safety events skipped: Samsara returned 401 for GET /fleet/safety-events. ' +
-        'Regenerate the API token in Samsara and enable **Read safety events** (and any Safety-related scopes). ' +
-        'Fleet/fuel sync does not require that scope.';
-      result.errorCount = 0;
-      console.warn(`[Samsara] ${result.skipReason}`);
-      return result;
-    }
+    if (err?.name?.startsWith('Telematics')) throw err;
     result.errorCount = 1;
-    result.errors.push({ recordId: 'safety_events', error: msg });
-    console.error(`[Samsara] syncSamsaraSafetyEvents error:`, msg);
+    result.errors.push({ recordId: 'safety_events', error: err?.message ?? String(err) });
+    console.error(`[Samsara] syncSamsaraSafetyEvents error:`, err?.message ?? String(err));
     return result;
   }
 }

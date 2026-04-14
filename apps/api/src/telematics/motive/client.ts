@@ -1,9 +1,19 @@
 /**
  * MOTIVE API CLIENT
- * HTTP client wrapper for Motive API with retry logic and pagination
+ * HTTP client wrapper for Motive API with typed errors, retry, and pagination
  */
 
-import axios, { AxiosInstance, AxiosRequestConfig } from 'axios';
+import axios, { AxiosInstance } from 'axios';
+import {
+  TelematicsAuthError,
+  TelematicsRateLimitError,
+  TelematicsServerError,
+  TelematicsTimeoutError,
+  isTransientError,
+} from '../errors.js';
+
+const MAX_RETRIES = 2;
+const RETRY_BASE_MS = 1000;
 
 export class MotiveClient {
   private client: AxiosInstance;
@@ -15,38 +25,41 @@ export class MotiveClient {
     
     this.client = axios.create({
       baseURL: this.baseURL,
-      timeout: 30000, // 30 second timeout
+      timeout: 30000,
       headers: {
         'X-API-Key': apiKey,
         'Content-Type': 'application/json',
-        'X-Time-Zone': 'Eastern Time (US & Canada)',  // Toronto is in Eastern Time
-        'X-Metric-Units': 'false'                     // Use Imperial units (miles, gallons)
+        'X-Time-Zone': 'Eastern Time (US & Canada)',
+        'X-Metric-Units': 'false'
       }
     });
 
-    // Add response interceptor for error handling
     this.client.interceptors.response.use(
       (response) => response,
       async (error) => {
+        const path =
+          typeof error.config?.url === 'string'
+            ? error.config.url
+            : 'unknown';
+
         if (error.response) {
-          // API responded with error status
           const status = error.response.status;
           const data = error.response.data;
           
           if (status === 401) {
-            throw new Error('Motive API authentication failed - invalid API key');
+            throw new TelematicsAuthError('MOTIVE', path);
           } else if (status === 429) {
-            throw new Error('Motive API rate limit exceeded');
+            throw new TelematicsRateLimitError('MOTIVE');
           } else if (status >= 500) {
-            throw new Error(`Motive API server error: ${status}`);
+            throw new TelematicsServerError('MOTIVE', status);
           } else {
-            throw new Error(`Motive API error: ${data?.error_message || data?.message || 'Unknown error'}`);
+            throw new Error(
+              `Motive API error on ${path}: ${data?.error_message || data?.message || `HTTP ${status}`}`
+            );
           }
         } else if (error.request) {
-          // Request made but no response
-          throw new Error('Motive API request timeout - no response received');
+          throw new TelematicsTimeoutError('MOTIVE');
         } else {
-          // Request setup error
           throw new Error(`Motive API request failed: ${error.message}`);
         }
       }
@@ -54,8 +67,7 @@ export class MotiveClient {
   }
 
   /**
-   * GET request with automatic pagination
-   * Fetches all pages and returns combined results
+   * GET with page-based pagination. Retries transient errors up to MAX_RETRIES.
    */
   async get<T = any>(
     endpoint: string,
@@ -66,100 +78,74 @@ export class MotiveClient {
     let hasMore = true;
 
     while (hasMore) {
-      try {
-        const response = await this.client.get(endpoint, {
+      const response = await this.withRetry(() =>
+        this.client.get(endpoint, {
           params: {
             ...params,
-            page_no: page, // Motive API uses page_no (not page)
-            per_page: 100  // Max results per page (Motive max is 100)
+            page_no: page,
+            per_page: 100
           }
-        });
+        })
+      );
 
-        const data = response.data;
+      const data = response.data;
 
-        // Handle different Motive API response formats
-        // Some endpoints return: { results: [...], pagination: {...} }
-        // Others return: { vehicle_utilizations: [{vehicle_utilization: {...}}], pagination: {...} }
-        // Others return: { driver_idle_rollups: [...], pagination: {...} }
+      if (data.results && Array.isArray(data.results)) {
+        allResults.push(...data.results);
+      } else {
+        const dataKey = Object.keys(data).find(key => 
+          Array.isArray(data[key]) && key !== 'pagination'
+        );
         
-        if (data.results && Array.isArray(data.results)) {
-          // Standard format: { results: [...] }
-          allResults.push(...data.results);
-        } else {
-          // Find the data array by looking for known keys
-          const dataKey = Object.keys(data).find(key => 
-            Array.isArray(data[key]) && key !== 'pagination'
-          );
-          
-          if (dataKey && Array.isArray(data[dataKey])) {
-            // Extract nested data (e.g., vehicle_utilization.vehicle_utilization)
-            const records = data[dataKey];
-            for (const record of records) {
-              // Check if data is nested one level deeper
-              const nestedKey = Object.keys(record).find(k => k !== 'pagination' && typeof record[k] === 'object');
-              if (nestedKey && record[nestedKey]) {
-                allResults.push(record[nestedKey] as T);
-              } else {
-                allResults.push(record as T);
-              }
-            }
-          } else {
-            // No array found, might be single item or error
-            if (Object.keys(data).length > 0 && !data.pagination) {
-              return [data as T];
+        if (dataKey && Array.isArray(data[dataKey])) {
+          const records = data[dataKey];
+          for (const record of records) {
+            const nestedKey = Object.keys(record).find(k => k !== 'pagination' && typeof record[k] === 'object');
+            if (nestedKey && record[nestedKey]) {
+              allResults.push(record[nestedKey] as T);
+            } else {
+              allResults.push(record as T);
             }
           }
-        }
-
-        // Check pagination (Motive returns page_no, per_page, total)
-        if (data.pagination) {
-          const { page_no: currentPage, per_page, total } = data.pagination;
-          const totalPages = Math.ceil(total / per_page);
-          hasMore = currentPage < totalPages;
-          page++;
         } else {
-          // No pagination = single page
-          hasMore = false;
+          if (Object.keys(data).length > 0 && !data.pagination) {
+            return [data as T];
+          }
         }
+      }
 
-        // Rate limiting: wait 500ms between pages
-        if (hasMore) {
-          await this.sleep(500);
-        }
-      } catch (error) {
-        console.error(`Motive API GET ${endpoint} page ${page} failed:`, error);
-        throw error;
+      if (data.pagination) {
+        const { page_no: currentPage, per_page, total } = data.pagination;
+        const totalPages = Math.ceil(total / per_page);
+        hasMore = currentPage < totalPages;
+        page++;
+      } else {
+        hasMore = false;
+      }
+
+      if (hasMore) {
+        await this.sleep(500);
       }
     }
 
     return allResults;
   }
 
-  /**
-   * GET single page (for testing or manual pagination)
-   */
   async getSinglePage<T = any>(
     endpoint: string,
     params: Record<string, any> = {},
     page: number = 1
   ): Promise<{ results: T[]; pagination?: any }> {
-    const response = await this.client.get(endpoint, {
-      params: {
-        ...params,
-        page_no: page,
-        per_page: 100
-      }
-    });
-
+    const response = await this.withRetry(() =>
+      this.client.get(endpoint, {
+        params: { ...params, page_no: page, per_page: 100 }
+      })
+    );
     return response.data;
   }
 
-  /**
-   * Test API connection
-   */
   async testConnection(): Promise<boolean> {
     try {
-      // Try to fetch geofences (lightweight endpoint)
       await this.client.get('/v1/geofences', {
         params: { page_no: 1, per_page: 1 }
       });
@@ -170,9 +156,27 @@ export class MotiveClient {
     }
   }
 
-  /**
-   * Sleep helper for rate limiting
-   */
+  private async withRetry<T>(fn: () => Promise<T>): Promise<T> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        return await fn();
+      } catch (err) {
+        lastError = err;
+        if (!isTransientError(err) || attempt === MAX_RETRIES) {
+          throw err;
+        }
+        const delayMs = RETRY_BASE_MS * Math.pow(2, attempt);
+        console.warn(
+          `[Motive] Transient error (attempt ${attempt + 1}/${MAX_RETRIES + 1}), ` +
+          `retrying in ${delayMs}ms: ${(err as Error).message}`
+        );
+        await this.sleep(delayMs);
+      }
+    }
+    throw lastError;
+  }
+
   private sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
   }

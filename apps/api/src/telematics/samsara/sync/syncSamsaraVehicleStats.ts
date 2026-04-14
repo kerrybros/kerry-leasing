@@ -102,6 +102,7 @@ export async function syncSamsaraVehicleStats(
     );
     return result;
   } catch (err: any) {
+    if (err?.name?.startsWith('Telematics')) throw err;
     result.errorCount = 1;
     result.errors.push({ recordId: 'stats', error: err.message });
     console.error(`[Samsara] syncSamsaraVehicleStats error:`, err.message);

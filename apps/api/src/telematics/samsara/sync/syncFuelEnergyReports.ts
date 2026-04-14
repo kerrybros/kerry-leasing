@@ -178,6 +178,7 @@ export async function syncFuelEnergyReports(
 
     return result;
   } catch (error: any) {
+    if (error?.name?.startsWith('Telematics')) throw error;
     console.error(`[Samsara] syncFuelEnergyReports error:`, error);
     result.errorCount = 1;
     result.errors.push({ recordId: 'sync', error: error.message });

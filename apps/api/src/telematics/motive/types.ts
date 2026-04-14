@@ -214,6 +214,9 @@ export interface SyncResult {
     recordId: string | number;
     error: string;
   }>;
+  /** When true, this step was not counted as a hard failure (e.g. 401 due to token scope). */
+  skipped?: boolean;
+  skipReason?: string;
 }
 
 // =====================================================

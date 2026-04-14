@@ -121,8 +121,7 @@ export async function syncMotiveScorecard(
     );
     return result;
   } catch (err: any) {
-    // Return an error result instead of throwing — scorecard failures should not abort
-    // the rest of the day's sync.
+    if (err?.name?.startsWith('Telematics')) throw err;
     console.error(`Failed to sync Motive scorecard for ${clerkOrgId} on ${date}:`, err.message);
     result.errorCount = 1;
     result.errors.push({ recordId: 'scorecard_summary', error: err.message });
