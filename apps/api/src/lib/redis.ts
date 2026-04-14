@@ -25,8 +25,10 @@ export function getRedis(): Redis | null {
         enableOfflineQueue: true,
         // Don't connect until first command
         lazyConnect: true,
-        // If a command takes longer than 500ms, reject it (falls through to DB)
-        commandTimeout: 500,
+        // Per-command timeout. 500ms is fine for small GET/SET but too tight for
+        // multi-MB SETEX (repairs blob can be 2–5 MB). 2s gives enough headroom
+        // for large writes while still failing fast on a dead connection.
+        commandTimeout: 2000,
         // Render internal Redis can be slow to accept TCP on cold start
         connectTimeout: 5000,
         // Exponential backoff on reconnect, give up after 3 attempts
@@ -82,11 +84,17 @@ export async function cacheGetOrSetMeta<T>(
   const value = await loader();
 
   if (redis) {
-    redis
-      .setex(key, ttlSecs, JSON.stringify(value))
-      .catch((err: Error) =>
-        console.error(`[Redis] Write error for key "${key}":`, err.message)
-      );
+    const json = JSON.stringify(value);
+    const sizeMb = json.length / (1024 * 1024);
+    if (sizeMb > 10) {
+      console.warn(`[Redis] Skipping write for "${key}" — payload too large (${sizeMb.toFixed(1)} MB)`);
+    } else {
+      redis
+        .setex(key, ttlSecs, json)
+        .catch((err: Error) =>
+          console.error(`[Redis] Write error for key "${key}":`, err.message)
+        );
+    }
   }
 
   return { value, hit: false };
