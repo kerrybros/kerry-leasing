@@ -123,3 +123,10 @@
   }
 }
 
+/* Remove focus outlines from Recharts chart wrappers and SVGs */
+.recharts-wrapper,
+.recharts-wrapper svg,
+.recharts-surface {
+  outline: none !important;
+}
+

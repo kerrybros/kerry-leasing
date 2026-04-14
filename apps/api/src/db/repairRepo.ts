@@ -283,6 +283,22 @@ export async function getInvoicesByVin(customerId: string, vin: string) {
 }
 
 /**
+ * CUSTOMERS - Get distinct customer list for onboarding dropdown
+ * Returns all unique customers with units in the repair shop.
+ */
+export async function getDistinctCustomers(): Promise<{ id: string; name: string }[]> {
+  const client = getRepairClient();
+  const rows = await client.customer_units.groupBy({
+    by: ['cust_id', 'customer'],
+    where: { organization_id: REPAIR_SHOP_ORG_ID },
+    orderBy: { customer: 'asc' },
+  });
+  return (rows as any[])
+    .filter((r) => r.cust_id && r.customer)
+    .map((r) => ({ id: r.cust_id as string, name: r.customer as string }));
+}
+
+/**
  * HEALTH CHECK - Test repair database connection
  * 
  * @returns true if connection works, false otherwise

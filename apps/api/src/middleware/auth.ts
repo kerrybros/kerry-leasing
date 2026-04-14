@@ -82,37 +82,46 @@ export async function clerkAuthMiddleware(
       }
     }
 
-    // Get org role if orgId exists
-    if (orgId) {
-      try {
-        const orgMemberships = await clerkClient.users.getOrganizationMembershipList({
-          userId,
-        });
-        
+    // Get org role — check specific org if provided, otherwise check any membership
+    try {
+      const orgMemberships = await clerkClient.users.getOrganizationMembershipList({
+        userId,
+      });
+
+      if (orgId) {
+        // Org context present — check role in that specific org
         const currentOrgMembership = orgMemberships.data.find(
           (membership) => membership.organization.id === orgId
         );
 
         if (currentOrgMembership) {
-          // Map Clerk roles to our internal/external system
-          // Clerk can return either "admin" or "org:admin" depending on context
           const clerkRole = currentOrgMembership.role;
           role = (clerkRole === 'org:admin' || clerkRole === 'admin') ? 'internal' : 'external';
           if (config.nodeEnv === 'development') {
             console.log(`User role in org ${orgId}: ${clerkRole} → ${role}`);
           }
         } else if (req.headers['x-organization-id'] && config.nodeEnv !== 'production') {
-          // DEV/STAGING ONLY: header fallback + no membership found → grant internal for testing
           console.log('⚠️  DEV MODE: Granting internal role via header fallback');
           role = 'internal';
         }
-      } catch (err) {
-        console.error('Error fetching org memberships:', err);
-        // DEV/STAGING ONLY: Clerk API error + header fallback → grant internal for testing
-        if (req.headers['x-organization-id'] && config.nodeEnv !== 'production') {
-          console.log('⚠️  DEV MODE: Granting internal role due to membership fetch error');
+      } else {
+        // No org context — grant internal if user is org:admin in any org
+        // This covers platform-wide admin pages (e.g. /admin/customers) where no specific org is active
+        const isAdminAnywhere = orgMemberships.data.some(
+          (m) => m.role === 'org:admin' || m.role === 'admin'
+        );
+        if (isAdminAnywhere) {
           role = 'internal';
+          if (config.nodeEnv === 'development') {
+            console.log(`User is org:admin in ${orgMemberships.data.length} org(s) — granting internal`);
+          }
         }
+      }
+    } catch (err) {
+      console.error('Error fetching org memberships:', err);
+      if (req.headers['x-organization-id'] && config.nodeEnv !== 'production') {
+        console.log('⚠️  DEV MODE: Granting internal role due to membership fetch error');
+        role = 'internal';
       }
     }
 

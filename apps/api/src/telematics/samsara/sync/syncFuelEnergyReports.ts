@@ -1,6 +1,12 @@
 /**
  * SYNC FUEL-ENERGY REPORTS
- * Syncs vehicle fuel-energy data from Samsara API to raw data table
+ * Syncs vehicle fuel-energy data from Samsara API.
+ *
+ * Write target: samsara_vehicle_utilization (normalized units converted at write time).
+ *   mL → gal (÷3785.41), meters → miles (÷1609.34), ms → minutes (÷60000)
+ *
+ * Also fetches and stores raw idling events in samsara_idling_events so that
+ * idle fuel (summed per vehicle) can populate idleFuelGallons on the util row.
  */
 
 import { appPrisma } from '../../../lib/prisma.js';
@@ -8,7 +14,7 @@ import { SamsaraClient } from '../client.js';
 import { getESTDayBounds } from '../../dates.js';
 import {
   fetchFuelEnergyReports,
-  SamsaraVehicleReport,
+  SamsaraConversions,
 } from '../endpoints/fuelEnergyReports.js';
 import { fetchIdlingEventsRaw } from '../endpoints/idlingEvents.js';
 import { SyncResult } from '../types.js';
@@ -36,17 +42,21 @@ export async function syncFuelEnergyReports(
   try {
     const reports = await fetchFuelEnergyReports(client, date);
 
-    // Fetch and store all idling events (same EST day bounds as fuel-energy)
+    // Fetch idling events for the same EST day — store raw + compute per-vehicle idle fuel sum
     const { startTime, endTime } = getESTDayBounds(date);
+    const idleFuelByVehicle = new Map<string, number>(); // vehicleId → gallons
+
     try {
       const rawEvents = await fetchIdlingEventsRaw(client, startTime, endTime);
-      let stored = 0;
+      let storedIdleEvents = 0;
+
       for (const event of rawEvents) {
         const assetId = event.asset?.id;
-        // Only skip when we cannot form a row: unique key is (clerkOrgId, assetId, startTime)
         if (assetId == null || !event.startTime) continue;
         const vehicleId = String(assetId);
-        const eventDate = date; // EST calendar day we're syncing (same as fuel-energy)
+        const eventDate = date;
+
+        // Store raw idling event
         await appPrisma.samsaraIdlingEvent.upsert({
           where: {
             clerkOrgId_assetId_startTime: { clerkOrgId, assetId: vehicleId, startTime: event.startTime },
@@ -66,10 +76,17 @@ export async function syncFuelEnergyReports(
             rawResponse: event as any,
           },
         });
-        stored++;
+        storedIdleEvents++;
+
+        // Accumulate idle fuel per vehicle (mL → gal)
+        if (event.fuelConsumedMilliliters != null) {
+          const gallons = SamsaraConversions.millilitersToGallons(event.fuelConsumedMilliliters);
+          idleFuelByVehicle.set(vehicleId, (idleFuelByVehicle.get(vehicleId) ?? 0) + gallons);
+        }
       }
-      if (stored > 0) {
-        console.log(`[Samsara] Idling events: stored ${stored} raw events for ${date}`);
+
+      if (storedIdleEvents > 0) {
+        console.log(`[Samsara] Idling events: stored ${storedIdleEvents} raw events for ${date}`);
       }
     } catch (idleErr: any) {
       console.warn(`[Samsara] Idling events fetch failed (continuing):`, idleErr.message);
@@ -82,87 +99,80 @@ export async function syncFuelEnergyReports(
 
     result.recordCount = reports.length;
 
-    // Process each vehicle report
     for (const report of reports) {
       try {
+        const vehicleId = String(report.vehicle.id);
         const vin = report.vehicle.externalIds?.['samsara.vin'] || null;
-        const vehicleId = String(report.vehicle.id); // match idling events assetId when joining in API
         const vehicleName = report.vehicle.name;
 
-        // Check if record exists
-        const existing = await appPrisma.samsaraRawData.findFirst({
-          where: { clerkOrgId, vehicleId, date },
-        });
+        // Convert all units at write time
+        const fuelGallons = SamsaraConversions.millilitersToGallons(report.fuelConsumedMl ?? 0);
+        const distanceMiles = SamsaraConversions.metersToMiles(report.distanceTraveledMeters ?? 0);
+        const engineOnMinutes = SamsaraConversions.millisecondsToMinutes(report.engineRunTimeDurationMs ?? 0);
+        const idleMinutes = SamsaraConversions.millisecondsToMinutes(report.engineIdleTimeDurationMs ?? 0);
+        const drivingMinutes = Math.max(0, engineOnMinutes - idleMinutes);
+        const idleFuelGallons = idleFuelByVehicle.get(vehicleId) ?? null;
+        const mpg = fuelGallons > 0 ? distanceMiles / fuelGallons : null;
 
-        // Store raw API values in source units — conversions happen at read time in the route
         const data = {
           vehicleName,
           vin,
-          distanceTraveledMeters: report.distanceTraveledMeters ?? null,
-          fuelConsumedMl: report.fuelConsumedMl ?? null,
-          engineRunTimeDurationMs: report.engineRunTimeDurationMs != null
-            ? BigInt(Math.round(report.engineRunTimeDurationMs))
-            : null,
-          engineIdleTimeDurationMs: report.engineIdleTimeDurationMs != null
-            ? BigInt(Math.round(report.engineIdleTimeDurationMs))
-            : null,
-          efficiencyMpge: report.efficiencyMpge ?? null,
-          // Full raw response kept as audit trail
-          rawResponse: report as any,
-          processedAt: verify ? new Date() : existing?.processedAt || null,
+          fuelGallons: report.fuelConsumedMl != null ? fuelGallons : null,
+          distanceMiles: report.distanceTraveledMeters != null ? distanceMiles : null,
+          engineOnMinutes: report.engineRunTimeDurationMs != null ? engineOnMinutes : null,
+          drivingMinutes: report.engineRunTimeDurationMs != null ? drivingMinutes : null,
+          idleMinutes: report.engineIdleTimeDurationMs != null ? idleMinutes : null,
+          idleFuelGallons,
+          mpg: mpg != null && isFinite(mpg) ? mpg : null,
+          processedAt: verify ? new Date() : undefined,
         };
 
+        const existing = await appPrisma.samsaraVehicleUtilization.findUnique({
+          where: { clerkOrgId_vehicleId_date: { clerkOrgId, vehicleId, date } },
+        });
+
         if (!existing) {
-          await appPrisma.samsaraRawData.create({
+          await appPrisma.samsaraVehicleUtilization.create({
             data: { clerkOrgId, vehicleId, date, ...data },
           });
           result.newCount++;
         } else {
-          // Compare typed columns; use tolerance for floats to avoid false "updated" from rounding
-          const eqFloat = (a: number | null | undefined, b: number | null | undefined, tol = 0.001) =>
+          const eqF = (a: number | null | undefined, b: number | null | undefined, tol = 0.001) =>
             (a == null && b == null) || (a != null && b != null && Math.abs(a - b) <= tol);
-          const eqBigInt = (a: bigint | number | null | undefined, b: bigint | number | null | undefined) =>
-            (a == null && b == null) || (a != null && b != null && BigInt(a) === BigInt(b));
 
           const hasChanged =
-            !eqFloat(existing.distanceTraveledMeters, data.distanceTraveledMeters) ||
-            !eqFloat(existing.fuelConsumedMl, data.fuelConsumedMl) ||
-            !eqBigInt(existing.engineRunTimeDurationMs, data.engineRunTimeDurationMs) ||
-            !eqBigInt(existing.engineIdleTimeDurationMs, data.engineIdleTimeDurationMs) ||
-            !eqFloat(existing.efficiencyMpge, data.efficiencyMpge);
+            !eqF(existing.fuelGallons, data.fuelGallons) ||
+            !eqF(existing.distanceMiles, data.distanceMiles) ||
+            !eqF(existing.engineOnMinutes, data.engineOnMinutes) ||
+            !eqF(existing.idleMinutes, data.idleMinutes) ||
+            !eqF(existing.idleFuelGallons, data.idleFuelGallons);
 
-          if (hasChanged) {
-            await appPrisma.samsaraRawData.update({ where: { id: existing.id }, data });
-            result.updatedCount++;
-          } else if (verify) {
-            await appPrisma.samsaraRawData.update({
+          if (hasChanged || verify) {
+            await appPrisma.samsaraVehicleUtilization.update({
               where: { id: existing.id },
-              data: { processedAt: new Date() },
+              data: { ...data, processedAt: new Date() },
             });
-            result.unchangedCount++;
+            result.updatedCount++;
           } else {
             result.unchangedCount++;
           }
         }
 
-        const milesDisplay = data.distanceTraveledMeters != null
-          ? (data.distanceTraveledMeters / 1609.34).toFixed(1)
-          : '?';
-        const galDisplay = data.fuelConsumedMl != null
-          ? (data.fuelConsumedMl / 3785.41).toFixed(1)
-          : '?';
-        console.log(`[Samsara] Processed vehicle ${vehicleName} (${vin || 'no VIN'}): ${milesDisplay} mi, ${galDisplay} gal`);
+        console.log(
+          `[Samsara] Vehicle ${vehicleName} (${vin ?? 'no VIN'}): ` +
+          `${distanceMiles.toFixed(1)} mi, ${fuelGallons.toFixed(2)} gal` +
+          (idleFuelGallons != null ? `, ${idleFuelGallons.toFixed(2)} gal idle` : '')
+        );
       } catch (error: any) {
-        const errorMsg = `Vehicle ${report.vehicle.name}: ${error.message}`;
         result.errorCount++;
-        result.errors.push({ recordId: report.vehicle.id, error: errorMsg });
-        console.error(`[Samsara] Error processing vehicle:`, errorMsg);
+        result.errors.push({ recordId: report.vehicle.id, error: error.message });
+        console.error(`[Samsara] Error processing vehicle ${report.vehicle.name}:`, error.message);
       }
     }
 
     console.log(
       `[Samsara] Sync complete for ${date}: ` +
-      `${result.newCount} new records added, ${result.unchangedCount} preexisting records unchanged, ${result.updatedCount} updated (overwritten)` +
+      `${result.newCount} new, ${result.unchangedCount} unchanged, ${result.updatedCount} updated` +
       (result.errorCount > 0 ? `, ${result.errorCount} errors` : '')
     );
 

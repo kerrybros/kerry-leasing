@@ -168,8 +168,8 @@ export async function getUnitsFromTelematics(clerkOrgId: string) {
     vehicleInfo.set(v.vin, { name: v.providerVehicleName || undefined });
   });
 
-  // 2. Get VINs from Samsara raw data
-  const samsaraVins = await client.samsaraRawData.findMany({
+  // 2. Get VINs from Samsara vehicle utilization (samsaraRawData is deprecated)
+  const samsaraVins = await client.samsaraVehicleUtilization.findMany({
     where: { clerkOrgId, vin: { not: null } },
     select: { vin: true, vehicleName: true },
     distinct: ['vin'],

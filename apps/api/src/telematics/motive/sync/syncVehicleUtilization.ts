@@ -1,6 +1,11 @@
 /**
- * SYNC VEHICLE UTILIZATION
- * Fetches vehicle utilization from Motive API and stores in database
+ * SYNC VEHICLE UTILIZATION (Motive v2)
+ * Fetches vehicle utilization from Motive v2 API and stores in motive_vehicle_utilization.
+ *
+ * Unit normalization at write time:
+ *   idle_time, driving_time: seconds → minutes (stored as minutes for consistent frontend contract)
+ *   idle_fuel, driving_fuel, total_fuel: gallons (API already returns imperial with X-Metric-Units: false)
+ *   total_distance: miles (API already returns imperial)
  */
 
 import { appPrisma } from '../../../lib/prisma.js';
@@ -22,30 +27,24 @@ export async function syncVehicleUtilization(
     updatedCount: 0,
     unchangedCount: 0,
     errorCount: 0,
-    errors: []
+    errors: [],
   };
 
   try {
-    // Create client and fetch data
     const client = new MotiveClient(apiKey);
     const records = await fetchVehicleUtilization(client, date);
-    
     result.recordCount = records.length;
 
-    // Process each record
     for (const record of records) {
       try {
         const vehicleId = record.vehicle.id;
-        
-        // Check if record exists
+
+        // Normalize seconds → minutes at write time
+        const idleTimeMin = record.idle_time != null ? Math.round(record.idle_time / 60) : null;
+        const drivingTimeMin = record.driving_time != null ? Math.round(record.driving_time / 60) : null;
+
         const existing = await appPrisma.motiveVehicleUtilization.findUnique({
-          where: {
-            clerkOrgId_vehicleId_date: {
-              clerkOrgId,
-              vehicleId,
-              date
-            }
-          }
+          where: { clerkOrgId_vehicleId_date: { clerkOrgId, vehicleId, date } },
         });
 
         const recordData = {
@@ -54,28 +53,28 @@ export async function syncVehicleUtilization(
           vehicleNumber: record.vehicle.number || null,
           vin: record.vehicle.vin || null,
           date,
-          lastLocatedAt: record.last_located_at || null,
+          lastLocatedAt: null,
           utilizationPercentage: record.utilization ?? null,
-          idleTime: record.idle_time ?? null,
+          idleTime: idleTimeMin,          // stored in minutes
           idleFuel: record.idle_fuel ?? null,
-          drivingTime: record.driving_time ?? null,
+          drivingTime: drivingTimeMin,    // stored in minutes
           drivingFuel: record.driving_fuel ?? null,
-          totalFuel: record.total_fuel ?? null,
+          totalFuel: record.total_fuel ?? (
+            record.idle_fuel != null && record.driving_fuel != null
+              ? record.idle_fuel + record.driving_fuel
+              : null
+          ),
           totalDistance: record.total_distance ?? null,
           message: record.message || null,
           rawResponse: record as any,
           lastVerifiedAt: verify ? new Date() : (existing?.lastVerifiedAt || null),
-          dataVersion: existing ? existing.dataVersion : 1
+          dataVersion: existing ? existing.dataVersion : 1,
         };
 
         if (!existing) {
-          // New record
-          await appPrisma.motiveVehicleUtilization.create({
-            data: recordData
-          });
+          await appPrisma.motiveVehicleUtilization.create({ data: recordData });
           result.newCount++;
         } else {
-          // Check if data changed (compare key fields; include all utilization metrics)
           const hasChanged =
             existing.utilizationPercentage !== recordData.utilizationPercentage ||
             existing.idleTime !== recordData.idleTime ||
@@ -86,34 +85,15 @@ export async function syncVehicleUtilization(
             existing.totalDistance !== recordData.totalDistance;
 
           if (hasChanged) {
-            // Update with incremented version
             await appPrisma.motiveVehicleUtilization.update({
-              where: {
-                clerkOrgId_vehicleId_date: {
-                  clerkOrgId,
-                  vehicleId,
-                  date
-                }
-              },
-              data: {
-                ...recordData,
-                dataVersion: existing.dataVersion + 1
-              }
+              where: { clerkOrgId_vehicleId_date: { clerkOrgId, vehicleId, date } },
+              data: { ...recordData, dataVersion: existing.dataVersion + 1 },
             });
             result.updatedCount++;
           } else if (verify) {
-            // No change but update verification timestamp
             await appPrisma.motiveVehicleUtilization.update({
-              where: {
-                clerkOrgId_vehicleId_date: {
-                  clerkOrgId,
-                  vehicleId,
-                  date
-                }
-              },
-              data: {
-                lastVerifiedAt: new Date()
-              }
+              where: { clerkOrgId_vehicleId_date: { clerkOrgId, vehicleId, date } },
+              data: { lastVerifiedAt: new Date() },
             });
             result.unchangedCount++;
           } else {
@@ -122,10 +102,7 @@ export async function syncVehicleUtilization(
         }
       } catch (error: any) {
         result.errorCount++;
-        result.errors.push({
-          recordId: record.vehicle.id,
-          error: error.message
-        });
+        result.errors.push({ recordId: record.vehicle.id, error: error.message });
       }
     }
 
@@ -135,4 +112,3 @@ export async function syncVehicleUtilization(
     throw error;
   }
 }
-

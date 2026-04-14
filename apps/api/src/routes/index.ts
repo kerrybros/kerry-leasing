@@ -7,6 +7,7 @@ import {
 } from '../middleware/auth.js';
 import * as repairRepo from '../db/repairRepo.js';
 import * as appRepo from '../db/appRepo.js';
+import { getDieselPricePerGallon } from '../lib/eiaFuelPrice.js';
 import { getRepairDbSafetyStatus } from '../safety/repairDbSafety.js';
 import { getAppPrisma } from '../lib/prisma.js';
 import telematicsRoutes from './telematics.js';
@@ -15,6 +16,7 @@ import cronRoutes from './cron.js';
 import servicePlanRoutes from './servicePlan.js';
 import fleetRoutes from './fleet.js';
 import repairsRoutes from './repairs.js';
+import adminOrgsRoutes from './adminOrgs.js';
 import { LinkOrgSchema, RepairCustomerSchema, parseBody } from '../lib/validate.js';
 
 const router = Router();
@@ -427,6 +429,9 @@ router.use(
 // Mount repairs aggregation routes
 router.use('/repairs', repairsRoutes);
 
+// Mount admin orgs routes (customer onboarding + management)
+router.use('/admin/orgs', adminOrgsRoutes);
+
 // Get organization settings (feature flags)
 router.get(
   '/org/settings',
@@ -464,6 +469,9 @@ router.get(
         },
       });
       
+      // Fetch diesel price in parallel — non-blocking, falls back to cached/hardcoded
+      const dieselPricePerGallon = await getDieselPricePerGallon();
+
       res.json({
         tracksDrivers: settings?.tracksDrivers ?? true,
         telematicsProvider: providerAccount?.provider || null,
@@ -475,6 +483,7 @@ router.get(
         telematicsDashboardUrl: settings?.telematicsDashboardUrl ?? null,
         telematicsDashboardUsername: settings?.telematicsDashboardUsername ?? null,
         telematicsDashboardPassword: settings?.telematicsDashboardPassword ?? null,
+        dieselPricePerGallon,
       });
     } catch (error) {
       console.error('Error fetching org settings:', error);
@@ -497,6 +506,7 @@ router.put(
       const clerkOrgId = req.auth!.orgId!;
       const appPrisma = getAppPrisma();
       const {
+        tracksDrivers,
         serviceRequestUrl,
         contractTermYears,
         telematicsDashboardUrl,
@@ -507,6 +517,7 @@ router.put(
       await appPrisma.organizationSettings.upsert({
         where: { clerkOrgId },
         update: {
+          ...(tracksDrivers !== undefined && { tracksDrivers: Boolean(tracksDrivers) }),
           ...(serviceRequestUrl !== undefined && { serviceRequestUrl }),
           ...(contractTermYears !== undefined && { contractTermYears }),
           ...(telematicsDashboardUrl !== undefined && { telematicsDashboardUrl }),
@@ -515,6 +526,7 @@ router.put(
         },
         create: {
           clerkOrgId,
+          tracksDrivers: tracksDrivers !== undefined ? Boolean(tracksDrivers) : true,
           serviceRequestUrl: serviceRequestUrl ?? null,
           contractTermYears: contractTermYears ?? null,
           telematicsDashboardUrl: telematicsDashboardUrl ?? null,

@@ -8,17 +8,21 @@
 import 'dotenv/config';
 import { appPrisma } from '../lib/prisma.js';
 import { MotiveClient } from '../telematics/motive/client.js';
+import { readCredentials } from '../lib/credentials.js';
 
 const ORG = 'org_39B7lu1b8YKds8IOtzrk6LpKnLW';
 const DATE = '2026-02-03';
-const START_AT = '2026-02-03T00:00:00-05:00';
-const END_AT = '2026-02-03T23:59:59-05:00';
+// Motive dashboard uses UTC day boundaries (midnight-to-midnight UTC).
+// The original resolution confirmed: end_at = next day T00:00:00Z captures the full UTC day.
+const START_AT = '2026-02-03T00:00:00Z';
+const END_AT = '2026-02-04T00:00:00Z';
 
 // Sample rows from your CSV (image) to compare
-const CSV_SAMPLE: Record<string, { util: number; idleMin: number; idleFuel: number; drivingMin: number; drivingFuel: number; distance: number; mpg: number | null }> = {
-  '111': { util: 16, idleMin: 431.6, idleFuel: 5.15, drivingMin: 79.38, drivingFuel: 2.25, distance: 32.31, mpg: 4.37 },
-  '2176': { util: 74, idleMin: 149.35, idleFuel: 1.54, drivingMin: 415.42, drivingFuel: 58.03, distance: 395.19, mpg: 6.63 },
-  '2203': { util: 0, idleMin: 16.35, idleFuel: 0.28, drivingMin: 0, drivingFuel: 0, distance: 0, mpg: null },
+// Values from downloaded dashboard CSV (1775851350-vehicle_fuel_performance.csv)
+const CSV_SAMPLE: Record<string, { idleMin: number; idleFuel: number; drivingMin: number; drivingFuel: number; distance: number; mpg: number | null }> = {
+  '2204': { idleMin: 150.71, idleFuel: 1.21, drivingMin: 502.34, drivingFuel: 62.78, distance: 459.81, mpg: 7.32 },
+  '2221': { idleMin: 228.71, idleFuel: 2.06, drivingMin: 368.06, drivingFuel: 41.66, distance: 313.79, mpg: 7.53 },
+  '2176': { idleMin: 149.35, idleFuel: 1.54, drivingMin: 432.60, drivingFuel: 58.82, distance: 395.19, mpg: 6.72 },
 };
 
 interface V2Record {
@@ -33,15 +37,16 @@ interface V2Record {
 
 async function main() {
   const account = await appPrisma.telematicsProviderAccount.findFirst({
-    where: { clerkOrgId: ORG, provider: 'MOTIVE', status: 'ACTIVE' },
+    where: { clerkOrgId: ORG, provider: 'MOTIVE' },
   });
   if (!account) {
-    console.error('No active Motive account for org', ORG);
+    console.error('No Motive account found for org', ORG);
     process.exit(1);
   }
-  const apiKey = (account.credentialsJson as { apiKey?: string })?.apiKey;
+  const creds = readCredentials(account.credentialsJson);
+  const apiKey = creds.apiKey as string | undefined;
   if (!apiKey) {
-    console.error('No API key for org', ORG);
+    console.error('Motive account has no apiKey in credentialsJson');
     process.exit(1);
   }
 
@@ -79,37 +84,27 @@ async function main() {
 
   // Compare to CSV sample
   console.log('\n--- Comparison to your CSV (sample rows) ---\n');
-  const tol = 0.02;
-  const eq = (a: number, b: number) => Math.abs(a - b) <= tol;
+  const tol = 0.05; // 5% tolerance
+  const pct = (a: number, b: number) => b === 0 ? '∞' : `${(((a - b) / b) * 100).toFixed(1)}%`;
+  console.log('Vehicle | Drive Time (min) | Distance (mi) | Drive Fuel (gal) | Idle Time (min) | Idle Fuel (gal) | Moving MPG');
+  console.log('        |  API   vs  CSV   |  API  vs  CSV |  API   vs  CSV   |  API  vs  CSV   |  API  vs  CSV   |  API  vs  CSV');
   for (const [veh, expected] of Object.entries(CSV_SAMPLE)) {
     const r = byVehicle[veh];
-    if (!r) {
-      console.log('Vehicle', veh, ': NOT IN API RESPONSE');
-      continue;
-    }
+    if (!r) { console.log(`${veh}: NOT IN API RESPONSE`); continue; }
     const idleMin = (r.idle_time ?? 0) / 60;
     const drivingMin = (r.driving_time ?? 0) / 60;
-    const mpg = (r.driving_fuel != null && r.driving_fuel > 0 && r.total_distance != null)
+    const movingMpg = (r.driving_fuel != null && r.driving_fuel > 0 && r.total_distance != null)
       ? r.total_distance / r.driving_fuel : null;
-    const okUtil = r.utilization != null && eq(r.utilization, expected.util);
-    const okIdleMin = eq(idleMin, expected.idleMin);
-    const okIdleFuel = r.idle_fuel != null && eq(r.idle_fuel, expected.idleFuel);
-    const okDrivingMin = eq(drivingMin, expected.drivingMin);
-    const okDrivingFuel = r.driving_fuel != null && eq(r.driving_fuel, expected.drivingFuel);
-    const okDist = (r.total_distance != null && expected.distance === 0) ? r.total_distance === 0 : (r.total_distance != null && eq(r.total_distance, expected.distance));
-    const okMpg = expected.mpg === null ? mpg === null : (mpg != null && eq(mpg, expected.mpg));
-    const all = okUtil && okIdleMin && okIdleFuel && okDrivingMin && okDrivingFuel && okDist && okMpg;
-    console.log('Vehicle', veh, all ? 'MATCHES' : 'DIFF', {
-      utilization: okUtil ? 'ok' : `api=${r.utilization} csv=${expected.util}`,
-      idlingMin: okIdleMin ? 'ok' : `api=${idleMin.toFixed(2)} csv=${expected.idleMin}`,
-      idledFuel: okIdleFuel ? 'ok' : `api=${r.idle_fuel} csv=${expected.idleFuel}`,
-      drivingMin: okDrivingMin ? 'ok' : `api=${drivingMin.toFixed(2)} csv=${expected.drivingMin}`,
-      drivingFuel: okDrivingFuel ? 'ok' : `api=${r.driving_fuel} csv=${expected.drivingFuel}`,
-      distance: okDist ? 'ok' : `api=${r.total_distance} csv=${expected.distance}`,
-      mpg: okMpg ? 'ok' : `api=${mpg?.toFixed(2)} csv=${expected.mpg}`,
-    });
+    console.log(
+      `${veh} | ${drivingMin.toFixed(1)} vs ${expected.drivingMin} (${pct(drivingMin, expected.drivingMin)}) ` +
+      `| ${(r.total_distance ?? 0).toFixed(2)} vs ${expected.distance} (${pct(r.total_distance ?? 0, expected.distance)}) ` +
+      `| ${(r.driving_fuel ?? 0).toFixed(2)} vs ${expected.drivingFuel} (${pct(r.driving_fuel ?? 0, expected.drivingFuel)}) ` +
+      `| ${idleMin.toFixed(1)} vs ${expected.idleMin} (${pct(idleMin, expected.idleMin)}) ` +
+      `| ${(r.idle_fuel ?? 0).toFixed(2)} vs ${expected.idleFuel} (${pct(r.idle_fuel ?? 0, expected.idleFuel)}) ` +
+      `| ${movingMpg?.toFixed(2) ?? 'N/A'} vs ${expected.mpg}`
+    );
   }
-  console.log('\nYour CSV had ~39 rows; v2 API returned', results.length, 'vehicles.\n');
+  console.log('\nv2 API returned', results.length, 'vehicles.\n');
 }
 
 main().catch((e) => {

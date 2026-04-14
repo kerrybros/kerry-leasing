@@ -20,7 +20,7 @@ import {
   SidebarMenuItem,
   SidebarProvider,
 } from '@/components/ui/sidebar';
-import { Truck, Settings, Users, Wrench, CalendarClock, MessageSquare } from 'lucide-react';
+import { Truck, Settings, Users, Wrench, CalendarClock, MessageSquare, Building2, Activity } from 'lucide-react';
 
 const defaultOrgSettings = {
   tracksDrivers: true,
@@ -41,8 +41,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
-  const showDrivers =
-    orgSettings.tracksDrivers && orgSettings.telematicsProvider === 'MOTIVE';
+  const showDrivers = orgSettings.tracksDrivers;
 
   const navItems = [
     {
@@ -56,18 +55,21 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       label: 'Shop',
       icon: Wrench,
       active: !!pathname?.includes('/wip'),
+      hidden: !isAdmin,
     },
     {
       href: '/app/pm',
       label: 'PM',
       icon: CalendarClock,
       active: !!pathname?.includes('/pm'),
+      hidden: !isAdmin,
     },
     {
       href: '/app/chat',
       label: 'Chat',
       icon: MessageSquare,
       active: !!pathname?.includes('/chat'),
+      hidden: !isAdmin,
     },
     {
       href: '/app/drivers',
@@ -77,24 +79,26 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       hidden: !showDrivers,
     },
     {
-      href: '/app/admin/overview',
-      label: 'Admin',
-      icon: Settings,
-      active: !!pathname?.includes('/admin'),
-      hidden: !isAdmin,
+      href: '/app/team',
+      label: 'Users',
+      icon: Users,
+      active: !!pathname?.includes('/team'),
     },
   ].filter((item) => !item.hidden);
 
   return (
-    <SidebarProvider style={{ "--sidebar-width": "11rem" } as React.CSSProperties}>
+    <SidebarProvider
+      defaultOpen={true}
+      style={{ "--sidebar-width": "10rem" } as React.CSSProperties}
+    >
       <Sidebar collapsible="none">
-        {/* Logo */}
+        {/* Logo — full logo when expanded, small "KL" square when collapsed */}
         <SidebarHeader className="py-3 px-3">
           <Link href="/app/fleet" className="no-underline block">
-            <div className="flex items-center px-2 py-1.5 bg-white rounded-lg">
+            <div className="flex items-center px-2 py-1.5 bg-white rounded-lg overflow-hidden">
               <Image
-                src="/logos/Kerry Leasing Logo.png"
-                alt="Kerry Leasing"
+                src="/logos/Kerry Brothers Truck Repair Logo Transpaent.png"
+                alt="Kerry Brothers Truck Repair"
                 width={120}
                 height={40}
                 className="h-7 w-auto object-contain"
@@ -125,24 +129,65 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             </SidebarGroupContent>
           </SidebarGroup>
 
+          {/* Internal section — KL-admin only */}
+          {isAdmin && (
+            <SidebarGroup className="mt-auto">
+              <div className="px-3 pb-1">
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-sidebar-foreground/40">Internal</p>
+              </div>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      render={<Link href="/app/admin/overview" />}
+                      isActive={!!pathname?.includes('/admin') && !pathname?.includes('/admin/customers')}
+                      tooltip="Admin"
+                    >
+                      <Settings />
+                      <span>Admin</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      render={<Link href="/app/admin/customers" />}
+                      isActive={!!pathname?.includes('/admin/customers')}
+                      tooltip="Customers"
+                    >
+                      <Building2 />
+                      <span>Customers</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      render={<Link href="/app/admin/cron-health" />}
+                      isActive={!!pathname?.includes('/admin/cron-health')}
+                      tooltip="Cron Health"
+                    >
+                      <Activity />
+                      <span>Cron Health</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          )}
+
           {/* Service Request Button — pinned to bottom of body */}
           <div className="mt-auto px-3 pb-2">
             <a
               href={orgSettings.serviceRequestUrl || '#'}
               target={orgSettings.serviceRequestUrl ? '_blank' : undefined}
               rel={orgSettings.serviceRequestUrl ? 'noopener noreferrer' : undefined}
-              onClick={orgSettings.serviceRequestUrl ? undefined : (e) => { e.preventDefault(); alert('No service request URL configured. Ask your admin to set one in Org Settings.'); }}
+              onClick={orgSettings.serviceRequestUrl ? undefined : (e) => { e.preventDefault(); alert('No service request URL configured. Ask your admin to set one in Customer Settings.'); }}
               className="flex items-center justify-center rounded-md px-3 py-2 text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors w-full"
             >
-              Submit Service Request
+              Request Service
             </a>
           </div>
         </SidebarContent>
 
         {/* Footer: org switcher + user controls */}
         <SidebarFooter className="border-t border-sidebar-border pb-3">
-
-          {/* OrganizationSwitcher — only render after hydration to avoid portal mismatch */}
           {mounted && (
             <div className="px-1 pt-1">
               <OrganizationSwitcher
@@ -159,10 +204,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             </div>
           )}
 
-          {/* Theme + User */}
-          <div className="flex items-center gap-1 px-1">
+          <div className="flex items-center gap-1 px-1 overflow-hidden">
             <ThemeToggle />
-            {mounted && <UserButton afterSignOutUrl="/sign-in" />}
+            {mounted && (
+              <div className="shrink-0 [&_button]:!w-7 [&_button]:!h-7 [&_img]:!w-7 [&_img]:!h-7">
+                <UserButton afterSignOutUrl="/sign-in" />
+              </div>
+            )}
           </div>
         </SidebarFooter>
       </Sidebar>

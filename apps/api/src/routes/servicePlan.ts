@@ -393,11 +393,11 @@ router.get('/units', async (req: AuthRequest, res) => {
     }
 
     // Build a map: normalized vehicleNumber → vehicle, for name-based suggestions
-    const telematicsByName = new Map<string, { vin: string; vehicleNumber: string }>();
+    const telematicsByName = new Map<string, { telematicsVin: string; vehicleNumber: string }>();
     for (const v of allTelematicsVehicles) {
       if (v.vehicleNumber) {
         telematicsByName.set(v.vehicleNumber.trim().toLowerCase(), {
-          vin: v.vin,
+          telematicsVin: v.vin,
           vehicleNumber: v.vehicleNumber,
         });
       }
@@ -455,7 +455,7 @@ router.get('/units', async (req: AuthRequest, res) => {
           // Only suggest if that VIN isn't already matched to another unit
           if (suggestion) {
             const alreadyMatched = units.some(
-              u => u.telematicsVin === suggestion.vin && u.matchType !== 'UNMATCHED'
+              u => u.telematicsVin === suggestion.telematicsVin && u.matchType !== 'UNMATCHED'
             );
             if (!alreadyMatched) suggestedMatch = suggestion;
           }

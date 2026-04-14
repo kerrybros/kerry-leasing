@@ -44,5 +44,8 @@ next-env.d.ts
 prisma/migrations
 apps/api/src/generated/
 
+# Admin config exports (local DB dumps; may contain encrypted telematics credentials)
+apps/api/src/scripts/admin/config-export/*.json
+
 # Turbo
 .turbo

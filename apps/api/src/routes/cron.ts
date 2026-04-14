@@ -8,6 +8,7 @@ import { Router, Request, Response } from 'express';
 import { config } from '../config.js';
 import { syncMotiveDaily } from '../telematics/motive/syncService.js';
 import { syncSamsaraDaily } from '../telematics/samsara/syncService.js';
+import { refreshDieselPrice } from '../lib/eiaFuelPrice.js';
 import { getAppPrisma } from '../lib/prisma.js';
 
 const router = Router();
@@ -78,9 +79,24 @@ router.post('/sync-samsara', async (req: Request, res: Response) => {
 });
 
 /**
+ * POST /cron/refresh-fuel-price
+ * Fetches the latest diesel retail price from EIA and stores in system_config.
+ * Should be called once per week (e.g. Monday morning).
+ */
+router.post('/refresh-fuel-price', async (req: Request, res: Response) => {
+  if (!verifyCronSecret(req, res)) return;
+  try {
+    const result = await refreshDieselPrice();
+    res.json({ success: true, ...result, timestamp: new Date().toISOString() });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Internal server error', message: error.message });
+  }
+});
+
+/**
  * GET /cron/status
- * Returns lastSyncAt, lastError, and status for all active provider accounts.
- * Protected by cron secret so it can be called by the scheduler to verify health.
+ * Returns lastSyncAt, lastError, status, and lastSyncAgeHours for all provider accounts.
+ * A stale flag is set if the last sync was >26h ago.
  */
 router.get('/status', async (req: Request, res: Response) => {
   if (!verifyCronSecret(req, res)) return;
@@ -98,12 +114,95 @@ router.get('/status', async (req: Request, res: Response) => {
       orderBy: { updatedAt: 'desc' },
     });
 
+    const now = Date.now();
+    const enriched = accounts.map((a) => {
+      const lastSyncAgeHours =
+        a.lastSyncAt != null
+          ? Math.round(((now - a.lastSyncAt.getTime()) / 3600000) * 10) / 10
+          : null;
+      return {
+        ...a,
+        lastSyncAgeHours,
+        stale: lastSyncAgeHours === null || lastSyncAgeHours > 26,
+      };
+    });
+
     res.json({
       timestamp: new Date().toISOString(),
-      total: accounts.length,
-      active: accounts.filter((a) => a.status === 'ACTIVE').length,
-      error: accounts.filter((a) => a.status === 'ERROR').length,
-      accounts,
+      total: enriched.length,
+      active: enriched.filter((a) => a.status === 'ACTIVE').length,
+      error: enriched.filter((a) => a.status === 'ERROR').length,
+      staleCount: enriched.filter((a) => a.stale).length,
+      accounts: enriched,
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Internal server error', message: error.message });
+  }
+});
+
+/**
+ * GET /cron/data-integrity
+ * Returns row counts per table per org for the last 7 days.
+ * Use this to confirm that data is flowing correctly post-sync.
+ */
+router.get('/data-integrity', async (req: Request, res: Response) => {
+  if (!verifyCronSecret(req, res)) return;
+  try {
+    const appClient = getAppPrisma();
+
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    const sevenDaysAgoStr = sevenDaysAgo.toISOString().split('T')[0];
+
+    // Count rows per org per table for the last 7 days
+    const [samsaraUtil, samsaraIdling, samsaraSafety, motiveUtil, motiveIdle, motiveScorecard] =
+      await Promise.all([
+        appClient.samsaraVehicleUtilization.groupBy({
+          by: ['clerkOrgId'],
+          where: { date: { gte: sevenDaysAgoStr } },
+          _count: { id: true },
+        }),
+        appClient.samsaraIdlingEvent.groupBy({
+          by: ['clerkOrgId'],
+          where: { eventDate: { gte: sevenDaysAgoStr } },
+          _count: { id: true },
+        }),
+        appClient.samsaraSafetyEvent.groupBy({
+          by: ['clerkOrgId'],
+          where: { eventDate: { gte: sevenDaysAgoStr } },
+          _count: { id: true },
+        }),
+        appClient.motiveVehicleUtilization.groupBy({
+          by: ['clerkOrgId'],
+          where: { date: { gte: sevenDaysAgoStr } },
+          _count: { id: true },
+        }),
+        appClient.motiveIdleEvent.groupBy({
+          by: ['clerkOrgId'],
+          where: { date: { gte: sevenDaysAgoStr } },
+          _count: { id: true },
+        }),
+        appClient.motiveScorecardSummary.groupBy({
+          by: ['clerkOrgId'],
+          where: { date: { gte: sevenDaysAgoStr } },
+          _count: { id: true },
+        }),
+      ]);
+
+    const toMap = (rows: Array<{ clerkOrgId: string; _count: { id: number } }>) =>
+      Object.fromEntries(rows.map((r) => [r.clerkOrgId, r._count.id]));
+
+    res.json({
+      timestamp: new Date().toISOString(),
+      window: `${sevenDaysAgoStr} to today`,
+      tables: {
+        samsara_vehicle_utilization: toMap(samsaraUtil),
+        samsara_idling_events: toMap(samsaraIdling),
+        samsara_safety_events: toMap(samsaraSafety),
+        motive_vehicle_utilization: toMap(motiveUtil),
+        motive_idle_events: toMap(motiveIdle),
+        motive_scorecard_summaries: toMap(motiveScorecard),
+      },
     });
   } catch (error: any) {
     res.status(500).json({ error: 'Internal server error', message: error.message });

@@ -636,51 +636,29 @@ router.get(
 
       const cacheKey = `telematics:samsara:vehicle-stats:${orgId}`;
       const { value: rawRecords, hit } = await telematicsCache.getOrSet(cacheKey, async () => {
-        return await appClient.samsaraRawData.findMany({
+        return await appClient.samsaraVehicleUtilization.findMany({
           where: { clerkOrgId: orgId },
           orderBy: [{ date: 'desc' }, { vehicleId: 'asc' }],
         });
       });
 
-      // Idle fuel: aggregate on read from idling events (assetId = vehicle.id)
-      const dates = [...new Set(rawRecords.map((r: any) => r.date))] as string[];
-      const idleByDate = await getSamsaraIdleAggregatesByDate(appClient, orgId, dates);
-
-      // Transform Samsara data to unified VehicleUtilization shape.
-      // Convert from raw source units: meters→miles, ml→gallons, ms→seconds.
+      // Data is already normalized in samsaraVehicleUtilization (gallons, miles, minutes)
       const transformedRecords = rawRecords.map((record: any) => {
-        const idle = idleByDate.get(record.date)?.get(record.vehicleId);
-        const idleFuelGallons = idle ? idle.idleFuelMl / 3785.41 : null;
-
-        const totalDistanceMiles = record.distanceTraveledMeters != null
-          ? record.distanceTraveledMeters / 1609.34
-          : null;
-        const totalFuelGallons = record.fuelConsumedMl != null
-          ? record.fuelConsumedMl / 3785.41
-          : null;
-        const engineMs = record.engineRunTimeDurationMs != null
-          ? Number(record.engineRunTimeDurationMs)
-          : null;
-        const idleMs = record.engineIdleTimeDurationMs != null
-          ? Number(record.engineIdleTimeDurationMs)
-          : null;
-        const idleSeconds = idleMs != null ? Math.round(idleMs / 1000) : null;
-        const drivingSeconds = engineMs != null && idleMs != null
-          ? Math.max(0, Math.round((engineMs - idleMs) / 1000))
-          : engineMs != null
-            ? Math.round(engineMs / 1000)
-            : null;
-
+        const drivingFuel =
+          record.fuelGallons != null && record.idleFuelGallons != null
+            ? Math.max(0, record.fuelGallons - record.idleFuelGallons)
+            : record.fuelGallons ?? null;
         return {
           vehicleId: parseInt(record.vehicleId) || 0,
-          vehicleNumber: record.vehicleName || null,
-          vin: record.vin,
+          vehicleNumber: record.vehicleName ?? null,
+          vin: record.vin ?? null,
           date: record.date,
-          totalDistance: totalDistanceMiles,
-          idleTime: idleSeconds,
-          drivingTime: drivingSeconds,
-          totalFuel: totalFuelGallons,
-          idleFuel: idleFuelGallons,
+          totalDistance: record.distanceMiles ?? null,
+          idleTime: record.idleMinutes != null ? Math.round(record.idleMinutes * 60) : null,
+          drivingTime: record.drivingMinutes != null ? Math.round(record.drivingMinutes * 60) : null,
+          totalFuel: record.fuelGallons ?? null,
+          idleFuel: record.idleFuelGallons ?? null,
+          drivingFuel,
         };
       });
 

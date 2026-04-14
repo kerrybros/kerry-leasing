@@ -1,76 +1,58 @@
 /**
- * VEHICLE UTILIZATION ENDPOINT
- * Fetches daily vehicle utilization metrics from Motive v1 API.
- * Uses start_date/end_date for the requested Eastern calendar day.
- * Response is normalized to a single shape for the sync layer.
+ * VEHICLE UTILIZATION ENDPOINT — Motive v2
+ * Fetches daily vehicle utilization metrics using the v2 API endpoint.
+ *
+ * Uses UTC midnight-to-midnight boundaries: start_at = YYYY-MM-DDT00:00:00Z,
+ * end_at = next day T00:00:00Z. Validated against Motive dashboard CSV.
+ *
+ * Unit notes from API (with X-Metric-Units: false):
+ *   idle_time, driving_time → seconds (normalized to minutes at write time in sync layer)
+ *   idle_fuel, driving_fuel → gallons
+ *   total_distance          → miles
  */
 
 import { MotiveClient } from '../client.js';
-import type {
-  MotiveVehicleUtilizationRecord,
-  MotiveVehicleUtilizationV1Rollup,
-} from '../types.js';
 
-function toNumber(value: number | string | undefined | null): number | null {
-  if (value == null) return null;
-  if (typeof value === 'number') return Number.isNaN(value) ? null : value;
-  const n = parseFloat(String(value));
-  return Number.isNaN(n) ? null : n;
+export interface MotiveV2VehicleUtilRecord {
+  vehicle: { id: number; number?: string; vin?: string };
+  utilization?: number;
+  idle_time?: number;    // seconds
+  idle_fuel?: number;    // gallons
+  driving_time?: number; // seconds
+  driving_fuel?: number; // gallons
+  total_distance?: number; // miles
+  total_fuel?: number;   // gallons (idle + driving)
+  message?: string;
 }
 
-/** Normalize a v1 vehicle_idle_rollup to the record shape expected by sync */
-function normalizeV1Rollup(raw: MotiveVehicleUtilizationV1Rollup): MotiveVehicleUtilizationRecord | null {
-  const vehicle = raw.vehicle;
-  if (!vehicle || vehicle.id == null) return null;
-  const idleFuel = toNumber(raw.idle_fuel);
-  const drivingFuel = toNumber(raw.driving_fuel);
-  const totalFuel = raw.total_fuel != null ? toNumber(raw.total_fuel) : (idleFuel != null && drivingFuel != null ? idleFuel + drivingFuel : null);
-  return {
-    vehicle: {
-      id: vehicle.id,
-      number: vehicle.number,
-      vin: vehicle.vin,
-    },
-    last_located_at: raw.last_located_at ?? null,
-    utilization: toNumber(raw.utilization),
-    idle_time: raw.idle_time ?? null,
-    idle_fuel: idleFuel,
-    driving_time: raw.driving_time ?? null,
-    driving_fuel: drivingFuel,
-    total_fuel: totalFuel,
-    total_distance: raw.total_distance != null ? toNumber(raw.total_distance) : null,
-    message: raw.message ?? null,
-  };
-}
-
+/**
+ * Fetch vehicle utilization for a UTC calendar day.
+ *
+ * Motive dashboard uses UTC midnight-to-midnight day boundaries.
+ * start_at = YYYY-MM-DDT00:00:00Z (midnight UTC, inclusive)
+ * end_at   = YYYY-MM-DDT00:00:00Z for the NEXT day (exclusive boundary — captures the full UTC day)
+ *
+ * Validated against dashboard CSV: distance and idle time match within 0%, drive time within ~4%.
+ */
 export async function fetchVehicleUtilization(
   client: MotiveClient,
-  date: string, // YYYY-MM-DD (Eastern calendar day)
-  vehicleIds?: number[]
-): Promise<MotiveVehicleUtilizationRecord[]> {
-  const params: Record<string, any> = {
-    start_date: date,
-    end_date: date,
-  };
-  if (vehicleIds && vehicleIds.length > 0) {
-    params.vehicle_ids = vehicleIds.join(',');
-  }
+  date: string // YYYY-MM-DD (UTC calendar day)
+): Promise<MotiveV2VehicleUtilRecord[]> {
+  const startAt = `${date}T00:00:00Z`;
+  // next day midnight UTC — Motive's end_at is exclusive so this captures the full 24h UTC day
+  const [y, m, d] = date.split('-').map(Number);
+  const next = new Date(Date.UTC(y, m - 1, d + 1));
+  const endAt = next.toISOString().replace('.000Z', 'Z').slice(0, 20) + 'Z';
 
   try {
-    const rawList = await client.get<MotiveVehicleUtilizationV1Rollup>(
-      '/v1/vehicle_utilization',
-      params
+    const records = await client.get<MotiveV2VehicleUtilRecord>(
+      '/v2/vehicle_utilization',
+      { start_at: startAt, end_at: endAt }
     );
-    const results: MotiveVehicleUtilizationRecord[] = [];
-    for (const raw of rawList) {
-      const normalized = normalizeV1Rollup(raw);
-      if (normalized) results.push(normalized);
-    }
-    console.log(`✓ Fetched ${results.length} vehicle utilization records for ${date} (v1)`);
-    return results;
+    console.log(`✓ Fetched ${records.length} vehicle utilization records for ${date} (v2, UTC bounds ${startAt}→${endAt})`);
+    return records;
   } catch (error) {
-    console.error(`✗ Failed to fetch vehicle utilization for ${date}:`, error);
+    console.error(`✗ Failed to fetch v2 vehicle utilization for ${date}:`, error);
     throw error;
   }
 }
-

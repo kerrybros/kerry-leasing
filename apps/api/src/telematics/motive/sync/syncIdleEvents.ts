@@ -56,7 +56,16 @@ export async function syncIdleEvents(
           }
         });
 
-        const recordData = {
+        // Compute idle fuel from fuel tank readings — API's idle_fuel field is always null.
+        // Units: gallons (Motive imperial mode, X-Metric-Units: false).
+        const vehFuelStart = record.veh_fuel_start ?? null;
+        const vehFuelEnd = record.veh_fuel_end ?? null;
+        const computedIdleFuel =
+          vehFuelStart != null && vehFuelEnd != null && vehFuelStart >= vehFuelEnd
+            ? vehFuelStart - vehFuelEnd
+            : null;
+
+        const recordData: any = {
           clerkOrgId,
           motiveEventId,
           driverId: record.driver?.id ?? null,
@@ -70,8 +79,9 @@ export async function syncIdleEvents(
           startTime: record.start_time,
           endTime: record.end_time,
           date, // Derived from start_time
-          vehFuelStart: record.veh_fuel_start ?? null,
-          vehFuelEnd: record.veh_fuel_end ?? null,
+          vehFuelStart,
+          vehFuelEnd,
+          idleFuel: computedIdleFuel,
           lat: record.lat ?? null,
           lon: record.lon ?? null,
           city: record.city || null,
@@ -101,6 +111,7 @@ export async function syncIdleEvents(
             existing.endTime !== recordData.endTime ||
             existing.vehFuelStart !== recordData.vehFuelStart ||
             existing.vehFuelEnd !== recordData.vehFuelEnd ||
+            (existing as any).idleFuel !== recordData.idleFuel ||
             existing.endType !== recordData.endType;
 
           if (hasChanged) {

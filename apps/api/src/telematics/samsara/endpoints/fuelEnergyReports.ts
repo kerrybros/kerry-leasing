@@ -9,7 +9,7 @@
  */
 
 import { SamsaraClient } from '../client.js';
-import { getESTDayBounds } from '../../dates.js';
+import { getESTDayBounds, getESTDateString } from '../../dates.js';
 
 export interface SamsaraVehicleReport {
   vehicle: {
@@ -67,8 +67,12 @@ export async function fetchFuelEnergyReports(
   date: string
 ): Promise<SamsaraVehicleReport[]> {
   try {
-    const { startTime, endTime } = getESTDayBounds(date);
-    console.log(`[Samsara] Fetching fuel-energy for ${date} EST (${startTime} to ${endTime})`);
+    // The fuel-energy report endpoint uses DATE-ONLY semantics:
+    // startDate and endDate are INCLUSIVE and the API ignores the time component,
+    // only using the date and timezone. Passing the same EST date for both
+    // ensures we pull exactly one calendar day as the dashboard shows.
+    const estDateStr = getESTDateString(date);
+    console.log(`[Samsara] Fetching fuel-energy for ${date} EST (${estDateStr})`);
 
     // Fetch with pagination support
     let allReports: SamsaraVehicleReport[] = [];
@@ -77,8 +81,8 @@ export async function fetchFuelEnergyReports(
 
     while (hasMore) {
       const params: any = {
-        startDate: startTime,
-        endDate: endTime,
+        startDate: estDateStr,
+        endDate: estDateStr,
         energyType: 'fuel',
       };
 

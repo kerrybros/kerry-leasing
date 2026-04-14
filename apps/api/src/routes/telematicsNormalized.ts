@@ -97,4 +97,39 @@ router.get(
   }
 );
 
+/**
+ * GET /telematics/normalized/driver-scorecard
+ * Query params: startDate (YYYY-MM-DD, optional), endDate (YYYY-MM-DD, optional)
+ *
+ * Computes a weighted fleet-wide driver scorecard.
+ * Currently Motive-only — returns empty data for Samsara orgs (no per-driver data yet).
+ */
+router.get(
+  '/driver-scorecard',
+  clerkAuthMiddleware,
+  requireOrg,
+  async (req: AuthRequest, res) => {
+    try {
+      const rawStart = req.query.startDate;
+      const rawEnd = req.query.endDate;
+
+      const startDate = isValidDate(rawStart) ? rawStart : '2020-01-01';
+      const endDate = isValidDate(rawEnd) ? rawEnd : new Date().toISOString().split('T')[0];
+
+      if (startDate > endDate) {
+        return res.status(400).json({ error: 'Bad Request', message: 'startDate must be on or before endDate' });
+      }
+
+      const orgId = req.auth!.orgId!;
+      const result = await telematicsService.getDriverScorecard(orgId, startDate, endDate);
+
+      res.setHeader('Cache-Control', 'private, max-age=300');
+      res.json(result);
+    } catch (error) {
+      console.error('[Normalized] Error fetching driver scorecard:', error);
+      res.status(500).json({ error: 'Internal Server Error', message: 'Failed to compute driver scorecard' });
+    }
+  }
+);
+
 export default router;

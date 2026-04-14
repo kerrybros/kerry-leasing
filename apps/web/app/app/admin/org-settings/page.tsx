@@ -5,10 +5,12 @@ import { useEffect, useState } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 import { useApiClient } from '@/hooks/useApiClient';
 import { useOrgSettingsQuery } from '@/hooks/useDataQueries';
+import { useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/Skeleton';
 
 interface RepairCustomerConfig {
@@ -30,10 +32,14 @@ export default function AdminOrgSettingsPage() {
   const { organization } = useOrganization();
   const { getApi } = useApiClient();
   const { data: orgSettings } = useOrgSettingsQuery();
+  const queryClient = useQueryClient();
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savingPortal, setSavingPortal] = useState(false);
+
+  // Feature flags
+  const [tracksDrivers, setTracksDrivers] = useState(true);
 
   // Section 1: Customer Info
   const [customerName, setCustomerName] = useState('');
@@ -62,6 +68,7 @@ export default function AdminOrgSettingsPage() {
 
   useEffect(() => {
     if (!orgSettings) return;
+    setTracksDrivers(orgSettings.tracksDrivers ?? true);
     setContractTermYears(orgSettings.contractTermYears?.toString() ?? '');
     setServiceRequestUrl(orgSettings.serviceRequestUrl ?? '');
     setTelematicsDashboardUrl(orgSettings.telematicsDashboardUrl ?? '');
@@ -93,6 +100,7 @@ export default function AdminOrgSettingsPage() {
       setCustomerStatusMsg(null);
       const api = await getApi();
       await api.put('/admin/repair-customer', { customerName: name, contractStartDate });
+      await queryClient.invalidateQueries({ queryKey: ['org-settings', organization?.id] });
       setCustomerStatusMsg({ type: 'success', text: 'Customer info saved.' });
       setTimeout(() => setCustomerStatusMsg(null), 5000);
     } catch (err: unknown) {
@@ -109,12 +117,14 @@ export default function AdminOrgSettingsPage() {
       setPortalStatusMsg(null);
       const api = await getApi();
       await api.put('/admin/org-settings', {
+        tracksDrivers,
         contractTermYears: contractTermYears ? parseInt(contractTermYears, 10) : null,
         serviceRequestUrl: serviceRequestUrl.trim() || null,
         telematicsDashboardUrl: telematicsDashboardUrl.trim() || null,
         telematicsDashboardUsername: telematicsDashboardUsername.trim() || null,
         telematicsDashboardPassword: telematicsDashboardPassword || null,
       });
+      await queryClient.invalidateQueries({ queryKey: ['org-settings', organization?.id] });
       setPortalStatusMsg({ type: 'success', text: 'Settings saved.' });
       setTimeout(() => setPortalStatusMsg(null), 5000);
     } catch (err: unknown) {
@@ -142,7 +152,7 @@ export default function AdminOrgSettingsPage() {
   return (
     <div className="mx-auto px-4 py-8 max-w-2xl flex flex-col gap-6">
       <div>
-        <h1 className="text-3xl font-bold mb-1">Org Settings</h1>
+        <h1 className="text-3xl font-bold mb-1">Customer Settings</h1>
         <p className="text-sm text-muted-foreground">
           Configuration for <span className="font-semibold text-foreground">{organization?.name}</span>.
         </p>
@@ -194,8 +204,26 @@ export default function AdminOrgSettingsPage() {
         </CardContent>
       </Card>
 
-      {/* Portal Settings: Contract Term, Service URL, Telematics Creds */}
+      {/* Portal Settings */}
       <form onSubmit={handleSavePortalSettings} className="flex flex-col gap-6">
+        <Card>
+          <CardHeader>
+            <CardTitle>Feature Flags</CardTitle>
+            <CardDescription>Toggle organization-wide features.</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium">Track Driver Data</p>
+                <p className="text-xs text-muted-foreground">
+                  Show the Driver Scorecard and per-driver metrics in the sidebar and fleet views.
+                </p>
+              </div>
+              <Switch checked={tracksDrivers} onCheckedChange={setTracksDrivers} />
+            </div>
+          </CardContent>
+        </Card>
+
         <Card>
           <CardHeader>
             <CardTitle>Contract Term</CardTitle>

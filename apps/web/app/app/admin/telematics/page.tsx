@@ -2,6 +2,7 @@
 
 import { useOrganization } from '@clerk/nextjs';
 import { useEffect, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useApiClient } from '@/hooks/useApiClient';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -24,6 +25,7 @@ interface BackdateReport {
 export default function AdminTelematicsPage() {
   const { organization } = useOrganization();
   const { getApi } = useApiClient();
+  const queryClient = useQueryClient();
 
   const [configuredProvider, setConfiguredProvider] = useState<Provider | null>(null);
   const [contractStartDate, setContractStartDate] = useState<string | null>(null);
@@ -105,6 +107,7 @@ export default function AdminTelematicsPage() {
       await api.post('/telematics/admin/telematics/configure', {
         clerkOrgId: organization.id, provider, credentials,
       });
+      await queryClient.invalidateQueries({ queryKey: ['org-settings', organization?.id] });
       setSaveMsg({ type: 'success', text: `${provider} credentials saved.` });
       autoHide(setSaveMsg);
       setApiKey('');

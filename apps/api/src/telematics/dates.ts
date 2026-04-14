@@ -128,6 +128,20 @@ export function getThreeDaysAgo(): string {
   return `${yy}-${mm}-${dd}`;
 }
 
+/**
+ * Return the RFC 3339 date string with EST/EDT offset for a given YYYY-MM-DD.
+ * e.g. "2026-02-03T00:00:00-05:00" (EST) or "2026-06-15T00:00:00-04:00" (EDT)
+ * Used for Samsara report endpoints that accept date+timezone but ignore time.
+ */
+export function getESTDateString(date: string): string {
+  const { startTime } = getESTDayBounds(date);
+  // startTime is midnight EST expressed as UTC (e.g. "2026-02-03T05:00:00Z")
+  // The UTC hour tells us the offset: 5 → EST (-05:00), 4 → EDT (-04:00)
+  const utcHour = parseInt(startTime.substring(11, 13), 10);
+  const offset = `-${String(utcHour).padStart(2, '0')}:00`;
+  return `${date}T00:00:00${offset}`;
+}
+
 /** Inclusive start and end (YYYY-MM-DD). Uses UTC date parts to avoid DST/Timezone duplicates or gaps. */
 export function getDateRange(startDate: string, endDate: string): string[] {
   const dates: string[] = [];

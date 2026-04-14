@@ -1,9 +1,21 @@
 /**
- * HISTORICAL BACKDATE SCRIPT FOR SAMSARA DATA
- * Pulls historical data for a specified date range
- * 
- * Usage:
- *   npm run backdate-samsara -- --org=org_xxxxx --start=2025-05-01 --end=2026-02-02
+ * SAMSARA HISTORICAL BACKDATE
+ *
+ * Pulls historical data day-by-day for a given org and date range.
+ * Idempotent — safe to re-run any date range. All writes are upserts.
+ *
+ * 72-hour verify window: dates within 3 calendar days of today are treated
+ * as "fresh" (verify: true) so already-stored records are force-refreshed.
+ * Samsara has up to 72h data lag; older dates have finalized data on their
+ * servers — upserts still detect and write any differences on re-runs.
+ *
+ * Usage (CLI):
+ *   pnpm exec tsx src/telematics/samsara/backdate.ts \
+ *     --org=org_xxxxx --start=2026-02-01 --end=2026-02-28
+ *
+ * Can also be imported and called programmatically:
+ *   import { backdateSamsaraData } from './backdate.js';
+ *   await backdateSamsaraData({ clerkOrgId, startDate, endDate });
  */
 
 import { fileURLToPath } from 'url';
@@ -11,6 +23,9 @@ import { appPrisma } from '../../lib/prisma.js';
 import { syncSamsaraOrgForDate } from './syncService.js';
 import { getDateRange } from './types.js';
 import { readCredentials } from '../../lib/credentials.js';
+import type { SyncResult } from './types.js';
+
+const SAMSARA_VERIFY_DAYS = 3; // Samsara has up to 72h data lag
 
 interface BackdateOptions {
   clerkOrgId: string;
@@ -18,177 +33,186 @@ interface BackdateOptions {
   endDate: string;   // YYYY-MM-DD
 }
 
-async function backdateSamsaraData(options: BackdateOptions): Promise<void> {
+interface DayReport {
+  date: string;
+  success: boolean;
+  verify: boolean;
+  duration: number;
+  results: SyncResult[];
+  error?: string;
+}
+
+/** True if the date is within N calendar days of today (UTC date comparison). */
+function isWithinVerifyWindow(date: string, days: number): boolean {
+  const today = new Date().toISOString().split('T')[0];
+  const cutoff = new Date(today);
+  cutoff.setUTCDate(cutoff.getUTCDate() - days);
+  return date >= cutoff.toISOString().split('T')[0];
+}
+
+/** Print a summary table: one row per endpoint. */
+function printSummaryTable(days: DayReport[], label: string): void {
+  const endpointTotals = new Map<string, { new: number; updated: number; unchanged: number; errors: number }>();
+
+  for (const day of days) {
+    for (const r of day.results) {
+      const e = endpointTotals.get(r.endpoint) ?? { new: 0, updated: 0, unchanged: 0, errors: 0 };
+      e.new += r.newCount;
+      e.updated += r.updatedCount;
+      e.unchanged += r.unchangedCount;
+      e.errors += r.errorCount;
+      endpointTotals.set(r.endpoint, e);
+    }
+  }
+
+  const successDays = days.filter((d) => d.success).length;
+  const errorDays = days.filter((d) => !d.success).length;
+
+  console.log(`\n${'═'.repeat(72)}`);
+  console.log(`  SAMSARA BACKFILL SUMMARY — ${label}`);
+  console.log(`${'═'.repeat(72)}`);
+  console.log(`  Days processed : ${days.length}  (${successDays} ok, ${errorDays} failed)`);
+  console.log(`  Completed at   : ${new Date().toISOString()}`);
+  console.log(`\n  ${'Endpoint'.padEnd(30)} ${'New'.padStart(7)} ${'Updated'.padStart(9)} ${'Unchanged'.padStart(11)} ${'Errors'.padStart(8)}`);
+  console.log(`  ${'─'.repeat(67)}`);
+
+  for (const [ep, t] of endpointTotals) {
+    console.log(
+      `  ${ep.padEnd(30)} ${String(t.new).padStart(7)} ${String(t.updated).padStart(9)} ` +
+      `${String(t.unchanged).padStart(11)} ${String(t.errors).padStart(8)}`
+    );
+  }
+
+  const failedDays = days.filter((d) => !d.success);
+  if (failedDays.length > 0) {
+    console.log(`\n  Failed dates:`);
+    for (const d of failedDays) {
+      console.log(`    ${d.date}: ${d.error ?? 'unknown error'}`);
+    }
+  }
+
+  console.log(`${'═'.repeat(72)}\n`);
+}
+
+export async function backdateSamsaraData(options: BackdateOptions): Promise<void> {
   const { clerkOrgId, startDate, endDate } = options;
 
-  console.log(`\n🔄 SAMSARA HISTORICAL BACKDATE`);
-  console.log(`  Organization: ${clerkOrgId}`);
-  console.log(`  Date range: ${startDate} to ${endDate}`);
-  console.log(`  Timestamp: ${new Date().toISOString()}\n`);
+  console.log(`\n${'─'.repeat(60)}`);
+  console.log(`  SAMSARA BACKDATE`);
+  console.log(`  Org        : ${clerkOrgId}`);
+  console.log(`  Range      : ${startDate} → ${endDate}`);
+  console.log(`  Started at : ${new Date().toISOString()}`);
+  console.log(`${'─'.repeat(60)}\n`);
 
-  // Get org's Samsara credentials
   const providerAccount = await appPrisma.telematicsProviderAccount.findUnique({
-    where: {
-      clerkOrgId,
-      provider: 'SAMSARA'
-    }
+    where: { clerkOrgId, provider: 'SAMSARA' },
   });
 
   if (!providerAccount) {
     throw new Error(`No Samsara provider account found for ${clerkOrgId}`);
   }
-
   if (providerAccount.status !== 'ACTIVE') {
-    throw new Error(`Samsara provider account for ${clerkOrgId} is not active (status: ${providerAccount.status})`);
+    throw new Error(`Samsara account for ${clerkOrgId} is not ACTIVE (status: ${providerAccount.status})`);
   }
 
-  const creds = readCredentials(providerAccount.credentialsJson);
-  const apiToken = creds.apiToken as string;
+  const apiToken = readCredentials(providerAccount.credentialsJson).apiToken as string;
+  if (!apiToken) throw new Error(`No API token in credentials for ${clerkOrgId}`);
 
-  if (!apiToken) {
-    throw new Error(`No API token found in credentials for ${clerkOrgId}`);
-  }
-
-  // Calculate all dates in range
   const dates = getDateRange(startDate, endDate);
-  console.log(`📅 Total days to process: ${dates.length}\n`);
+  console.log(`  ${dates.length} days to process\n`);
 
-  let successCount = 0;
-  let errorCount = 0;
-  const errors: Array<{ date: string; error: string }> = [];
+  const dayReports: DayReport[] = [];
 
-  // Process each date sequentially
   for (let i = 0; i < dates.length; i++) {
     const date = dates[i];
-    const progress = `[${i + 1}/${dates.length}]`;
+    const verify = isWithinVerifyWindow(date, SAMSARA_VERIFY_DAYS);
+    const progress = `[${String(i + 1).padStart(String(dates.length).length)}/${dates.length}]`;
+    const modeTag = verify ? ' (verify)' : '';
 
     try {
-      console.log(`${progress} Processing ${date}...`);
+      const result = await syncSamsaraOrgForDate(clerkOrgId, apiToken, date, verify);
 
-      // Sync all endpoints for this date (NO verification - initial load)
-      const result = await syncSamsaraOrgForDate(clerkOrgId, apiToken, date, false);
+      const totalNew = result.results.reduce((s, r) => s + r.newCount, 0);
+      const totalUpdated = result.results.reduce((s, r) => s + r.updatedCount, 0);
+      const totalErrors = result.results.reduce((s, r) => s + r.errorCount, 0);
 
-      if (result.success) {
-        const r = result.results[0];
-        console.log(
-          `  ✓ ${date} complete - ${r?.newCount ?? 0} new records added, ${r?.unchangedCount ?? 0} preexisting records unchanged, ${r?.updatedCount ?? 0} updated (overwritten) ` +
-          `in ${Math.round(result.duration / 1000)}s`
-        );
-        successCount++;
-      } else {
-        const errorMsg = result.error ?? result.results.map(r => r.errors.map(e => e.error).join('; ')).join('; ');
-        console.log(`  ✗ ${date} failed: ${errorMsg}`);
-        errorCount++;
-        errors.push({ date, error: errorMsg });
-      }
+      const statusIcon = result.success ? '✓' : '✗';
+      console.log(
+        `  ${progress} ${date}${modeTag}  ${statusIcon}  ` +
+        `new=${totalNew} updated=${totalUpdated} errors=${totalErrors}  ` +
+        `(${Math.round(result.duration / 1000)}s)`
+      );
 
-      // Rate limiting: 2 seconds between days
-      await sleep(2000);
-    } catch (error: any) {
-      console.error(`  ✗ ${date} failed:`, error.message);
-      errorCount++;
-      errors.push({ date, error: error.message });
+      dayReports.push({
+        date,
+        success: result.success,
+        verify,
+        duration: result.duration,
+        results: result.results,
+        error: result.error,
+      });
+    } catch (err: any) {
+      console.error(`  ${progress} ${date}${modeTag}  ✗  ${err.message}`);
+      dayReports.push({ date, success: false, verify, duration: 0, results: [], error: err.message });
+    }
 
-      // Continue to next date despite error
+    // Courtesy delay — avoids hammering Samsara API
+    if (i < dates.length - 1) {
+      await new Promise((r) => setTimeout(r, 1500));
     }
   }
 
-  console.log(`\n✅ BACKDATE COMPLETE`);
-  console.log(`  Total days: ${dates.length}`);
-  console.log(`  Success: ${successCount}`);
-  console.log(`  Errors: ${errorCount}`);
+  const successCount = dayReports.filter((d) => d.success).length;
+  const errorCount = dayReports.filter((d) => !d.success).length;
+  const errors = dayReports.filter((d) => !d.success).map((d) => ({ date: d.date, error: d.error ?? 'unknown' }));
 
-  if (errors.length > 0) {
-    console.log(`\n❌ Failed dates:`);
-    errors.forEach(({ date, error }) => {
-      console.log(`  - ${date}: ${error}`);
-    });
-  }
-
-  // Update provider account with run report
-  const lastBackdateReport = {
-    completedAt: new Date().toISOString(),
-    startDate,
-    endDate,
-    totalDays: dates.length,
-    successCount,
-    errorCount,
-    failedDates: errors,
-  };
+  // Write run report to DB
   await appPrisma.telematicsProviderAccount.update({
     where: { id: providerAccount.id },
     data: {
-      lastSyncAt: new Date(),
       lastError: errors.length > 0 ? `Backdate completed with ${errors.length} errors` : null,
-      lastBackdateReport: lastBackdateReport as any,
-    }
+      lastBackdateReport: {
+        completedAt: new Date().toISOString(),
+        startDate,
+        endDate,
+        totalDays: dates.length,
+        successCount,
+        errorCount,
+        failedDates: errors,
+      } as any,
+    },
   });
 
-  console.log(`\n✅ Backdate finished at ${new Date().toISOString()}\n`);
+  printSummaryTable(dayReports, `${clerkOrgId}  ${startDate} → ${endDate}`);
 }
 
-/**
- * Parse CLI arguments
- */
 function parseArgs(): BackdateOptions {
   const args = process.argv.slice(2);
-  const options: Partial<BackdateOptions> = {};
-
+  const opts: Partial<BackdateOptions> = {};
   for (const arg of args) {
-    if (arg.startsWith('--org=')) {
-      options.clerkOrgId = arg.split('=')[1];
-    } else if (arg.startsWith('--start=')) {
-      options.startDate = arg.split('=')[1];
-    } else if (arg.startsWith('--end=')) {
-      options.endDate = arg.split('=')[1];
-    }
+    if (arg.startsWith('--org=')) opts.clerkOrgId = arg.split('=')[1];
+    else if (arg.startsWith('--start=')) opts.startDate = arg.split('=')[1];
+    else if (arg.startsWith('--end=')) opts.endDate = arg.split('=')[1];
   }
-
-  // Validate required args
-  if (!options.clerkOrgId) {
-    throw new Error('Missing required argument: --org=org_xxxxx');
-  }
-  if (!options.startDate) {
-    throw new Error('Missing required argument: --start=YYYY-MM-DD');
-  }
-  if (!options.endDate) {
-    throw new Error('Missing required argument: --end=YYYY-MM-DD');
-  }
-
-  // Validate date format
-  const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-  if (!dateRegex.test(options.startDate) || !dateRegex.test(options.endDate)) {
-    throw new Error('Dates must be in YYYY-MM-DD format');
-  }
-
-  return options as BackdateOptions;
+  if (!opts.clerkOrgId) throw new Error('Missing --org=org_xxxxx');
+  if (!opts.startDate) throw new Error('Missing --start=YYYY-MM-DD');
+  if (!opts.endDate) throw new Error('Missing --end=YYYY-MM-DD');
+  const re = /^\d{4}-\d{2}-\d{2}$/;
+  if (!re.test(opts.startDate) || !re.test(opts.endDate)) throw new Error('Dates must be YYYY-MM-DD');
+  if (opts.startDate > opts.endDate) throw new Error('--start must be ≤ --end');
+  return opts as BackdateOptions;
 }
 
-/**
- * Sleep helper
- */
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-/**
- * Main entry point
- */
 async function main() {
   try {
     const options = parseArgs();
     await backdateSamsaraData(options);
     process.exit(0);
-  } catch (error: any) {
-    console.error(`\n❌ BACKDATE FAILED:`, error.message);
+  } catch (err: any) {
+    console.error(`\n❌ ${err.message}`);
     process.exit(1);
   }
 }
 
-// Run if executed directly
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
-if (isMain) {
-  main();
-}
-
-export { backdateSamsaraData };
+if (isMain) main();

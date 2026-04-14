@@ -9,6 +9,8 @@ import { syncDriverUtilization } from './sync/syncDriverUtilization.js';
 import { syncIdleEvents } from './sync/syncIdleEvents.js';
 import { syncDrivingPeriods } from './sync/syncDrivingPeriods.js';
 import { syncGeofences } from './sync/syncGeofences.js';
+import { syncMotiveScorecard } from './sync/syncMotiveScorecard.js';
+import { reconcileMotiveVehicleFromDrivingPeriods } from './sync/reconcileMotiveVehicleFromDrivingPeriods.js';
 import { getYesterday, getTwoDaysAgo, SyncResult } from './types.js';
 import { readCredentials } from '../../lib/credentials.js';
 
@@ -63,6 +65,19 @@ export async function syncMotiveOrgForDate(
     const drivingPeriodsResult = await syncDrivingPeriods(clerkOrgId, apiKey, date, verify);
     orgResult.results.push(drivingPeriodsResult);
     console.log(`  ✓ Driving periods: ${drivingPeriodsResult.newCount} new records added, ${drivingPeriodsResult.unchangedCount} preexisting records unchanged, ${drivingPeriodsResult.updatedCount} updated (overwritten)`);
+
+    // Reconcile vehicle utilization distance/time using driving_periods as source of truth.
+    // The v2/vehicle_utilization rollup can under-report for some vehicles (Motive-side issue).
+    const reconcileResult = await reconcileMotiveVehicleFromDrivingPeriods(clerkOrgId, date);
+    if (reconcileResult.reconciled > 0) {
+      for (const p of reconcileResult.patches) {
+        console.log(`  ⚡ Reconciled vehicle ${p.vehicleNumber ?? p.vehicleId} ${p.field}: ${p.before.toFixed(1)} → ${p.after.toFixed(1)} (${p.pctDiff})`);
+      }
+    }
+
+    const scorecardResult = await syncMotiveScorecard(clerkOrgId, apiKey, date, verify);
+    orgResult.results.push(scorecardResult);
+    console.log(`  ✓ Scorecard: ${scorecardResult.newCount} new, ${scorecardResult.unchangedCount} unchanged, ${scorecardResult.updatedCount} updated`);
 
     // Sync geofences at most once per 24h — they are static config data
     const lastGeofenceSync = geofenceLastSyncAt.get(clerkOrgId) ?? 0;
