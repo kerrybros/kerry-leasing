@@ -5,7 +5,9 @@
 
 @layer base {
   :root {
-    /* shadcn tokens — light mode */
+    /* shadcn tokens — light mode
+       Default primary = KERRY_GOLD. Per-org brand overrides are applied at
+       runtime via OrgBrandTheme (inline style on <html>); see lib/brandPresets.ts. */
     --background: oklch(1 0 0);
     --foreground: oklch(0.145 0 0);
     --card: oklch(1 0 0);
@@ -123,10 +125,16 @@
   }
 }
 
-/* Remove focus outlines from Recharts chart wrappers and SVGs */
+/* Remove focus outlines / rings from Recharts (clicking charts must not show a focus box) */
 .recharts-wrapper,
+.recharts-wrapper:focus,
+.recharts-wrapper:focus-visible,
 .recharts-wrapper svg,
-.recharts-surface {
+.recharts-wrapper svg:focus,
+.recharts-surface,
+.recharts-surface:focus,
+.recharts-surface:focus-visible {
   outline: none !important;
+  box-shadow: none !important;
 }
 

@@ -19,6 +19,8 @@ import { CronJobType, ServicePlanMatchType } from '../generated/app-client/index
 import { cronStepApiPaths } from '../lib/cronStepApiPaths.js';
 import { createId } from '@paralleldrive/cuid2';
 import { config } from '../config.js';
+import { loadSamsaraTelematicsVinSetForServicePlan } from '../lib/servicePlanSamsaraTelematics.js';
+import { invalidateCachesAfterServicePlanChange } from '../lib/fleetCache.js';
 
 const router = Router();
 
@@ -340,21 +342,19 @@ async function triggerServicePlanSync(
   const customerUnits = allUnits.filter((u: any) => u.number && activeUnitNumbers.has(u.number));
 
   // Pull telematics VINs
-  let telematicsVins = new Set<string>();
+  let telematicsVins: Set<string>;
   if (provider === 'MOTIVE') {
+    telematicsVins = new Set<string>();
     const rows = await appPrisma.motiveVehicleUtilization.findMany({
       where: { clerkOrgId, vin: { not: null } },
       select: { vin: true },
       distinct: ['vin'],
     });
-    rows.forEach((r) => { if (r.vin) telematicsVins.add(r.vin); });
-  } else {
-    const rows = await appPrisma.telematicsVehicleMap.findMany({
-      where: { clerkOrgId, provider: 'SAMSARA', vin: { not: null } },
-      select: { vin: true },
-      distinct: ['vin'],
+    rows.forEach((r) => {
+      if (r.vin) telematicsVins.add(r.vin.trim());
     });
-    rows.forEach((r) => { if (r.vin) telematicsVins.add(r.vin); });
+  } else {
+    telematicsVins = await loadSamsaraTelematicsVinSetForServicePlan(appPrisma, clerkOrgId);
   }
 
   // Upsert service plan units
@@ -469,6 +469,8 @@ router.put('/:clerkOrgId/fleet/units/:unitId/inclusion', async (req: AuthRequest
       data: { isIncluded },
     });
 
+    await invalidateCachesAfterServicePlanChange(clerkOrgId);
+
     res.json({ unit });
   } catch (err: any) {
     console.error('[adminOrgs] PUT /:clerkOrgId/fleet/units/:unitId/inclusion error:', err);
@@ -509,6 +511,8 @@ router.post('/:clerkOrgId/fleet/sync', async (req: AuthRequest, res) => {
       repairConfig.contractStartDate,
       account.provider as 'MOTIVE' | 'SAMSARA'
     );
+
+    await invalidateCachesAfterServicePlanChange(clerkOrgId);
 
     const units = await appPrisma.servicePlanUnit.findMany({ where: { clerkOrgId } });
     res.json({ ok: true, unitCount: units.length });

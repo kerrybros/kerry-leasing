@@ -8,8 +8,7 @@ const adminTabs = [
   { label: 'Org Settings', href: '/app/admin/org-settings' },
   { label: 'Service Plan', href: '/app/admin/service-plan' },
   { label: 'Telematics',   href: '/app/admin/telematics' },
-  { label: 'Contract',     href: '/app/admin/contract' },
-  { label: 'Exhibit B',    href: '/app/admin/exhibit-b' },
+  { label: 'Documents',    href: '/app/admin/documents' },
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {

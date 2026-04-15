@@ -7,6 +7,10 @@ import type { RepairUnitSummary } from '@/features/fleet/components/RepairBreakd
 
 // --- Shared Types ---
 
+export type BrandColorPreset =
+  | 'KERRY_GOLD' | 'ROYAL_BLUE' | 'NAVY' | 'TEAL' | 'FOREST'
+  | 'BURGUNDY' | 'AMBER' | 'VIOLET' | 'SLATE_BRAND' | 'COPPER';
+
 export type OrgSettings = {
   tracksDrivers: boolean;
   telematicsProvider: 'MOTIVE' | 'SAMSARA' | null;
@@ -16,6 +20,7 @@ export type OrgSettings = {
   telematicsDashboardUrl: string | null;
   telematicsDashboardUsername: string | null;
   telematicsDashboardPassword: string | null;
+  brandColorPreset: BrandColorPreset | null;
   dieselPricePerGallon: number | null;
 };
 
@@ -329,6 +334,13 @@ export type ServicePlanSummary = {
   fromRepair: number;
   fromTelematicsOnly: number;
   withTelematicsData: number;
+  unmatchedFromRepair: number;
+  unmatchedFromTelematics: number;
+  autoMatched: number;
+  manualMatched: number;
+  confirmed: number;
+  excluded: number;
+  included: number;
 };
 
 export function useServicePlanQuery() {
@@ -339,7 +351,7 @@ export function useServicePlanQuery() {
     queryFn: async () => {
       const api = await getApi();
       return api.get<{ units: ServicePlanUnit[]; summary: ServicePlanSummary }>(
-        '/admin/service-plan/units?summary=true'
+        '/admin/service-plan/units?pageSize=50000'
       );
     },
     enabled: !!organization?.id,

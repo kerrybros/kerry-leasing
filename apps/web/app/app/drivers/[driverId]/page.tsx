@@ -246,7 +246,21 @@ export default function DriverDetailPage() {
     );
   }
 
-  if (isNaN(driverId) || driverRecords.length === 0) {
+  if (!Number.isFinite(driverId) || driverId <= 0) {
+    return (
+      <div className="max-w-[1400px] mx-auto px-4 sm:px-6 p-6 pt-8">
+        <Button variant="outline" onClick={() => router.back()} className="mb-4">
+          Back to Drivers
+        </Button>
+        <EmptyState
+          title="Invalid driver link"
+          description="The URL does not contain a valid driver ID."
+        />
+      </div>
+    );
+  }
+
+  if (driverRecords.length === 0) {
     return (
       <div className="max-w-[1400px] mx-auto px-4 sm:px-6 p-6 pt-8">
         <Button variant="outline" onClick={() => router.back()} className="mb-4">
@@ -338,7 +352,7 @@ export default function DriverDetailPage() {
                       paddingAngle={3} dataKey="value" isAnimationActive={false}
                     >
                       <Cell fill="#ef4444" />
-                      <Cell fill={CHART_COLORS.idle} />
+                      <Cell fill={CHART_COLORS.primary} />
                     </Pie>
                     <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(val) => [`${Number(val).toLocaleString()} gal`]} />
                     <Legend formatter={(name) => <span style={LEGEND_STYLE}>{name}</span>} />
@@ -406,7 +420,7 @@ export default function DriverDetailPage() {
                 <XAxis dataKey="month" stroke="var(--muted-foreground)" fontSize={12} tickLine={false} axisLine={false} />
                 <YAxis stroke="var(--muted-foreground)" fontSize={12} tickLine={false} axisLine={false} domain={['auto', 'auto']} width={35} />
                 <Tooltip {...chartTooltipStyle} />
-                <Line type="monotone" dataKey="avgMpg" stroke="#d9a528" strokeWidth={4} dot={{ fill: '#d9a528', r: 5, strokeWidth: 0 }} activeDot={{ r: 7 }}>
+                <Line type="monotone" dataKey="avgMpg" stroke={CHART_COLORS.primary} strokeWidth={4} dot={{ fill: CHART_COLORS.primary, r: 5, strokeWidth: 0 }} activeDot={{ r: 7 }}>
                   <LabelList dataKey="avgMpg" position="top" offset={10} style={{ fill: 'var(--foreground)', fontSize: 11, fontWeight: 600 }} />
                 </Line>
               </LineChart>
@@ -420,7 +434,7 @@ export default function DriverDetailPage() {
                 <XAxis dataKey="month" stroke="var(--muted-foreground)" fontSize={12} tickLine={false} axisLine={false} />
                 <YAxis stroke="var(--muted-foreground)" fontSize={12} tickLine={false} axisLine={false} width={35} />
                 <Tooltip {...chartTooltipStyle} formatter={(v: unknown) => [`${v}%`, 'Idle %']} />
-                <Line type="monotone" dataKey="idlePercentage" stroke="#d9a528" strokeWidth={4} dot={{ fill: '#d9a528', r: 5, strokeWidth: 0 }} activeDot={{ r: 7 }}>
+                <Line type="monotone" dataKey="idlePercentage" stroke={CHART_COLORS.primary} strokeWidth={4} dot={{ fill: CHART_COLORS.primary, r: 5, strokeWidth: 0 }} activeDot={{ r: 7 }}>
                     <LabelList dataKey="idlePercentage" position="top" offset={10} formatter={(v: unknown) => `${v}%`} style={{ fill: 'var(--foreground)', fontSize: 11, fontWeight: 600 }} />
                 </Line>
               </LineChart>
@@ -434,7 +448,7 @@ export default function DriverDetailPage() {
                 <XAxis dataKey="month" stroke="var(--muted-foreground)" fontSize={12} tickLine={false} axisLine={false} />
                 <YAxis stroke="var(--muted-foreground)" fontSize={12} tickLine={false} axisLine={false} width={35} />
                 <Tooltip {...chartTooltipStyle} />
-                <Line type="monotone" dataKey="totalMiles" stroke="#d9a528" strokeWidth={4} dot={{ fill: '#d9a528', r: 5, strokeWidth: 0 }} activeDot={{ r: 7 }}>
+                <Line type="monotone" dataKey="totalMiles" stroke={CHART_COLORS.primary} strokeWidth={4} dot={{ fill: CHART_COLORS.primary, r: 5, strokeWidth: 0 }} activeDot={{ r: 7 }}>
                   <LabelList dataKey="totalMiles" position="top" offset={10} formatter={(v: unknown) => typeof v === 'number' && v >= 1000 ? `${(v / 1000).toFixed(0)}K` : String(v)} style={{ fill: 'var(--foreground)', fontSize: 11, fontWeight: 600 }} />
                 </Line>
               </LineChart>

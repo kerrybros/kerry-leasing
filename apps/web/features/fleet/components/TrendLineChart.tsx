@@ -98,9 +98,9 @@ export function TrendLineChart({ title, dataKey, data, loading, labelFormatter }
               <Line
                 type="monotone"
                 dataKey={dataKey}
-                stroke={CHART_COLORS.idle}
+                stroke={CHART_COLORS.primary}
                 strokeWidth={4}
-                dot={{ fill: CHART_COLORS.idle, r: 5, strokeWidth: 0 }}
+                dot={{ fill: CHART_COLORS.primary, r: 5, strokeWidth: 0 }}
                 activeDot={{ r: 7 }}
               >
                 <LabelList

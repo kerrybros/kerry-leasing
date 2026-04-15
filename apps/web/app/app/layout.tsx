@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { UserButton, OrganizationSwitcher, useAuth } from '@clerk/nextjs';
 import { ThemeToggle } from '@/components/ThemeToggle';
+import { OrgBrandTheme } from '@/components/OrgBrandTheme';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useOrgSettingsQuery } from '@/hooks/useDataQueries';
@@ -104,6 +105,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       defaultOpen={true}
       style={{ "--sidebar-width": "10rem" } as React.CSSProperties}
     >
+      <OrgBrandTheme />
       <Sidebar collapsible="none">
         {/* Logo — full logo when expanded, small "KL" square when collapsed */}
         <SidebarHeader className="py-3 px-2">

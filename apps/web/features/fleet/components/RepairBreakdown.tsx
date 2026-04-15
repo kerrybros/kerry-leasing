@@ -507,7 +507,7 @@ export function RepairBreakdown({
                     dataKey="count"
                     radius={[0, 2, 2, 0]}
                     isAnimationActive={false}
-                    fill={CHART_COLORS.idle}
+                    fill={CHART_COLORS.primary}
                     barSize={13}
                   >
                     {categoryBreakdown.map((entry, index) => (
@@ -516,7 +516,7 @@ export function RepairBreakdown({
                         fill={
                           entry.isDamage || entry.category.toLowerCase().includes('damage')
                             ? '#ef4444'
-                            : CHART_COLORS.idle
+                            : CHART_COLORS.primary
                         }
                       />
                     ))}
@@ -532,7 +532,7 @@ export function RepairBreakdown({
             </div>
             <div className="flex items-center gap-4 text-xs text-muted-foreground border-t border-border pt-3 mt-1">
               <span className="flex items-center gap-1">
-                <span className="inline-block w-3 h-3 rounded-sm" style={{ background: CHART_COLORS.idle }}></span>
+                <span className="inline-block w-3 h-3 rounded-sm" style={{ background: CHART_COLORS.primary }}></span>
                 Standard
               </span>
               <span className="flex items-center gap-1">
@@ -578,9 +578,9 @@ export function RepairBreakdown({
                   <Line
                     type="monotone"
                     dataKey="count"
-                    stroke={CHART_COLORS.idle}
+                    stroke={CHART_COLORS.primary}
                     strokeWidth={4}
-                    dot={{ fill: CHART_COLORS.idle, r: 5, strokeWidth: 0 }}
+                    dot={{ fill: CHART_COLORS.primary, r: 5, strokeWidth: 0 }}
                     activeDot={{ r: 7 }}
                   >
                     <LabelList

@@ -19,6 +19,7 @@ import repairsRoutes from './repairs.js';
 import adminOrgsRoutes from './adminOrgs.js';
 import { LinkOrgSchema, RepairCustomerSchema, parseBody } from '../lib/validate.js';
 import { getRedis } from '../lib/redis.js';
+import { BrandColorPreset } from '../generated/app-client/index.js';
 
 const router = Router();
 
@@ -469,6 +470,7 @@ router.get(
           telematicsDashboardUrl: true,
           telematicsDashboardUsername: true,
           telematicsDashboardPassword: true,
+          brandColorPreset: true,
         },
       });
 
@@ -500,6 +502,7 @@ router.get(
         telematicsDashboardUrl: settings?.telematicsDashboardUrl ?? null,
         telematicsDashboardUsername: settings?.telematicsDashboardUsername ?? null,
         telematicsDashboardPassword: settings?.telematicsDashboardPassword ?? null,
+        brandColorPreset: settings?.brandColorPreset ?? null,
         dieselPricePerGallon,
       });
     } catch (error) {
@@ -529,7 +532,14 @@ router.put(
         telematicsDashboardUrl,
         telematicsDashboardUsername,
         telematicsDashboardPassword,
+        brandColorPreset,
       } = req.body;
+
+      const validPresets = Object.values(BrandColorPreset) as string[];
+      const resolvedPreset: BrandColorPreset | null =
+        brandColorPreset && validPresets.includes(brandColorPreset)
+          ? (brandColorPreset as BrandColorPreset)
+          : null;
 
       await appPrisma.organizationSettings.upsert({
         where: { clerkOrgId },
@@ -540,6 +550,7 @@ router.put(
           ...(telematicsDashboardUrl !== undefined && { telematicsDashboardUrl }),
           ...(telematicsDashboardUsername !== undefined && { telematicsDashboardUsername }),
           ...(telematicsDashboardPassword !== undefined && { telematicsDashboardPassword }),
+          ...(brandColorPreset !== undefined && { brandColorPreset: resolvedPreset }),
         },
         create: {
           clerkOrgId,
@@ -549,6 +560,7 @@ router.put(
           telematicsDashboardUrl: telematicsDashboardUrl ?? null,
           telematicsDashboardUsername: telematicsDashboardUsername ?? null,
           telematicsDashboardPassword: telematicsDashboardPassword ?? null,
+          brandColorPreset: resolvedPreset,
         },
       });
 

@@ -46,7 +46,10 @@ function CompactBar({
       <div className="px-2.5 pt-2 pb-0.5">
         <p className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">{title}</p>
       </div>
-      <div style={{ height: chartH }} className="px-0 pb-1">
+      <div
+        style={{ height: chartH }}
+        className="px-0 pb-1 [&_.recharts-wrapper]:!outline-none [&_.recharts-wrapper]:shadow-none [&_.recharts-surface]:!outline-none [&_.recharts-surface]:shadow-none [&_svg]:outline-none"
+      >
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={data} layout="vertical" margin={{ top: 0, right: 48, left: 0, bottom: 0 }}>
             <XAxis type="number" hide />
@@ -182,7 +185,7 @@ export function TelematicsBreakdownView({
   const handleItemClick = (m: UnitMetrics | DriverMetrics) => {
     const label = isUnit ? (m as UnitMetrics).unitNumber : (m as DriverMetrics).driverName;
     const href = isUnit
-      ? `/app/units/${(m as UnitMetrics).unitNumber ?? (m as UnitMetrics).vin}`
+      ? `/app/units/${encodeURIComponent((m as UnitMetrics).vin || (m as UnitMetrics).unitNumber || '')}`
       : `/app/drivers/${(m as DriverMetrics).driverId}`;
     setNavConfirm({ label, href });
   };
@@ -219,7 +222,7 @@ export function TelematicsBreakdownView({
           title="Highest Miles Driven"
           data={mostMiles}
           dataKey="totalMiles"
-          color={CHART_COLORS.idle}
+          color={CHART_COLORS.primary}
           formatter={(v) => Math.round(Number(v)).toLocaleString()}
           onBarClick={handleItemClick}
         />

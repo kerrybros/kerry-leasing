@@ -32,8 +32,7 @@ Reference APIs (verify against current Samsara docs): list/retrieve drivers (`/f
 
 | Route | Summary |
 |-------|---------|
-| `/app/admin/contract` | Contract management — documents, version tracking |
-| `/app/admin/exhibit-b` | Exhibit B / fleet pricing — data entry and import |
+| `/app/admin/documents` | Embedded SharePoint library — contracts, Exhibit B, customer documents. Requires M365 session and tenant embedding allowlist. |
 
 Nav entries for the customer placeholders are in `apps/web/app/app/layout.tsx`.
 

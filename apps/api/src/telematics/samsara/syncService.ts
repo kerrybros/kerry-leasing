@@ -111,7 +111,10 @@ export async function syncSamsaraOrgForDate(
       syncSamsaraVehicles(clerkOrgId, apiToken)
     );
     orgResult.results.push(rosterResult);
-    vehicleRosterLastSyncAt.set(clerkOrgId, Date.now());
+    const rosterSucceeded = !rosterResult.skipped && rosterResult.errorCount === 0;
+    if (rosterSucceeded) {
+      vehicleRosterLastSyncAt.set(clerkOrgId, Date.now());
+    }
     console.log(
       rosterResult.skipped
         ? `  ⏭  Vehicle roster: skipped (${rosterResult.skipReason})`

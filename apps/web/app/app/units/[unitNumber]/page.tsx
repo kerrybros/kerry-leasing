@@ -608,7 +608,7 @@ export default function UnitDetailPage() {
                               paddingAngle={3} dataKey="value" isAnimationActive={false}
                             >
                               <Cell fill="#ef4444" />
-                              <Cell fill={CHART_COLORS.idle} />
+                              <Cell fill={CHART_COLORS.primary} />
                             </Pie>
                             <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(val) => [`${Number(val).toLocaleString()} gal`]} />
                             <Legend formatter={(name) => <span style={LEGEND_STYLE}>{name}</span>} />
@@ -686,7 +686,7 @@ export default function UnitDetailPage() {
                           <XAxis dataKey="month" stroke={CHART_COLORS.axis} fontSize={11} tickLine={false} axisLine={false} />
                           <YAxis stroke={CHART_COLORS.axis} fontSize={11} tickLine={false} axisLine={false} domain={['auto', 'auto']} width={35} />
                           <Tooltip contentStyle={TOOLTIP_STYLE} />
-                          <Line type="monotone" dataKey={dataKey} stroke={CHART_COLORS.idle} strokeWidth={3} dot={{ fill: CHART_COLORS.idle, r: 4, strokeWidth: 0 }} activeDot={{ r: 6 }} isAnimationActive={false}>
+                          <Line type="monotone" dataKey={dataKey} stroke={CHART_COLORS.primary} strokeWidth={3} dot={{ fill: CHART_COLORS.primary, r: 4, strokeWidth: 0 }} activeDot={{ r: 6 }} isAnimationActive={false}>
                             <LabelList dataKey={dataKey} position="top" offset={8} formatter={fmt} style={{ fill: 'var(--foreground)', fontSize: 10, fontWeight: 600 }} />
                           </Line>
                         </LineChart>

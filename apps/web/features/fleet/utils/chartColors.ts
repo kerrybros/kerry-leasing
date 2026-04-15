@@ -11,11 +11,12 @@ export const CHART_COLORS = {
   danger: 'var(--destructive)',
   warning: '#d9a528',
   success: '#22c55e',
+  /** Brand primary — use for main series (lines, standard repair bars); follows OrgBrandTheme. */
   primary: 'var(--primary)',
   muted: 'var(--muted-foreground)',
 
   // Chart-specific
-  idle: '#d9a528',      // amber — idle time/fuel
+  idle: '#d9a528',      // amber — idle/donut semantics where not using brand primary
   driving: '#22c55e',   // green — driving time/fuel
   damage: '#ef4444',    // red — damage events
   miles: 'var(--primary)',

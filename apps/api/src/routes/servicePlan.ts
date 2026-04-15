@@ -15,6 +15,10 @@ import { REPAIR_SHOP_ORG_ID } from '../config/repairShop.js';
 import { ServicePlanMatchType } from '../generated/app-client/index.js';
 import { PaginationSchema, parseQuery } from '../lib/validate.js';
 import { createId } from '@paralleldrive/cuid2';
+import {
+  loadSamsaraTelematicsVehiclesForServicePlan,
+} from '../lib/servicePlanSamsaraTelematics.js';
+import { invalidateCachesAfterServicePlanChange } from '../lib/fleetCache.js';
 
 const router = Router();
 
@@ -59,7 +63,7 @@ router.post('/sync', async (req: AuthRequest, res) => {
     
     const existingRepairIds = new Set(existingUnits.map(u => u.repairUnitId));
     const existingTelematicsVins = new Set(
-      existingUnits.filter(u => u.telematicsVin).map(u => u.telematicsVin!)
+      existingUnits.filter(u => u.telematicsVin).map(u => u.telematicsVin!.trim())
     );
     
     // 1. Fetch revenue_details for this customer since contract start to find ACTIVE units
@@ -126,23 +130,20 @@ router.post('/sync', async (req: AuthRequest, res) => {
         },
         distinct: ['vin'],
       });
-      telematicsVehicles = motiveVehicles.map(v => ({
-        vin: v.vin,
-        vehicleNumber: v.vehicleNumber,
-      }));
+      telematicsVehicles = motiveVehicles
+        .filter((v) => v.vin && v.vin.trim().length > 0)
+        .map((v) => ({
+          vin: v.vin!.trim(),
+          vehicleNumber: v.vehicleNumber,
+        }));
     } else if (providerAccount?.provider === 'SAMSARA') {
-      const samsaraVehicles = await appPrisma.telematicsVehicleMap.findMany({
-        where: { clerkOrgId, provider: 'SAMSARA', vin: { not: null } },
-        select: { vin: true, providerVehicleName: true },
-        distinct: ['vin'],
-      });
-      telematicsVehicles = samsaraVehicles.map(v => ({
-        vin: v.vin,
-        vehicleNumber: v.providerVehicleName ?? null,
-      }));
+      telematicsVehicles = await loadSamsaraTelematicsVehiclesForServicePlan(
+        appPrisma,
+        clerkOrgId
+      );
     }
-    
-    const telematicsVins = new Set(telematicsVehicles.map(v => v.vin.trim()));
+
+    const telematicsVins = new Set(telematicsVehicles.map((v) => v.vin));
     console.log(`[ServicePlan] Found ${telematicsVins.size} telematics vehicles (${providerAccount?.provider || 'NO_PROVIDER'})`);
     
     // Detect telematics-only units (VINs in telematics but not in repair)
@@ -292,7 +293,7 @@ router.post('/sync', async (req: AuthRequest, res) => {
     // 4. Create entries for telematics-only units (units with telematics but no repair data)
     // Use a stable cuid as repairUnitId so VIN changes don't orphan the record.
     for (const vin of newTelematicsOnlyVins) {
-      const vehicle = telematicsVehicles.find(v => v.vin === vin);
+      const vehicle = telematicsVehicles.find((v) => v.vin === vin);
       await appPrisma.servicePlanUnit.create({
         data: {
           clerkOrgId,
@@ -314,7 +315,9 @@ router.post('/sync', async (req: AuthRequest, res) => {
     // Calculate unique unit count: repair units + telematics-only units
     // (matched units are only counted once as part of repair units)
     const uniqueUnitCount = customerUnits.length + revenueOnlyUnitNumbers.length + newTelematicsOnlyVins.length;
-    
+
+    await invalidateCachesAfterServicePlanChange(clerkOrgId);
+
     res.json({
       success: true,
       synced: uniqueUnitCount,
@@ -352,24 +355,119 @@ router.get('/units', async (req: AuthRequest, res) => {
     if (!pagination) return;
     const { page, pageSize } = pagination;
     const appPrisma = getAppPrisma();
+    const whereOrg = { clerkOrgId };
 
-    const [units, totalCount] = await Promise.all([
+    const [
+      units,
+      totalCount,
+      matchedRepairCount,
+      needingAttentionCount,
+      fromRepairCount,
+      fromTelematicsOnlyCount,
+      withTelematicsVinCount,
+      autoMatchedCount,
+      manualMatchedCount,
+      confirmedCount,
+      excludedCount,
+      includedCount,
+      unmatchedFromRepairCount,
+      telematicsReservedRows,
+      providerAccount,
+    ] = await Promise.all([
       appPrisma.servicePlanUnit.findMany({
-        where: { clerkOrgId },
+        where: whereOrg,
         orderBy: [{ matchType: 'asc' }, { repairUnitNumber: 'asc' }],
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
-      appPrisma.servicePlanUnit.count({ where: { clerkOrgId } }),
+      appPrisma.servicePlanUnit.count({ where: whereOrg }),
+      appPrisma.servicePlanUnit.count({
+        where: {
+          ...whereOrg,
+          isTelematicsOnly: false,
+          matchType: { not: ServicePlanMatchType.UNMATCHED },
+        },
+      }),
+      appPrisma.servicePlanUnit.count({
+        where: {
+          ...whereOrg,
+          OR: [
+            { isTelematicsOnly: true, isConfirmed: false },
+            {
+              isTelematicsOnly: false,
+              matchType: ServicePlanMatchType.UNMATCHED,
+              isConfirmed: false,
+            },
+          ],
+        },
+      }),
+      appPrisma.servicePlanUnit.count({
+        where: { ...whereOrg, isTelematicsOnly: false },
+      }),
+      appPrisma.servicePlanUnit.count({
+        where: { ...whereOrg, isTelematicsOnly: true },
+      }),
+      appPrisma.servicePlanUnit.count({
+        where: { ...whereOrg, telematicsVin: { not: null } },
+      }),
+      appPrisma.servicePlanUnit.count({
+        where: {
+          ...whereOrg,
+          isTelematicsOnly: false,
+          matchType: ServicePlanMatchType.AUTO,
+        },
+      }),
+      appPrisma.servicePlanUnit.count({
+        where: {
+          ...whereOrg,
+          isTelematicsOnly: false,
+          matchType: ServicePlanMatchType.MANUAL,
+        },
+      }),
+      appPrisma.servicePlanUnit.count({
+        where: {
+          ...whereOrg,
+          OR: [
+            {
+              isTelematicsOnly: false,
+              matchType: ServicePlanMatchType.UNMATCHED,
+              isConfirmed: true,
+            },
+            { isTelematicsOnly: true, isConfirmed: true },
+          ],
+        },
+      }),
+      appPrisma.servicePlanUnit.count({
+        where: { ...whereOrg, isIncluded: false },
+      }),
+      appPrisma.servicePlanUnit.count({
+        where: { ...whereOrg, isIncluded: true },
+      }),
+      appPrisma.servicePlanUnit.count({
+        where: {
+          ...whereOrg,
+          isTelematicsOnly: false,
+          matchType: ServicePlanMatchType.UNMATCHED,
+        },
+      }),
+      appPrisma.servicePlanUnit.findMany({
+        where: {
+          ...whereOrg,
+          matchType: { not: ServicePlanMatchType.UNMATCHED },
+          telematicsVin: { not: null },
+        },
+        select: { telematicsVin: true },
+      }),
+      appPrisma.telematicsProviderAccount.findUnique({
+        where: { clerkOrgId },
+        select: { provider: true },
+      }),
     ]);
-    
-    // Enrich with telematics data for matched units
-    // Check what provider this org uses
-    const providerAccount = await appPrisma.telematicsProviderAccount.findUnique({
-      where: { clerkOrgId },
-      select: { provider: true },
-    });
-    
+
+    const telematicsVinsReserved = new Set(
+      telematicsReservedRows.map((r) => r.telematicsVin!.trim())
+    );
+
     // Fetch all telematics vehicles once for enrichment and suggestion lookup
     let allTelematicsVehicles: Array<{ vin: string; vehicleNumber: string | null }> = [];
     if (providerAccount?.provider === 'MOTIVE') {
@@ -379,17 +477,13 @@ router.get('/units', async (req: AuthRequest, res) => {
         distinct: ['vin'],
       });
       allTelematicsVehicles = rows
-        .filter(r => r.vin && r.vin.trim().length > 0)
-        .map(r => ({ vin: r.vin!.trim(), vehicleNumber: r.vehicleNumber }));
+        .filter((r) => r.vin && r.vin.trim().length > 0)
+        .map((r) => ({ vin: r.vin!.trim(), vehicleNumber: r.vehicleNumber }));
     } else if (providerAccount?.provider === 'SAMSARA') {
-      const rows = await appPrisma.telematicsVehicleMap.findMany({
-        where: { clerkOrgId, provider: 'SAMSARA', vin: { not: null } },
-        select: { vin: true, providerVehicleName: true },
-        distinct: ['vin'],
-      });
-      allTelematicsVehicles = rows
-        .filter(r => r.vin && r.vin.trim().length > 0)
-        .map(r => ({ vin: r.vin!.trim(), vehicleNumber: r.providerVehicleName ?? null }));
+      allTelematicsVehicles = await loadSamsaraTelematicsVehiclesForServicePlan(
+        appPrisma,
+        clerkOrgId
+      );
     }
 
     // Build a map: normalized vehicleNumber → vehicle, for name-based suggestions
@@ -439,6 +533,22 @@ router.get('/units', async (req: AuthRequest, res) => {
                 lastDataDate: latestData.date,
                 hasTelematicsData: true,
               };
+            } else {
+              const mapRow = await appPrisma.telematicsVehicleMap.findFirst({
+                where: {
+                  clerkOrgId,
+                  provider: 'SAMSARA',
+                  vin: unit.telematicsVin,
+                },
+                select: { providerVehicleName: true },
+              });
+              if (mapRow) {
+                telematicsData = {
+                  vehicleNumber: mapRow.providerVehicleName ?? null,
+                  lastDataDate: '',
+                  hasTelematicsData: false,
+                };
+              }
             }
           }
         }
@@ -454,9 +564,7 @@ router.get('/units', async (req: AuthRequest, res) => {
           const suggestion = telematicsByName.get(key);
           // Only suggest if that VIN isn't already matched to another unit
           if (suggestion) {
-            const alreadyMatched = units.some(
-              u => u.telematicsVin === suggestion.telematicsVin && u.matchType !== 'UNMATCHED'
-            );
+            const alreadyMatched = telematicsVinsReserved.has(suggestion.telematicsVin);
             if (!alreadyMatched) suggestedMatch = suggestion;
           }
         }
@@ -468,19 +576,7 @@ router.get('/units', async (req: AuthRequest, res) => {
         };
       })
     );
-    
-    // Calculate breakdown by source using the isTelematicsOnly flag
-    const fromRepairCount = units.filter(u => !u.isTelematicsOnly).length;
-    const fromTelematicsOnlyCount = units.filter(u => u.isTelematicsOnly).length;
 
-    // Count units WITH telematics data (matched repair units + telematics-only units)
-    const withTelematicsData = units.filter(u => u.telematicsVin !== null).length;
-
-    const unmatchedFromRepair = units.filter(u =>
-      !u.isTelematicsOnly && u.matchType === 'UNMATCHED'
-    ).length;
-    const unmatchedFromTelematics = fromTelematicsOnlyCount;
-    
     res.json({
       units: enrichedUnits.map((u: any) => ({ ...u, isIncluded: u.isIncluded ?? true })),
       pagination: {
@@ -491,13 +587,18 @@ router.get('/units', async (req: AuthRequest, res) => {
       },
       summary: {
         total: totalCount,
-        matched: units.filter(u => u.matchType !== 'UNMATCHED').length,
-        unmatched: units.filter(u => u.matchType === 'UNMATCHED').length,
+        matched: matchedRepairCount,
+        unmatched: needingAttentionCount,
         fromRepair: fromRepairCount,
         fromTelematicsOnly: fromTelematicsOnlyCount,
-        withTelematicsData: withTelematicsData,
-        unmatchedFromRepair,
-        unmatchedFromTelematics,
+        withTelematicsData: withTelematicsVinCount,
+        unmatchedFromRepair: unmatchedFromRepairCount,
+        unmatchedFromTelematics: fromTelematicsOnlyCount,
+        autoMatched: autoMatchedCount,
+        manualMatched: manualMatchedCount,
+        confirmed: confirmedCount,
+        excluded: excludedCount,
+        included: includedCount,
       },
     });
     
@@ -555,11 +656,17 @@ router.put('/units/:unitId/match', async (req: AuthRequest, res) => {
       }
     } else if (providerAccount?.provider === 'SAMSARA') {
       if (telematicsVin) {
-        const samsaraVehicle = await appPrisma.samsaraVehicleUtilization.findFirst({
-          where: { clerkOrgId, vin: telematicsVin },
-          select: { vin: true },
-        });
-        vehicleExists = !!samsaraVehicle;
+        const [utilRow, mapRow] = await Promise.all([
+          appPrisma.samsaraVehicleUtilization.findFirst({
+            where: { clerkOrgId, vin: telematicsVin },
+            select: { vin: true },
+          }),
+          appPrisma.telematicsVehicleMap.findFirst({
+            where: { clerkOrgId, provider: 'SAMSARA', vin: telematicsVin },
+            select: { vin: true },
+          }),
+        ]);
+        vehicleExists = !!(utilRow || mapRow);
       } else {
         // VIN-less: look up by providerVehicleId in vehicle map
         const vehicleMap = await appPrisma.telematicsVehicleMap.findFirst({
@@ -595,7 +702,9 @@ router.put('/units/:unitId/match', async (req: AuthRequest, res) => {
         matchedAt: new Date(),
       },
     });
-    
+
+    await invalidateCachesAfterServicePlanChange(clerkOrgId);
+
     res.json({ success: true, unit: updated });
     
   } catch (error) {
@@ -631,7 +740,9 @@ router.delete('/units/:unitId/match', async (req: AuthRequest, res) => {
         matchedAt: null,
       },
     });
-    
+
+    await invalidateCachesAfterServicePlanChange(clerkOrgId);
+
     res.json({ success: true, unit: updated });
     
   } catch (error) {
@@ -675,7 +786,7 @@ router.get('/available-vins', async (req: AuthRequest, res) => {
         vehicleId: String(v.vehicleId),
       }));
     } else if (providerAccount?.provider === 'SAMSARA') {
-      // telematicsVehicleMap has all Samsara vehicles; some may have no VIN
+      // telematicsVehicleMap (roster); merge utilization rows so vehicles missing from roster still appear
       const samsaraVehicles = await appPrisma.telematicsVehicleMap.findMany({
         where: { clerkOrgId, provider: 'SAMSARA' },
         select: { vin: true, providerVehicleName: true, providerVehicleId: true },
@@ -686,6 +797,25 @@ router.get('/available-vins', async (req: AuthRequest, res) => {
         vehicleNumber: v.providerVehicleName ?? null,
         vehicleId: v.providerVehicleId,
       }));
+      const seenVehicleIds = new Set(
+        telematicsVehicles.map(v => v.vehicleId).filter(Boolean) as string[]
+      );
+      const utilRows = await appPrisma.samsaraVehicleUtilization.findMany({
+        where: { clerkOrgId },
+        select: { vehicleId: true, vin: true, vehicleName: true },
+        distinct: ['vehicleId'],
+        orderBy: { date: 'desc' },
+      });
+      for (const u of utilRows) {
+        if (seenVehicleIds.has(u.vehicleId)) continue;
+        seenVehicleIds.add(u.vehicleId);
+        const vinTrim = u.vin?.trim() || null;
+        telematicsVehicles.push({
+          vin: vinTrim && vinTrim.length > 0 ? vinTrim : null,
+          vehicleNumber: u.vehicleName ?? null,
+          vehicleId: u.vehicleId,
+        });
+      }
     }
     
     // Get already matched units (by VIN or vehicleId)
@@ -757,6 +887,8 @@ router.put('/units/:unitId/inclusion', async (req: AuthRequest, res) => {
       where: { id: unitId },
       data: { isIncluded },
     });
+
+    await invalidateCachesAfterServicePlanChange(clerkOrgId);
 
     res.json({ success: true, unit: updated });
   } catch (error) {
@@ -844,6 +976,8 @@ router.post('/units/:telematicsUnitId/merge', async (req: AuthRequest, res) => {
     // Delete the now-redundant telematics-only record
     await appPrisma.servicePlanUnit.delete({ where: { id: telematicsUnitId } });
 
+    await invalidateCachesAfterServicePlanChange(clerkOrgId);
+
     res.json({ success: true, unit: merged });
   } catch (error) {
     console.error('[ServicePlan] Merge error:', error);
@@ -878,6 +1012,8 @@ router.put('/units/:unitId/confirm', async (req: AuthRequest, res) => {
       data: { isConfirmed },
     });
 
+    await invalidateCachesAfterServicePlanChange(clerkOrgId);
+
     res.json({ success: true, unit: updated });
   } catch (error) {
     console.error('[ServicePlan] Confirm error:', error);
@@ -911,6 +1047,8 @@ router.put('/units/:unitId/name', async (req: AuthRequest, res) => {
       where: { id: unitId },
       data: { customUnitName: customUnitName?.trim() || null },
     });
+
+    await invalidateCachesAfterServicePlanChange(clerkOrgId);
 
     res.json({ success: true, unit: updated });
   } catch (error) {

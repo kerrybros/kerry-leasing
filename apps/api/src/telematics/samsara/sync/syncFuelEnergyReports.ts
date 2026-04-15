@@ -102,7 +102,10 @@ export async function syncFuelEnergyReports(
     for (const report of reports) {
       try {
         const vehicleId = String(report.vehicle.id);
-        const vin = report.vehicle.externalIds?.['samsara.vin'] || null;
+        const vin =
+          report.vehicle.externalIds?.['samsara.vin'] ||
+          (report.vehicle as { vin?: string | null }).vin ||
+          null;
         const vehicleName = report.vehicle.name;
 
         // Convert all units at write time

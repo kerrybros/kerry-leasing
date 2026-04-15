@@ -150,9 +150,9 @@ router.get('/', clerkAuthMiddleware, requireOrg, async (req: AuthRequest, res) =
       });
     }
 
-    // Get all service plan units for this org to filter repairs (all plan units are shown)
+    // Service plan unit numbers — only units included in the customer portal
     const includedUnits = await appPrisma.servicePlanUnit.findMany({
-      where: { clerkOrgId: klOrgId },
+      where: { clerkOrgId: klOrgId, isIncluded: true },
       select: { repairUnitNumber: true },
     });
 
@@ -197,6 +197,39 @@ router.get('/', clerkAuthMiddleware, requireOrg, async (req: AuthRequest, res) =
 
     const fromDate = parseYmdToDate(effectiveFromYmd);
     const toDate = parseYmdToDate(toYmdValue);
+
+    if (allowedUnitNumbers.length === 0) {
+      const elapsedMs = Date.now() - startedAt;
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+      res.setHeader('Surrogate-Control', 'no-store');
+      res.setHeader('X-Cache', 'SKIP');
+      res.setHeader('X-Elapsed-Ms', String(elapsedMs));
+      res.json({
+        customer: {
+          klOrgId: config.klOrgId,
+          customerName: config.customerName,
+          contractStartDate: contractStartYmd,
+        },
+        period: { from: effectiveFromYmd, to: toYmdValue },
+        pagination: {
+          page,
+          pageSize,
+          total: 0,
+          totalPages: 0,
+        },
+        summary: {
+          unitCount: 0,
+          invoiceCount: 0,
+          lineRowCount: 0,
+          total: 0,
+          tax: 0,
+        },
+        units: [],
+      });
+      return;
+    }
 
     const cacheKey = repairsRawRedisKey(
       klOrgId,

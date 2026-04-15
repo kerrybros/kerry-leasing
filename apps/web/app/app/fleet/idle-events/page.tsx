@@ -132,7 +132,7 @@ export default function IdleEventsPage() {
             {data.repeatOffenders.length === 0 ? (
               <p className="text-muted-foreground text-sm">No idle events found.</p>
             ) : (
-              <div className="h-[280px]">
+              <div className="h-[280px] [&_.recharts-wrapper]:!outline-none [&_.recharts-wrapper]:shadow-none [&_.recharts-surface]:!outline-none [&_.recharts-surface]:shadow-none [&_svg]:outline-none">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart
                     data={data.repeatOffenders.slice(0, 8)}
@@ -165,7 +165,7 @@ export default function IdleEventsPage() {
                         name === 'count' ? 'Events' : 'Total Idle',
                       ]}
                     />
-                    <Bar dataKey="count" fill={CHART_COLORS.warning} radius={[0, 3, 3, 0]} isAnimationActive={false}>
+                    <Bar dataKey="count" fill={CHART_COLORS.primary} radius={[0, 3, 3, 0]} isAnimationActive={false}>
                       <LabelList
                         dataKey="count"
                         position="right"

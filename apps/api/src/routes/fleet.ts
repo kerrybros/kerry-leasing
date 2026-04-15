@@ -39,7 +39,7 @@ function toYmd(date: unknown): string | null {
  * GET /fleet/units
  * 
  * Get all service plan units with combined telematics and repair data.
- * Any unit in the service plan is shown in fleet/reports (no isIncluded filter).
+ * Only units with isIncluded=true (customer portal) are returned.
  * Tenant-scoped to authenticated org
  */
 router.get('/units', clerkAuthMiddleware, requireOrg, async (req: AuthRequest, res) => {
@@ -313,6 +313,22 @@ router.get('/units/:identifier', clerkAuthMiddleware, requireOrg, async (req: Au
     // If no service plan entry but telematics data exists for this VIN, synthesise a
     // minimal entry so the detail page can still render with whatever data is available.
     if (!servicePlanUnit) {
+      const excludedMatch = await appPrisma.servicePlanUnit.findFirst({
+        where: {
+          clerkOrgId,
+          isIncluded: false,
+          OR: [
+            { telematicsVin: identifier },
+            { repairVin: identifier },
+            { repairUnitNumber: identifier },
+          ],
+        },
+        select: { id: true },
+      });
+      if (excludedMatch) {
+        return res.status(404).json({ error: 'Not Found', message: 'Unit not found' });
+      }
+
       let hasTelematics = false;
       if (providerAccount?.provider === 'MOTIVE') {
         const count = await appPrisma.motiveVehicleUtilization.count({ where: { clerkOrgId, vin: identifier } });

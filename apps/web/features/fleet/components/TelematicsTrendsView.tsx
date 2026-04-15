@@ -95,7 +95,7 @@ export function TelematicsTrendsView({
                         dataKey="value"
                       >
                         <Cell fill="#ef4444" />
-                        <Cell fill={CHART_COLORS.idle} />
+                        <Cell fill={CHART_COLORS.primary} />
                       </Pie>
                       <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(val) => [`${Number(val).toLocaleString()} gal`]} />
                       <Legend formatter={(name) => <span style={LEGEND_STYLE}>{name}</span>} />

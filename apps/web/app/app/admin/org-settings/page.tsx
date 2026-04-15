@@ -12,6 +12,8 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/Skeleton';
+import { BRAND_PRESETS } from '@/lib/brandPresets';
+import type { BrandColorPreset } from '@/hooks/useDataQueries';
 
 interface RepairCustomerConfig {
   klOrgId: string;
@@ -57,6 +59,8 @@ export default function AdminOrgSettingsPage() {
   const [telematicsDashboardPassword, setTelematicsDashboardPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
+  const [brandColorPreset, setBrandColorPreset] = useState<BrandColorPreset | null>(null);
+
   const [customerStatusMsg, setCustomerStatusMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [portalStatusMsg, setPortalStatusMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -74,6 +78,7 @@ export default function AdminOrgSettingsPage() {
     setTelematicsDashboardUrl(orgSettings.telematicsDashboardUrl ?? '');
     setTelematicsDashboardUsername(orgSettings.telematicsDashboardUsername ?? '');
     setTelematicsDashboardPassword(orgSettings.telematicsDashboardPassword ?? '');
+    setBrandColorPreset(orgSettings.brandColorPreset ?? null);
   }, [orgSettings]);
 
   const loadConfig = async () => {
@@ -123,6 +128,7 @@ export default function AdminOrgSettingsPage() {
         telematicsDashboardUrl: telematicsDashboardUrl.trim() || null,
         telematicsDashboardUsername: telematicsDashboardUsername.trim() || null,
         telematicsDashboardPassword: telematicsDashboardPassword || null,
+        brandColorPreset,
       });
       await queryClient.invalidateQueries({ queryKey: ['org-settings', organization?.id] });
       setPortalStatusMsg({ type: 'success', text: 'Settings saved.' });
@@ -322,6 +328,40 @@ export default function AdminOrgSettingsPage() {
                   {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Brand Color</CardTitle>
+            <CardDescription>
+              Choose a primary color theme for this organization. This overrides the default gold accent across buttons, links, and focus rings.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-5 gap-3">
+              {BRAND_PRESETS.map((preset) => {
+                const isSelected = (brandColorPreset ?? 'KERRY_GOLD') === preset.key;
+                return (
+                  <button
+                    key={preset.key}
+                    type="button"
+                    onClick={() => setBrandColorPreset(preset.key)}
+                    className={`flex flex-col items-center gap-1.5 rounded-lg p-2 transition-all border-2 ${
+                      isSelected
+                        ? 'border-foreground bg-muted'
+                        : 'border-transparent hover:bg-muted/50'
+                    }`}
+                  >
+                    <div
+                      className="w-8 h-8 rounded-full border border-border"
+                      style={{ backgroundColor: preset.swatch }}
+                    />
+                    <span className="text-xs font-medium text-muted-foreground">{preset.label}</span>
+                  </button>
+                );
+              })}
             </div>
           </CardContent>
         </Card>

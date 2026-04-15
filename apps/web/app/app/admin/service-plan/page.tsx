@@ -286,13 +286,23 @@ export default function AdminServicePlanPage() {
   // "Unmatched" = needs attention: not matched, not confirmed
   const isUnmatched = (u: any) => !isMatched(u) && !u.isConfirmed;
 
-  const autoCount = units.filter(u => !u.isTelematicsOnly && u.matchType === 'AUTO').length;
-  const manualCount = units.filter(u => !u.isTelematicsOnly && u.matchType === 'MANUAL').length;
-  const unmatchedCount = units.filter(isUnmatched).length;
-  const confirmedCount = units.filter(isConfirmedUnit).length;
-  const excludedCount = units.filter(u => !(u as any).isIncluded).length;
-  const includedCount = units.filter(u => (u as any).isIncluded).length;
-  const matchedCount = units.filter(isMatched).length;
+  const autoCount =
+    summary?.autoMatched ??
+    units.filter(u => !u.isTelematicsOnly && u.matchType === 'AUTO').length;
+  const manualCount =
+    summary?.manualMatched ??
+    units.filter(u => !u.isTelematicsOnly && u.matchType === 'MANUAL').length;
+  const unmatchedCount =
+    summary?.unmatched ?? units.filter(isUnmatched).length;
+  const confirmedCount =
+    summary?.confirmed ?? units.filter(isConfirmedUnit).length;
+  const excludedCount =
+    summary?.excluded ?? units.filter(u => !(u as any).isIncluded).length;
+  const includedCount =
+    summary?.included ?? units.filter(u => (u as any).isIncluded).length;
+  const matchedCount =
+    summary?.matched ?? units.filter(isMatched).length;
+  const totalUnitsForFilters = summary?.total ?? units.length;
   const filteredUnits = (() => {
     const base = filter === 'included'
       ? units.filter(u => (u as any).isIncluded)
@@ -394,7 +404,7 @@ export default function AdminServicePlanPage() {
                 className="rounded-none border-0"
                 onClick={() => setFilter('all')}
               >
-                All ({units.length})
+                All ({totalUnitsForFilters})
               </Button>
               <Button
                 variant={filter === 'included' ? 'default' : 'ghost'}
