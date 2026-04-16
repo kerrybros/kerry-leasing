@@ -2,7 +2,6 @@
 
 import { useMemo } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { ScrollArea } from '@/components/ui/scroll-area';
 
 import type { EnrichedIdleEvent, GroupBy } from '../types';
 import { formatDuration, fuelStr } from '../types';
@@ -65,7 +64,7 @@ export default function UnitListPanel({ events, groupBy, open, onToggle }: Props
               <p className="text-xs text-muted-foreground/60">No data</p>
             </div>
           ) : (
-            <ScrollArea className="flex-1">
+            <div className="flex-1 overflow-y-auto min-h-0">
               <div className="flex flex-col">
                 {rows.map((row, i) => {
                   const isWorst = i === 0 && worstMinutes > 0;
@@ -94,7 +93,7 @@ export default function UnitListPanel({ events, groupBy, open, onToggle }: Props
                   );
                 })}
               </div>
-            </ScrollArea>
+            </div>
           )}
         </div>
       )}

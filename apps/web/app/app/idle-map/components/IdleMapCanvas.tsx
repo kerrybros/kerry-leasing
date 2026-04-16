@@ -124,12 +124,9 @@ export default function IdleMapCanvas({
 }: Props) {
   const mapRef = useRef<MapRef>(null);
   const mapStyle = useMapTheme();
-  const mapLoadedRef = useRef(false);
+  const [mapLoaded, setMapLoaded] = useState(false);
 
   const eventsWithCoords = useMemo(() => events.filter(e => e.lat != null && e.lon != null), [events]);
-  // Keep a stable ref so onLoad callback is never stale
-  const eventsWithCoordsRef = useRef(eventsWithCoords);
-  eventsWithCoordsRef.current = eventsWithCoords;
 
   const isEmpty = !loading && eventsWithCoords.length === 0;
   const noCoords = !loading && events.length > 0 && eventsWithCoords.length === 0;
@@ -167,17 +164,16 @@ export default function IdleMapCanvas({
     }
   }
 
-  // When the map finishes loading, fit to any data that's already arrived
   const handleMapLoad = useCallback(() => {
-    mapLoadedRef.current = true;
-    fitToEvents(eventsWithCoordsRef.current);
-  }, []); // stable — reads from ref, not closure
+    setMapLoaded(true);
+  }, []);
 
-  // When event count changes after map is loaded, refit
+  // Fit bounds whenever the map is loaded AND events are available.
+  // useState for mapLoaded ensures this effect re-runs when either changes.
   useEffect(() => {
-    if (!mapLoadedRef.current) return;
+    if (!mapLoaded || eventsWithCoords.length === 0 || !mapRef.current) return;
     fitToEvents(eventsWithCoords);
-  }, [eventsWithCoords.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [mapLoaded, eventsWithCoords.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleMapClick = useCallback(
     (e: MapLayerMouseEvent) => {

@@ -464,7 +464,7 @@ export default function IdleReportModal({
 
   return (
     <Dialog open onOpenChange={() => onClose()}>
-      <DialogContent className="max-w-5xl w-full h-[85vh] flex flex-col p-0 gap-0 overflow-hidden">
+      <DialogContent className="max-w-5xl sm:max-w-5xl w-full h-[85vh] flex flex-col p-0 gap-0 overflow-hidden">
         <DialogHeader className="px-6 pt-5 pb-3 border-b border-border shrink-0">
           <div className="flex items-start justify-between gap-4">
             <div>
