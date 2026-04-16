@@ -13,7 +13,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 
-import type { DateRange, ViewMode, BubbleMode, GroupBy, FilterState, EnrichedIdleEvent } from '../types';
+import type { DateRange, ViewMode, BubbleMode, FilterState, EnrichedIdleEvent } from '../types';
 import { driverLabel } from '../types';
 
 interface Props {
@@ -23,8 +23,6 @@ interface Props {
   onViewModeChange: (v: ViewMode) => void;
   bubbleMode: BubbleMode;
   onBubbleModeChange: (v: BubbleMode) => void;
-  groupBy: GroupBy;
-  onGroupByChange: (v: GroupBy) => void;
   geofenceVisible: boolean;
   onGeofenceVisibleChange: (v: boolean) => void;
   filters: FilterState;
@@ -88,8 +86,6 @@ export default function IdleMapToolbar({
   onViewModeChange,
   bubbleMode,
   onBubbleModeChange,
-  groupBy,
-  onGroupByChange,
   geofenceVisible,
   onGeofenceVisibleChange,
   filters,
@@ -208,16 +204,6 @@ export default function IdleMapToolbar({
           <ToggleGroupItem value="raw" className="h-8 px-3 text-xs rounded-none">Raw</ToggleGroupItem>
         </ToggleGroup>
       )}
-
-      {/* Group by: Vehicle | Driver */}
-      <ToggleGroup
-        value={[groupBy]}
-        onValueChange={(values) => handleToggleGroup(values, groupBy, onGroupByChange)}
-        className="h-8 border border-input rounded-md overflow-hidden"
-      >
-        <ToggleGroupItem value="vehicle" className="h-8 px-3 text-xs rounded-none">Vehicle</ToggleGroupItem>
-        <ToggleGroupItem value="driver" className="h-8 px-3 text-xs rounded-none">Driver</ToggleGroupItem>
-      </ToggleGroup>
 
       {/* Geofences toggle */}
       <div className="flex items-center gap-1.5 h-8 px-2 border border-input rounded-md">

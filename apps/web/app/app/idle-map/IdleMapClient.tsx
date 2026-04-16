@@ -234,8 +234,6 @@ export default function IdleMapClient() {
         onViewModeChange={handleViewModeChange}
         bubbleMode={bubbleMode}
         onBubbleModeChange={handleBubbleModeChange}
-        groupBy={groupBy}
-        onGroupByChange={handleGroupByChange}
         geofenceVisible={geofenceVisible}
         onGeofenceVisibleChange={handleGeofenceVisibleChange}
         filters={filters}
@@ -257,7 +255,6 @@ export default function IdleMapClient() {
           }}
           onClusterClick={(groupKey) => {
             if (!groupKey) {
-              // Cluster of mixed units: open full report
               setModalTarget({ type: 'all', initialTab: 'events' });
             } else {
               setModalTarget({
@@ -266,6 +263,9 @@ export default function IdleMapClient() {
                 initialTab: 'events',
               });
             }
+          }}
+          onClusterEventsClick={(eventIds) => {
+            setModalTarget({ type: 'eventSet', eventIds, initialTab: 'events' });
           }}
         />
 
@@ -281,12 +281,17 @@ export default function IdleMapClient() {
         <UnitListPanel
           events={filteredEvents}
           groupBy={groupBy}
+          onGroupByChange={handleGroupByChange}
           open={unitPanelOpen}
           onToggle={() => setUnitPanelOpen(v => !v)}
         />
       </div>
 
-      <InsideOutsideBar events={filteredEvents} loading={eventsLoading} dieselPrice={dieselPrice} />
+      <InsideOutsideBar
+        events={filteredEvents}
+        loading={eventsLoading}
+        onViewGeofenceReport={() => setModalTarget({ type: 'all', initialTab: 'geofences' })}
+      />
 
       {modalTarget && (
         <IdleReportModal

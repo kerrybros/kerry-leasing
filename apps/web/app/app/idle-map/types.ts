@@ -68,10 +68,11 @@ export interface FilterState {
 }
 
 export type ModalTarget =
-  | { type: 'all';    initialTab?: 'events' | 'drivers' | 'vehicles' | 'geofences' }
-  | { type: 'unit';   value: string; initialTab?: 'events' | 'drivers' | 'vehicles' | 'geofences' }
-  | { type: 'driver'; value: string; initialTab?: 'events' | 'drivers' | 'vehicles' | 'geofences' }
-  | { type: 'event';  eventId: string; initialTab?: 'events' | 'drivers' | 'vehicles' | 'geofences' };
+  | { type: 'all';      initialTab?: 'events' | 'drivers' | 'vehicles' | 'geofences' }
+  | { type: 'unit';     value: string; initialTab?: 'events' | 'drivers' | 'vehicles' | 'geofences' }
+  | { type: 'driver';   value: string; initialTab?: 'events' | 'drivers' | 'vehicles' | 'geofences' }
+  | { type: 'event';    eventId: string; initialTab?: 'events' | 'drivers' | 'vehicles' | 'geofences' }
+  | { type: 'eventSet'; eventIds: string[]; initialTab?: 'events' | 'drivers' | 'vehicles' | 'geofences' };
 
 export function formatDuration(minutes: number | null): string {
   if (minutes == null) return '—';

@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
@@ -34,6 +34,7 @@ function getScopeLabel(scope: ModalTarget, scopedEvents: EnrichedIdleEvent[]): s
   if (scope.type === 'all') return 'Idle Report';
   if (scope.type === 'unit') return `Idle Report — Unit ${scope.value}`;
   if (scope.type === 'driver') return `Idle Report — ${scope.value}`;
+  if (scope.type === 'eventSet') return `Idle Report — ${scopedEvents.length.toLocaleString('en-US')} events`;
   // Single event: show unit + date
   const e = scopedEvents[0];
   return e ? `Idle Event — Unit ${e.unitNumber ?? '?'} · ${e.date}` : 'Idle Event';
@@ -44,6 +45,7 @@ function scopeEvents(events: EnrichedIdleEvent[], scope: ModalTarget): EnrichedI
   if (scope.type === 'unit') return events.filter(e => e.unitNumber === scope.value);
   if (scope.type === 'driver') return events.filter(e => driverLabel(e) === scope.value);
   if (scope.type === 'event') return events.filter(e => e.id === scope.eventId);
+  if (scope.type === 'eventSet') return events.filter(e => scope.eventIds.includes(e.id));
   return events;
 }
 
@@ -124,11 +126,11 @@ function EventsTable({
   const pageCount = Math.ceil(sorted.length / PAGE_SIZE);
   const slice = sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
-  function SortTh({ k, children }: { k: SortKey; children: React.ReactNode }) {
+  function SortTh({ k, children, className }: { k: SortKey; children: React.ReactNode; className?: string }) {
     const active = sortKey === k;
     return (
       <TableHead
-        className="cursor-pointer select-none text-xs hover:text-foreground whitespace-nowrap"
+        className={`cursor-pointer select-none text-xs hover:text-foreground whitespace-nowrap ${className ?? ''}`}
         onClick={() => toggleSort(k)}
       >
         <span className="flex items-center gap-0.5">
@@ -142,7 +144,18 @@ function EventsTable({
   return (
     <div className="flex flex-col gap-2">
       <div className="overflow-x-auto">
-        <Table>
+        {/* table-fixed keeps column widths stable when sort changes cell content length */}
+        <Table className="table-fixed w-full">
+          <colgroup>
+            <col className="w-20" />
+            <col className="w-28" />
+            <col className="w-20" />
+            <col className="w-20" />
+            <col className="w-40" />
+            <col className="w-16" />
+            <col className="w-20" />
+            <col className="w-24" />
+          </colgroup>
           <TableHeader>
             <TableRow className="bg-muted hover:bg-muted">
               <SortTh k="unit">Unit</SortTh>
@@ -159,16 +172,17 @@ function EventsTable({
             {slice.map(e => (
               <TableRow key={e.id} className="text-sm">
                 <TableCell>
+                  {/* Use unitNumber ?? 'Unknown' to match GroupedTab getKey for vehicles */}
                   <button
-                    className="font-medium hover:underline text-left"
-                    onClick={() => onUnitClick?.(e.unitNumber ?? '')}
+                    className="font-medium hover:underline text-left truncate max-w-full block"
+                    onClick={() => onUnitClick?.(e.unitNumber ?? 'Unknown')}
                   >
                     {e.unitNumber ?? '—'}
                   </button>
                 </TableCell>
                 <TableCell>
                   <button
-                    className="text-muted-foreground hover:underline text-left"
+                    className="text-muted-foreground hover:underline text-left truncate max-w-full block"
                     onClick={() => onDriverClick?.(driverLabel(e))}
                   >
                     {driverLabel(e)}
@@ -186,7 +200,7 @@ function EventsTable({
                     {formatDuration(e.durationMinutes)}
                   </span>
                 </TableCell>
-                <TableCell className="text-muted-foreground text-xs max-w-[160px] truncate">{e.location ?? '—'}</TableCell>
+                <TableCell className="text-muted-foreground text-xs truncate">{e.location ?? '—'}</TableCell>
                 <TableCell className="text-muted-foreground">{fuelStr(e.idleFuelGallons)}</TableCell>
                 <TableCell className="text-muted-foreground">{costStr(e.idleFuelGallons, dieselPrice)}</TableCell>
                 <TableCell>
@@ -224,13 +238,25 @@ function GroupedTab({
   dieselPrice,
   getKey,
   label,
+  expandToKey,
+  onExpandApplied,
 }: {
   events: EnrichedIdleEvent[];
   dieselPrice: number;
   getKey: (e: EnrichedIdleEvent) => string;
   label: string;
+  expandToKey?: string | null;
+  onExpandApplied?: () => void;
 }) {
   const [expanded, setExpanded] = useState<string | null>(null);
+
+  // When a drill-down key arrives, expand that row and notify parent to clear drilldown.
+  // Clearing drilldown allows the same unit to be re-clicked from All Events and re-expand.
+  useEffect(() => {
+    if (!expandToKey) return;
+    setExpanded(expandToKey);
+    onExpandApplied?.();
+  }, [expandToKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const groups = useMemo(() => {
     const map = new Map<string, { events: EnrichedIdleEvent[]; totalMinutes: number; totalFuel: number }>();
@@ -255,13 +281,12 @@ function GroupedTab({
 
   const totalMinutes = groups.reduce((s, g) => s + g.totalMinutes, 0);
   const totalFuel = groups.reduce((s, g) => s + g.totalFuel, 0);
-  const totalCost = totalFuel * dieselPrice;
 
   return (
     <div className="flex flex-col gap-3">
       {/* Summary row */}
       <div className="flex gap-4 text-sm">
-        <span className="text-muted-foreground">{groups.length} {label}s</span>
+        <span className="text-muted-foreground">{groups.length.toLocaleString('en-US')} {label}s</span>
         <span className="font-medium">{formatDuration(totalMinutes)} total idle</span>
         {totalFuel > 0 && <span className="text-muted-foreground">{fuelStr(totalFuel)} · {costStr(totalFuel, dieselPrice)}</span>}
       </div>
@@ -275,7 +300,7 @@ function GroupedTab({
               <TableHead className="text-xs">Total Time</TableHead>
               <TableHead className="text-xs">Fuel</TableHead>
               <TableHead className="text-xs">Est. Cost</TableHead>
-              <TableHead className="text-xs">% Inside</TableHead>
+              <TableHead className="text-xs">% In geofence</TableHead>
               <TableHead className="text-xs w-6"></TableHead>
             </TableRow>
           </TableHeader>
@@ -287,7 +312,7 @@ function GroupedTab({
                   onClick={() => setExpanded(expanded === g.key ? null : g.key)}
                 >
                   <TableCell className="font-medium text-sm">{g.key}</TableCell>
-                  <TableCell className="text-sm text-muted-foreground">{g.events.length}</TableCell>
+                  <TableCell className="text-sm text-muted-foreground">{g.events.length.toLocaleString('en-US')}</TableCell>
                   <TableCell className="text-sm font-semibold">{formatDuration(g.totalMinutes)}</TableCell>
                   <TableCell className="text-sm text-muted-foreground">{fuelStr(g.totalFuel)}</TableCell>
                   <TableCell className="text-sm text-muted-foreground">{costStr(g.totalFuel, dieselPrice)}</TableCell>
@@ -366,9 +391,9 @@ function GeofencesTab({ events, dieselPrice }: { events: EnrichedIdleEvent[]; di
   return (
     <div className="flex flex-col gap-4">
       <div className="flex gap-4 text-sm">
-        <span>{total} total events</span>
-        <span className="text-primary font-medium">{insideTotal} inside geofences ({total > 0 ? Math.round(insideTotal / total * 100) : 0}%)</span>
-        <span className="text-muted-foreground">{outsideTotal} outside</span>
+        <span>{total.toLocaleString('en-US')} total events</span>
+        <span className="text-primary font-medium">{insideTotal.toLocaleString('en-US')} inside geofences ({total > 0 ? Math.round(insideTotal / total * 100) : 0}%)</span>
+        <span className="text-muted-foreground">{outsideTotal.toLocaleString('en-US')} outside</span>
       </div>
 
       {chartData.length > 1 && (
@@ -404,7 +429,7 @@ function GeofencesTab({ events, dieselPrice }: { events: EnrichedIdleEvent[]; di
                 <TableCell>
                   {g.category && <Badge variant="outline" className="text-[10px]">{g.category}</Badge>}
                 </TableCell>
-                <TableCell className="text-sm text-muted-foreground">{g.count}</TableCell>
+                <TableCell className="text-sm text-muted-foreground">{g.count.toLocaleString('en-US')}</TableCell>
                 <TableCell className="text-sm">{formatDuration(g.totalMinutes)}</TableCell>
                 <TableCell className="text-sm text-muted-foreground">{fuelStr(g.totalFuel)}</TableCell>
                 <TableCell className="text-sm text-muted-foreground">{costStr(g.totalFuel, dieselPrice)}</TableCell>
@@ -428,6 +453,8 @@ export default function IdleReportModal({
   onClose,
 }: Props) {
   const [activeTab, setActiveTab] = useState(scopeFilter.initialTab ?? 'events');
+  // drilldown: set when user clicks unit/driver from All Events table to navigate + expand that row
+  const [drilldown, setDrilldown] = useState<{ tab: 'drivers' | 'vehicles'; key: string } | null>(null);
 
   const scopedEvents = useMemo(() => scopeEvents(events, scopeFilter), [events, scopeFilter]);
 
@@ -471,7 +498,7 @@ export default function IdleReportModal({
               <DialogTitle className="text-lg font-semibold">{title}</DialogTitle>
               <div className="flex items-center gap-2 mt-1">
                 <Badge variant="secondary" className="text-xs font-normal">{dateLabel}</Badge>
-                <span className="text-xs text-muted-foreground">{scopedEvents.length} events</span>
+                <span className="text-xs text-muted-foreground">{scopedEvents.length.toLocaleString('en-US')} events</span>
               </div>
             </div>
             <Button variant="outline" size="sm" className="gap-1.5 shrink-0" onClick={handleDownloadCSV}>
@@ -483,16 +510,33 @@ export default function IdleReportModal({
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col flex-1 min-h-0 overflow-hidden">
           <TabsList className="px-6 py-0 h-10 rounded-none border-b border-border bg-transparent justify-start shrink-0">
-            <TabsTrigger value="events" className="text-xs rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-3">
+            {/* data-active:* targets Base UI's active attribute; data-[state=active]:* would not match */}
+            <TabsTrigger
+              value="events"
+              className="text-xs rounded-none border-b-2 border-transparent data-active:border-primary data-active:text-foreground data-active:font-medium px-3"
+              onClick={() => setDrilldown(null)}
+            >
               All Events
             </TabsTrigger>
-            <TabsTrigger value="drivers" className="text-xs rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-3">
+            <TabsTrigger
+              value="drivers"
+              className="text-xs rounded-none border-b-2 border-transparent data-active:border-primary data-active:text-foreground data-active:font-medium px-3"
+              onClick={() => setDrilldown(null)}
+            >
               Drivers
             </TabsTrigger>
-            <TabsTrigger value="vehicles" className="text-xs rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-3">
+            <TabsTrigger
+              value="vehicles"
+              className="text-xs rounded-none border-b-2 border-transparent data-active:border-primary data-active:text-foreground data-active:font-medium px-3"
+              onClick={() => setDrilldown(null)}
+            >
               Vehicles
             </TabsTrigger>
-            <TabsTrigger value="geofences" className="text-xs rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-3">
+            <TabsTrigger
+              value="geofences"
+              className="text-xs rounded-none border-b-2 border-transparent data-active:border-primary data-active:text-foreground data-active:font-medium px-3"
+              onClick={() => setDrilldown(null)}
+            >
               Geofences
             </TabsTrigger>
           </TabsList>
@@ -514,25 +558,25 @@ export default function IdleReportModal({
                           <BarChart data={analytics.dailyData} margin={{ top: 2, right: 0, left: 0, bottom: 2 }}>
                             <XAxis dataKey="date" hide />
                             <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v: unknown) => [`${v}m`, '']} />
-                            <Bar dataKey="inside" stackId="a" fill={CHART_COLORS.primary} isAnimationActive={false} />
-                            <Bar dataKey="outside" stackId="a" fill={CHART_COLORS.idle} isAnimationActive={false} />
+                            <Bar dataKey="inside" name="In geofence" stackId="a" fill={CHART_COLORS.primary} isAnimationActive={false} />
+                            <Bar dataKey="outside" name="Outside geofence" stackId="a" fill={CHART_COLORS.idle} isAnimationActive={false} />
                           </BarChart>
                         </ResponsiveContainer>
                       </div>
                     )}
                   </div>
 
-                  {/* Inside vs Outside donut */}
+                  {/* Inside vs Outside geofences donut */}
                   <div className="rounded-lg border border-border p-3 flex flex-col gap-2">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Inside vs Outside</p>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Inside vs Outside Geofences</p>
                     {scopedEvents.length > 0 ? (
                       <div className="h-28 flex items-center">
                         <ResponsiveContainer width="100%" height="100%">
                           <PieChart>
                             <Pie
                               data={[
-                                { name: 'Inside', value: analytics.insideCount },
-                                { name: 'Outside', value: analytics.outsideCount },
+                                { name: 'Inside geofences', value: analytics.insideCount },
+                                { name: 'Outside geofences', value: analytics.outsideCount },
                               ]}
                               cx="50%"
                               cy="50%"
@@ -565,8 +609,8 @@ export default function IdleReportModal({
                           <BarChart data={analytics.dailyData} margin={{ top: 2, right: 0, left: 0, bottom: 2 }}>
                             <XAxis dataKey="date" hide />
                             <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v: unknown, n: unknown) => [`${v}m`, String(n)]} />
-                            <Bar dataKey="inside" name="Inside" stackId="b" fill={CHART_COLORS.primary} isAnimationActive={false} />
-                            <Bar dataKey="outside" name="Outside" stackId="b" fill={CHART_COLORS.idle} isAnimationActive={false} />
+                            <Bar dataKey="inside" name="In geofence" stackId="b" fill={CHART_COLORS.primary} isAnimationActive={false} />
+                            <Bar dataKey="outside" name="Outside geofence" stackId="b" fill={CHART_COLORS.idle} isAnimationActive={false} />
                           </BarChart>
                         </ResponsiveContainer>
                       </div>
@@ -577,8 +621,15 @@ export default function IdleReportModal({
                 <EventsTable
                   events={scopedEvents}
                   dieselPrice={dieselPrice}
-                  onUnitClick={(u) => setActiveTab('vehicles')}
-                  onDriverClick={(d) => setActiveTab('drivers')}
+                  onUnitClick={(u) => {
+                    // u is already normalised to ?? 'Unknown' by EventsTable's onClick
+                    setDrilldown({ tab: 'vehicles', key: u });
+                    setActiveTab('vehicles');
+                  }}
+                  onDriverClick={(d) => {
+                    setDrilldown({ tab: 'drivers', key: d });
+                    setActiveTab('drivers');
+                  }}
                 />
               </TabsContent>
 
@@ -589,6 +640,8 @@ export default function IdleReportModal({
                   dieselPrice={dieselPrice}
                   getKey={driverLabel}
                   label="Driver"
+                  expandToKey={drilldown?.tab === 'drivers' ? drilldown.key : null}
+                  onExpandApplied={() => setDrilldown(null)}
                 />
               </TabsContent>
 
@@ -599,6 +652,8 @@ export default function IdleReportModal({
                   dieselPrice={dieselPrice}
                   getKey={(e) => e.unitNumber ?? 'Unknown'}
                   label="Vehicle"
+                  expandToKey={drilldown?.tab === 'vehicles' ? drilldown.key : null}
+                  onExpandApplied={() => setDrilldown(null)}
                 />
               </TabsContent>
 

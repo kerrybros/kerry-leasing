@@ -697,7 +697,15 @@ router.get('/idle-events', clerkAuthMiddleware, requireOrg, async (req: AuthRequ
             idleFuelGallons: r.idleFuel ?? null,
             lat: r.lat ?? null,
             lon: r.lon ?? null,
-            location: r.location ?? [r.city, r.state].filter(Boolean).join(', ') ?? null,
+            location: (() => {
+              const loc = r.location?.trim() ?? '';
+              const city = r.city?.trim() ?? '';
+              const state = r.state?.trim() ?? '';
+              if (!loc) return [city, state].filter(Boolean).join(', ') || null;
+              // If state is known but not already present in location string, append it
+              if (state && !loc.includes(state)) return `${loc}, ${state}`;
+              return loc;
+            })(),
             driverId: r.driverId ?? null,
             driverFirstName: r.driverFirstName ?? null,
             driverLastName: r.driverLastName ?? null,

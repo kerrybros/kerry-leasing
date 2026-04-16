@@ -17,6 +17,7 @@ interface Props {
   loading: boolean;
   onEventClick: (eventId: string) => void;
   onClusterClick: (groupKey: string) => void;
+  onClusterEventsClick: (eventIds: string[]) => void;
 }
 
 const DARK_STYLE = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json';
@@ -121,6 +122,7 @@ export default function IdleMapCanvas({
   loading,
   onEventClick,
   onClusterClick,
+  onClusterEventsClick,
 }: Props) {
   const mapRef = useRef<MapRef>(null);
   const mapStyle = useMapTheme();
@@ -150,29 +152,51 @@ export default function IdleMapCanvas({
     );
   }, [eventsWithCoords, isClustered]);
 
-  function fitToEvents(coords: typeof eventsWithCoords) {
-    if (!mapRef.current || coords.length === 0) return;
-    const lngs = coords.map(e => e.lon!);
-    const lats = coords.map(e => e.lat!);
-    try {
-      mapRef.current.fitBounds(
-        [[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]],
-        { padding: 60, maxZoom: 13, duration: 800 }
-      );
-    } catch {
-      // ignore
-    }
-  }
-
   const handleMapLoad = useCallback(() => {
     setMapLoaded(true);
   }, []);
 
-  // Fit bounds whenever the map is loaded AND events are available.
-  // useState for mapLoaded ensures this effect re-runs when either changes.
+  // Fit camera to events when both map and events are ready.
+  // Uses map.once('idle') to defer until basemap tiles are loaded, avoiding a race condition
+  // where fitBounds is called before the style is ready and the camera change is ignored.
+  // Named handler is stored so the useEffect cleanup can remove it if events change before idle fires.
   useEffect(() => {
     if (!mapLoaded || eventsWithCoords.length === 0 || !mapRef.current) return;
-    fitToEvents(eventsWithCoords);
+
+    const map = mapRef.current.getMap();
+    const lngs = eventsWithCoords.map(e => e.lon!);
+    const lats = eventsWithCoords.map(e => e.lat!);
+    const minLng = Math.min(...lngs);
+    const maxLng = Math.max(...lngs);
+    const minLat = Math.min(...lats);
+    const maxLat = Math.max(...lats);
+
+    // Treat near-zero bounding boxes (tight clusters / single point) as degenerate
+    const isDegenerate = Math.abs(maxLng - minLng) < 0.005 && Math.abs(maxLat - minLat) < 0.005;
+
+    const handler = () => {
+      if (!mapRef.current) return;
+      try {
+        if (isDegenerate) {
+          // easeTo a fixed zoom instead of fitBounds which would zoom in to ~18
+          map.easeTo({
+            center: [(minLng + maxLng) / 2, (minLat + maxLat) / 2],
+            zoom: 13,
+            duration: 1200,
+          });
+        } else {
+          mapRef.current.fitBounds(
+            [[minLng, minLat], [maxLng, maxLat]],
+            { padding: 80, maxZoom: 13, duration: 1200 }
+          );
+        }
+      } catch {
+        // ignore if map was unmounted
+      }
+    };
+
+    map.once('idle', handler);
+    return () => { map.off('idle', handler); };
   }, [mapLoaded, eventsWithCoords.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleMapClick = useCallback(
@@ -181,11 +205,24 @@ export default function IdleMapCanvas({
       const map = mapRef.current.getMap();
 
       if (isClustered) {
-        // Cluster click: groupKey can't be reliably aggregated across mixed-unit clusters.
-        // Open the full report modal (caller handles '' as "all events").
+        // Cluster bubble: retrieve the actual leaf event IDs so the modal is scoped correctly.
         const clusterFeatures = map.queryRenderedFeatures(e.point, { layers: ['cluster-circles'] });
         if (clusterFeatures.length > 0) {
-          onClusterClick('');
+          const f = clusterFeatures[0]!;
+          const clusterId = (f.properties as any).cluster_id;
+          const pointCount: number = (f.properties as any).point_count ?? 0;
+          const source = map.getSource('clustered-source') as any;
+          // Cap at 500 leaves per call; clusters larger than this are rare in fleet idle data
+          source.getClusterLeaves(clusterId, Math.min(pointCount, 500), 0, (err: unknown, leaves: any[]) => {
+            if (err || !leaves || leaves.length === 0) {
+              // Fallback: open full report
+              onClusterClick('');
+              return;
+            }
+            const ids = leaves.map((l: any) => String(l.properties?.id ?? '')).filter(Boolean);
+            if (ids.length > 0) onClusterEventsClick(ids);
+            else onClusterClick('');
+          });
           return;
         }
         // Individual un-clustered point: scope to that point's groupKey.
@@ -226,7 +263,7 @@ export default function IdleMapCanvas({
         }
       }
     },
-    [isClustered, isRaw, isHeatmap, onEventClick, onClusterClick]
+    [isClustered, isRaw, isHeatmap, onEventClick, onClusterClick, onClusterEventsClick]
   );
 
   return (

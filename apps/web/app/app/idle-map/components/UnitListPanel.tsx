@@ -2,6 +2,7 @@
 
 import { useMemo } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 
 import type { EnrichedIdleEvent, GroupBy } from '../types';
 import { formatDuration, fuelStr } from '../types';
@@ -9,6 +10,7 @@ import { formatDuration, fuelStr } from '../types';
 interface Props {
   events: EnrichedIdleEvent[];
   groupBy: GroupBy;
+  onGroupByChange: (v: GroupBy) => void;
   open: boolean;
   onToggle: () => void;
 }
@@ -20,7 +22,9 @@ interface UnitRow {
   eventCount: number;
 }
 
-export default function UnitListPanel({ events, groupBy, open, onToggle }: Props) {
+// By design, groupBy can only be changed while the panel is open.
+// The toggle button remains visible when panel is closed; opening it reveals the control.
+export default function UnitListPanel({ events, groupBy, onGroupByChange, open, onToggle }: Props) {
   const rows = useMemo<UnitRow[]>(() => {
     const map = new Map<string, UnitRow>();
     for (const e of events) {
@@ -36,6 +40,11 @@ export default function UnitListPanel({ events, groupBy, open, onToggle }: Props
 
   const worstMinutes = rows[0]?.totalMinutes ?? 0;
   const title = groupBy === 'driver' ? 'Drivers' : 'Vehicles';
+
+  function handleToggleGroup(values: readonly string[]) {
+    const next = values[values.length - 1] as GroupBy | undefined;
+    if (next && next !== groupBy) onGroupByChange(next);
+  }
 
   return (
     <>
@@ -54,9 +63,20 @@ export default function UnitListPanel({ events, groupBy, open, onToggle }: Props
           className="absolute left-0 top-0 bottom-0 z-10 w-56 border-r border-border shadow-md flex flex-col overflow-hidden"
           style={{ backdropFilter: 'blur(8px)', background: 'hsl(var(--card) / 0.92)' }}
         >
-          <div className="px-3 pt-3 pb-2 border-b border-border">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</p>
-            <p className="text-[10px] text-muted-foreground/60">{rows.length} {groupBy === 'driver' ? 'drivers' : 'units'} · sorted by idle time</p>
+          <div className="px-3 pt-3 pb-2 border-b border-border flex flex-col gap-1.5">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</p>
+              <p className="text-[10px] text-muted-foreground/60">{rows.length} · by idle time</p>
+            </div>
+            {/* Group by toggle in panel header */}
+            <ToggleGroup
+              value={[groupBy]}
+              onValueChange={handleToggleGroup}
+              className="w-full h-6 border border-input rounded overflow-hidden"
+            >
+              <ToggleGroupItem value="vehicle" className="flex-1 h-6 text-[10px] rounded-none px-1">Vehicle</ToggleGroupItem>
+              <ToggleGroupItem value="driver" className="flex-1 h-6 text-[10px] rounded-none px-1">Driver</ToggleGroupItem>
+            </ToggleGroup>
           </div>
 
           {rows.length === 0 ? (
