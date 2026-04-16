@@ -8,6 +8,7 @@ const adminTabs = [
   { label: 'Org Settings', href: '/app/admin/org-settings' },
   { label: 'Service Plan', href: '/app/admin/service-plan' },
   { label: 'Telematics',   href: '/app/admin/telematics' },
+  { label: 'Whiparound',   href: '/app/admin/whiparound' },
   { label: 'Documents',    href: '/app/admin/documents' },
 ];
 

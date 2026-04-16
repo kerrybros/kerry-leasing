@@ -13,6 +13,7 @@ import { encryptCredentials } from '../lib/credentials.js';
 import { MotiveClient } from '../telematics/motive/client.js';
 import { SamsaraClient } from '../telematics/samsara/client.js';
 import { WhiparoundClient } from '../integrations/whiparound/client.js';
+import { syncWhiparoundOrg } from '../integrations/whiparound/syncService.js';
 import { backdateMotiveData } from '../telematics/motive/backdate.js';
 import { backdateSamsaraData } from '../telematics/samsara/backdate.js';
 import { REPAIR_SHOP_ORG_ID } from '../config/repairShop.js';
@@ -753,6 +754,36 @@ router.get('/whiparound/status', async (_req: AuthRequest, res) => {
     });
   } catch (error: any) {
     console.error('Error fetching Whip Around status:', error);
+    res.status(500).json({ error: 'Internal Server Error', message: error.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /admin/orgs/whiparound/sync
+// Manually trigger a Whip Around sync for a given org (no CRON_SECRET needed).
+// ---------------------------------------------------------------------------
+router.post('/whiparound/sync', async (req: AuthRequest, res) => {
+  try {
+    const { clerkOrgId } = req.body as { clerkOrgId?: string };
+    if (!clerkOrgId) {
+      return res.status(400).json({ error: 'clerkOrgId is required' });
+    }
+
+    const appPrisma = getAppPrisma();
+    const account = await appPrisma.whiparoundAccount.findUnique({
+      where: { clerkOrgId },
+      select: { credentials: true, status: true },
+    });
+
+    if (!account) {
+      return res.status(404).json({ error: 'No Whip Around account found for this org' });
+    }
+
+    const result = await syncWhiparoundOrg(clerkOrgId, account.credentials);
+
+    res.status(result.success ? 200 : 500).json(result);
+  } catch (error: any) {
+    console.error('Error triggering Whip Around sync:', error);
     res.status(500).json({ error: 'Internal Server Error', message: error.message });
   }
 });
