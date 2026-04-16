@@ -174,6 +174,74 @@ export type RepairsResponse = {
 
 // --- Query Keys ---
 
+// --- Whip Around types ---
+
+export type WhiparoundDefect = {
+  id: string;
+  whiparoundId: number;
+  defectRef: string | null;
+  inspectionId: number | null;
+  assetId: number | null;
+  assetName: string | null;
+  teamId: number | null;
+  teamName: string | null;
+  driverName: string | null;
+  defectName: string | null;
+  description: string | null;
+  status: string | null;
+  defectPriority: string | null;
+  defectType: string | null;
+  severity: string | null;
+  repeatedTimes: number | null;
+  assignee: string | null;
+  workOrder: string | null;
+  defectSource: string | null;
+  createdBy: string | null;
+  defectCreatedAt: string | null;
+  defectUpdatedAt: string | null;
+};
+
+export type WhiparoundDefectsResponse = {
+  defects: WhiparoundDefect[];
+  total: number;
+  limit: number;
+  offset: number;
+  statusCounts: Record<string, number>;
+};
+
+export type WhiparoundInspection = {
+  id: string;
+  whiparoundId: number;
+  driverId: number | null;
+  driverName: string | null;
+  assetId: number | null;
+  teamId: number | null;
+  formId: number | null;
+  completion: string | null;
+  passed: boolean | null;
+  pdfUrl: string | null;
+  durationSec: number | null;
+  inspectedAt: string;
+  endedOnDeviceAt: string | null;
+};
+
+export type WhiparoundInspectionsResponse = {
+  inspections: WhiparoundInspection[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
+export type WhiparoundSyncStatus = {
+  configured: boolean;
+  status?: string;
+  lastSyncAt: string | null;
+  lastError: string | null;
+  updatedAt?: string;
+};
+
+// --- Query Keys ---
+
 export const keys = {
   orgSettings: (orgId: string | undefined) =>
     ['org-settings', orgId] as const,
@@ -191,6 +259,12 @@ export const keys = {
     ['service-plan', orgId] as const,
   driverScorecard: (orgId: string | undefined, startDate?: string, endDate?: string) =>
     ['driver-scorecard', orgId, startDate, endDate] as const,
+  whiparoundDefects: (orgId: string | undefined, filters?: Record<string, string>) =>
+    ['whiparound-defects', orgId, filters] as const,
+  whiparoundInspections: (orgId: string | undefined, filters?: Record<string, string>) =>
+    ['whiparound-inspections', orgId, filters] as const,
+  whiparoundSyncStatus: (orgId: string | undefined) =>
+    ['whiparound-sync-status', orgId] as const,
 };
 
 // --- Hooks ---
@@ -395,5 +469,88 @@ export function useDriverScorecardQuery(
       return api.get<DriverScorecardResponse>(`/telematics/normalized/driver-scorecard${qs}`);
     },
     enabled: !!organization?.id && enabled,
+  });
+}
+
+// --- Whip Around hooks ---
+
+export function useWhiparoundDefects(
+  filters: {
+    status?: string;
+    teamId?: string;
+    defectType?: string;
+    priority?: string;
+    search?: string;
+    limit?: number;
+    offset?: number;
+  } = {}
+) {
+  const { getApi } = useApiClient();
+  const { organization } = useOrganization();
+
+  return useQuery({
+    queryKey: keys.whiparoundDefects(organization?.id, filters as Record<string, string>),
+    queryFn: async (): Promise<WhiparoundDefectsResponse> => {
+      const api = await getApi();
+      const params = new URLSearchParams();
+      if (filters.status) params.set('status', filters.status);
+      if (filters.teamId) params.set('teamId', filters.teamId);
+      if (filters.defectType) params.set('defectType', filters.defectType);
+      if (filters.priority) params.set('priority', filters.priority);
+      if (filters.search) params.set('search', filters.search);
+      if (filters.limit) params.set('limit', String(filters.limit));
+      if (filters.offset) params.set('offset', String(filters.offset));
+      const qs = params.toString() ? `?${params.toString()}` : '';
+      return api.get<WhiparoundDefectsResponse>(`/whiparound/defects${qs}`);
+    },
+    enabled: !!organization?.id,
+    staleTime: 5 * 60 * 1000, // 5 min
+  });
+}
+
+export function useWhiparoundInspections(
+  filters: {
+    from?: string;
+    to?: string;
+    assetId?: string;
+    passed?: boolean;
+    limit?: number;
+    offset?: number;
+  } = {}
+) {
+  const { getApi } = useApiClient();
+  const { organization } = useOrganization();
+
+  return useQuery({
+    queryKey: keys.whiparoundInspections(organization?.id, filters as Record<string, string>),
+    queryFn: async (): Promise<WhiparoundInspectionsResponse> => {
+      const api = await getApi();
+      const params = new URLSearchParams();
+      if (filters.from) params.set('from', filters.from);
+      if (filters.to) params.set('to', filters.to);
+      if (filters.assetId) params.set('assetId', filters.assetId);
+      if (filters.passed !== undefined) params.set('passed', String(filters.passed));
+      if (filters.limit) params.set('limit', String(filters.limit));
+      if (filters.offset) params.set('offset', String(filters.offset));
+      const qs = params.toString() ? `?${params.toString()}` : '';
+      return api.get<WhiparoundInspectionsResponse>(`/whiparound/inspections${qs}`);
+    },
+    enabled: !!organization?.id,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useWhiparoundSyncStatus() {
+  const { getApi } = useApiClient();
+  const { organization } = useOrganization();
+
+  return useQuery({
+    queryKey: keys.whiparoundSyncStatus(organization?.id),
+    queryFn: async (): Promise<WhiparoundSyncStatus> => {
+      const api = await getApi();
+      return api.get<WhiparoundSyncStatus>('/whiparound/sync-status');
+    },
+    enabled: !!organization?.id,
+    staleTime: 2 * 60 * 1000, // 2 min — check freshness more often
   });
 }

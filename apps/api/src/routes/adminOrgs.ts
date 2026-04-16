@@ -12,6 +12,7 @@ import { getDistinctCustomers } from '../db/repairRepo.js';
 import { encryptCredentials } from '../lib/credentials.js';
 import { MotiveClient } from '../telematics/motive/client.js';
 import { SamsaraClient } from '../telematics/samsara/client.js';
+import { WhiparoundClient } from '../integrations/whiparound/client.js';
 import { backdateMotiveData } from '../telematics/motive/backdate.js';
 import { backdateSamsaraData } from '../telematics/samsara/backdate.js';
 import { REPAIR_SHOP_ORG_ID } from '../config/repairShop.js';
@@ -661,6 +662,98 @@ router.get('/cron-health', async (_req: AuthRequest, res) => {
     });
   } catch (error: any) {
     res.status(500).json({ error: 'Internal server error', message: error.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /admin/orgs/whiparound/configure
+// Store an encrypted Whip Around API key for a given org.
+// ---------------------------------------------------------------------------
+router.post('/whiparound/configure', async (req: AuthRequest, res) => {
+  try {
+    const { clerkOrgId, apiKey } = req.body as { clerkOrgId?: string; apiKey?: string };
+    if (!clerkOrgId || !apiKey) {
+      return res.status(400).json({ error: 'clerkOrgId and apiKey are required' });
+    }
+
+    // Test the key before storing
+    const client = new WhiparoundClient(apiKey);
+    const ok = await client.testConnection();
+    if (!ok) {
+      return res.status(400).json({ error: 'API key validation failed — connection test returned an error' });
+    }
+
+    const appPrisma = getAppPrisma();
+    const encrypted = encryptCredentials({ apiKey });
+
+    const account = await appPrisma.whiparoundAccount.upsert({
+      where: { clerkOrgId },
+      create: {
+        clerkOrgId,
+        credentials: encrypted,
+        status: 'ACTIVE',
+      },
+      update: {
+        credentials: encrypted,
+        status: 'ACTIVE',
+        lastError: null,
+      },
+    });
+
+    res.json({
+      success: true,
+      clerkOrgId: account.clerkOrgId,
+      status: account.status,
+      createdAt: account.createdAt,
+      updatedAt: account.updatedAt,
+    });
+  } catch (error: any) {
+    console.error('Error configuring Whip Around:', error);
+    res.status(500).json({ error: 'Internal Server Error', message: error.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// GET /admin/orgs/whiparound/status
+// Returns sync status for all Whip Around accounts.
+// ---------------------------------------------------------------------------
+router.get('/whiparound/status', async (_req: AuthRequest, res) => {
+  try {
+    const appPrisma = getAppPrisma();
+    const accounts = await appPrisma.whiparoundAccount.findMany({
+      select: {
+        clerkOrgId: true,
+        status: true,
+        lastSyncAt: true,
+        lastError: true,
+        updatedAt: true,
+      },
+      orderBy: { updatedAt: 'desc' },
+    });
+
+    const now = Date.now();
+    const enriched = accounts.map((a) => {
+      const lastSyncAgeHours =
+        a.lastSyncAt != null
+          ? Math.round(((now - a.lastSyncAt.getTime()) / 3_600_000) * 10) / 10
+          : null;
+      return {
+        ...a,
+        lastSyncAgeHours,
+        stale: lastSyncAgeHours === null || lastSyncAgeHours > 26,
+      };
+    });
+
+    res.json({
+      timestamp: new Date().toISOString(),
+      total: enriched.length,
+      active: enriched.filter((a) => a.status === 'ACTIVE').length,
+      staleCount: enriched.filter((a) => a.stale).length,
+      accounts: enriched,
+    });
+  } catch (error: any) {
+    console.error('Error fetching Whip Around status:', error);
+    res.status(500).json({ error: 'Internal Server Error', message: error.message });
   }
 });
 

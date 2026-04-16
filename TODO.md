@@ -25,9 +25,6 @@ Reference APIs (verify against current Samsara docs): list/retrieve drivers (`/f
 | `/app/wip` | Work in progress — live link to shop management system |
 | `/app/pm` | Preventive maintenance — LOF schedules from shop system (currently mock data + banner) |
 | `/app/chat` | Messaging with the shop |
-| `/app/whiparound` | Whiparound inspection sync |
-| `/app/idle-map` | Idle events on a map (heat-map / clustering) |
-
 **Admin**
 
 | Route | Summary |

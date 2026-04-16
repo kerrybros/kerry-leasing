@@ -8,6 +8,7 @@ import { Router, Request, Response } from 'express';
 import { config } from '../config.js';
 import { syncMotiveDaily } from '../telematics/motive/syncService.js';
 import { syncSamsaraDaily } from '../telematics/samsara/syncService.js';
+import { syncWhiparoundDaily } from '../integrations/whiparound/syncService.js';
 import { refreshDieselPrice } from '../lib/eiaFuelPrice.js';
 import { getAppPrisma } from '../lib/prisma.js';
 import { cacheDelPattern } from '../lib/redis.js';
@@ -99,6 +100,31 @@ router.post('/sync-samsara', async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     console.error('Samsara cron error:', error);
+    res.status(500).json({ error: 'Internal server error', message: error.message });
+  }
+});
+
+/**
+ * POST /cron/sync-whiparound
+ * Runs the Whip Around daily sync and returns the full result.
+ */
+router.post('/sync-whiparound', async (req: Request, res: Response) => {
+  if (!verifyCronSecret(req, res)) return;
+  try {
+    console.log(`\n✅ Authorized Whip Around cron request from ${req.ip}`);
+    const result = await syncWhiparoundDaily();
+    const allSucceeded = result.errorCount === 0;
+    res.status(allSucceeded ? 200 : 207).json({
+      success: allSucceeded,
+      totalOrgs: result.totalOrgs,
+      successCount: result.successCount,
+      errorCount: result.errorCount,
+      durationMs: result.duration,
+      timestamp: new Date().toISOString(),
+      results: result.results,
+    });
+  } catch (error: any) {
+    console.error('Whip Around cron error:', error);
     res.status(500).json({ error: 'Internal server error', message: error.message });
   }
 });

@@ -17,6 +17,7 @@ import servicePlanRoutes from './servicePlan.js';
 import fleetRoutes from './fleet.js';
 import repairsRoutes from './repairs.js';
 import adminOrgsRoutes from './adminOrgs.js';
+import whiparoundRoutes from './whiparound.js';
 import { LinkOrgSchema, RepairCustomerSchema, parseBody } from '../lib/validate.js';
 import { getRedis } from '../lib/redis.js';
 import { BrandColorPreset } from '../generated/app-client/index.js';
@@ -449,6 +450,9 @@ router.use('/repairs', repairsRoutes);
 
 // Mount admin orgs routes (customer onboarding + management)
 router.use('/admin/orgs', adminOrgsRoutes);
+
+// Mount Whip Around read routes
+router.use('/whiparound', whiparoundRoutes);
 
 // Get organization settings (feature flags)
 router.get(

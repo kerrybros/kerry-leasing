@@ -687,3 +687,90 @@ model SamsaraDriverEfficiency {
   @@index([clerkOrgId, date])
   @@map("samsara_driver_efficiency")
 }
+
+// ---------------------------------------------------------------------------
+// WHIPAROUND integration
+// ---------------------------------------------------------------------------
+
+enum WhiparoundAccountStatus {
+  ACTIVE
+  INACTIVE
+}
+
+// One row per org — stores encrypted API key and sync metadata
+model WhiparoundAccount {
+  id          String                  @id @default(cuid())
+  clerkOrgId  String                  @unique @map("clerk_org_id")
+  credentials Json                    // encrypted string, same pattern as TelematicsProviderAccount
+  status      WhiparoundAccountStatus @default(ACTIVE)
+  lastSyncAt  DateTime?               @map("last_sync_at")
+  lastError   String?                 @map("last_error")
+  createdAt   DateTime                @default(now()) @map("created_at")
+  updatedAt   DateTime                @updatedAt @map("updated_at")
+
+  @@index([clerkOrgId])
+  @@index([status])
+  @@map("whiparound_accounts")
+}
+
+// DVIR inspections — cursor-paginated from GET /inspections
+model WhiparoundInspection {
+  id              String    @id @default(cuid())
+  clerkOrgId      String    @map("clerk_org_id")
+  whiparoundId    Int       @map("whiparound_id")   // numeric id from API
+  driverId        Int?      @map("driver_id")
+  driverName      String?   @map("driver_name")
+  assetId         Int?      @map("asset_id")
+  teamId          Int?      @map("team_id")
+  formId          Int?      @map("form_id")
+  completion      String?
+  passed          Boolean?
+  pdfUrl          String?   @map("pdf_url")
+  durationSec     Int?      @map("duration_sec")
+  inspectedAt     DateTime  @map("inspected_at")    // created_at from API
+  endedOnDeviceAt DateTime? @map("ended_on_device_at")
+  rawResponse     Json?     @map("raw_response")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@unique([clerkOrgId, whiparoundId])
+  @@index([clerkOrgId])
+  @@index([clerkOrgId, inspectedAt(sort: Desc)])
+  @@map("whiparound_inspections")
+}
+
+// Defects — classic-paginated from GET /defects; all fields from the full column set
+model WhiparoundDefect {
+  id              String    @id @default(cuid())
+  clerkOrgId      String    @map("clerk_org_id")
+  whiparoundId    Int       @map("whiparound_id")   // numeric API id
+  defectRef       String?   @map("defect_ref")      // FA-0162 style display label
+  inspectionId    Int?      @map("inspection_id")
+  assetId         Int?      @map("asset_id")
+  assetName       String?   @map("asset_name")      // unit number / asset label
+  teamId          Int?      @map("team_id")
+  teamName        String?   @map("team_name")
+  driverName      String?   @map("driver_name")
+  defectName      String?   @map("defect_name")
+  description     String?
+  status          String?   // "new" | "in_progress" | "corrected" | "no_correction_needed"
+  defectPriority  String?   @map("defect_priority")
+  defectType      String?   @map("defect_type")
+  severity        String?
+  repeatedTimes   Int?      @map("repeated_times")
+  assignee        String?
+  workOrder       String?   @map("work_order")
+  defectSource    String?   @map("defect_source")
+  createdBy       String?   @map("created_by")
+  defectCreatedAt DateTime? @map("defect_created_at")
+  defectUpdatedAt DateTime? @map("defect_updated_at")
+  rawResponse     Json?     @map("raw_response")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@unique([clerkOrgId, whiparoundId])
+  @@index([clerkOrgId])
+  @@index([clerkOrgId, status])
+  @@index([clerkOrgId, defectCreatedAt(sort: Desc)])
+  @@map("whiparound_defects")
+}
