@@ -253,13 +253,7 @@ export default function IdleMapClient() {
           geofenceVisible={geofenceVisible}
           loading={eventsLoading}
           onEventClick={(eventId) => {
-            const e = filteredEvents.find(x => x.id === eventId);
-            if (!e) return;
-            setModalTarget({
-              type: groupBy === 'driver' ? 'driver' : 'unit',
-              value: e.groupKey,
-              initialTab: 'events',
-            });
+            setModalTarget({ type: 'event', eventId, initialTab: 'events' });
           }}
           onClusterClick={(groupKey) => {
             if (!groupKey) {

@@ -5,7 +5,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 
 import type { EnrichedIdleEvent, GroupBy } from '../types';
-import { formatDuration } from '../types';
+import { formatDuration, fuelStr } from '../types';
 
 interface Props {
   events: EnrichedIdleEvent[];
@@ -52,7 +52,7 @@ export default function UnitListPanel({ events, groupBy, open, onToggle }: Props
       {/* Slide-in panel */}
       {open && (
         <div
-          className="absolute left-0 top-0 bottom-0 z-10 w-56 border-r border-border shadow-md flex flex-col"
+          className="absolute left-0 top-0 bottom-0 z-10 w-56 border-r border-border shadow-md flex flex-col overflow-hidden"
           style={{ backdropFilter: 'blur(8px)', background: 'hsl(var(--card) / 0.92)' }}
         >
           <div className="px-3 pt-3 pb-2 border-b border-border">
@@ -80,14 +80,14 @@ export default function UnitListPanel({ events, groupBy, open, onToggle }: Props
                         >
                           {row.key}
                         </span>
-                        <span className="text-[10px] text-muted-foreground shrink-0">{row.eventCount} ev</span>
+                        <span className="text-[10px] text-muted-foreground shrink-0">{row.eventCount} events</span>
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-[11px] font-semibold text-foreground">
                           {formatDuration(row.totalMinutes)}
                         </span>
                         <span className="text-[10px] text-muted-foreground">
-                          {row.totalFuel.toFixed(1)} gal
+                          {fuelStr(row.totalFuel)}
                         </span>
                       </div>
                     </div>

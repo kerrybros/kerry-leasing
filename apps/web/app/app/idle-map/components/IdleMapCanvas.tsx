@@ -124,8 +124,13 @@ export default function IdleMapCanvas({
 }: Props) {
   const mapRef = useRef<MapRef>(null);
   const mapStyle = useMapTheme();
+  const mapLoadedRef = useRef(false);
 
   const eventsWithCoords = useMemo(() => events.filter(e => e.lat != null && e.lon != null), [events]);
+  // Keep a stable ref so onLoad callback is never stale
+  const eventsWithCoordsRef = useRef(eventsWithCoords);
+  eventsWithCoordsRef.current = eventsWithCoords;
+
   const isEmpty = !loading && eventsWithCoords.length === 0;
   const noCoords = !loading && events.length > 0 && eventsWithCoords.length === 0;
 
@@ -148,24 +153,31 @@ export default function IdleMapCanvas({
     );
   }, [eventsWithCoords, isClustered]);
 
-  // Fit bounds to events when data changes
-  useEffect(() => {
-    if (!mapRef.current || eventsWithCoords.length === 0) return;
-    const lngs = eventsWithCoords.map(e => e.lon!);
-    const lats = eventsWithCoords.map(e => e.lat!);
-    const minLng = Math.min(...lngs);
-    const maxLng = Math.max(...lngs);
-    const minLat = Math.min(...lats);
-    const maxLat = Math.max(...lats);
+  function fitToEvents(coords: typeof eventsWithCoords) {
+    if (!mapRef.current || coords.length === 0) return;
+    const lngs = coords.map(e => e.lon!);
+    const lats = coords.map(e => e.lat!);
     try {
       mapRef.current.fitBounds(
-        [[minLng, minLat], [maxLng, maxLat]],
+        [[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]],
         { padding: 60, maxZoom: 13, duration: 800 }
       );
     } catch {
-      // ignore if map not ready
+      // ignore
     }
-  }, [eventsWithCoords.length]); // only refit when count changes, not on every filter
+  }
+
+  // When the map finishes loading, fit to any data that's already arrived
+  const handleMapLoad = useCallback(() => {
+    mapLoadedRef.current = true;
+    fitToEvents(eventsWithCoordsRef.current);
+  }, []); // stable — reads from ref, not closure
+
+  // When event count changes after map is loaded, refit
+  useEffect(() => {
+    if (!mapLoadedRef.current) return;
+    fitToEvents(eventsWithCoords);
+  }, [eventsWithCoords.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleMapClick = useCallback(
     (e: MapLayerMouseEvent) => {
@@ -226,8 +238,9 @@ export default function IdleMapCanvas({
       <Map
         ref={mapRef}
         mapStyle={mapStyle}
-        initialViewState={{ longitude: -95, latitude: 38, zoom: 4 }}
+        initialViewState={{ longitude: -83, latitude: 42, zoom: 6 }}
         style={{ width: '100%', height: '100%' }}
+        onLoad={handleMapLoad}
         interactiveLayerIds={
           isClustered
             ? ['cluster-circles', 'individual-circles']

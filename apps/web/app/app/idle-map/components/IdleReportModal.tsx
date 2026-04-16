@@ -16,7 +16,7 @@ import {
 import { CHART_COLORS, TOOLTIP_STYLE } from '@/features/fleet/utils/chartColors';
 
 import type { EnrichedIdleEvent, Geofence, DateRange, ModalTarget } from '../types';
-import { formatDuration, driverLabel } from '../types';
+import { formatDuration, driverLabel, fuelStr, costStr } from '../types';
 
 interface Props {
   events: EnrichedIdleEvent[];
@@ -30,16 +30,20 @@ interface Props {
 type SortKey = 'date' | 'duration' | 'fuel' | 'cost' | 'unit' | 'driver';
 type SortDir = 'asc' | 'desc';
 
-function getScopeLabel(scope: ModalTarget): string {
+function getScopeLabel(scope: ModalTarget, scopedEvents: EnrichedIdleEvent[]): string {
   if (scope.type === 'all') return 'Idle Report';
   if (scope.type === 'unit') return `Idle Report — Unit ${scope.value}`;
-  return `Idle Report — ${scope.value}`;
+  if (scope.type === 'driver') return `Idle Report — ${scope.value}`;
+  // Single event: show unit + date
+  const e = scopedEvents[0];
+  return e ? `Idle Event — Unit ${e.unitNumber ?? '?'} · ${e.date}` : 'Idle Event';
 }
 
 function scopeEvents(events: EnrichedIdleEvent[], scope: ModalTarget): EnrichedIdleEvent[] {
   if (scope.type === 'all') return events;
   if (scope.type === 'unit') return events.filter(e => e.unitNumber === scope.value);
   if (scope.type === 'driver') return events.filter(e => driverLabel(e) === scope.value);
+  if (scope.type === 'event') return events.filter(e => e.id === scope.eventId);
   return events;
 }
 
@@ -183,8 +187,8 @@ function EventsTable({
                   </span>
                 </TableCell>
                 <TableCell className="text-muted-foreground text-xs max-w-[160px] truncate">{e.location ?? '—'}</TableCell>
-                <TableCell className="text-muted-foreground">{e.idleFuelGallons?.toFixed(2) ?? '—'} gal</TableCell>
-                <TableCell className="text-muted-foreground">${((e.idleFuelGallons ?? 0) * dieselPrice).toFixed(2)}</TableCell>
+                <TableCell className="text-muted-foreground">{fuelStr(e.idleFuelGallons)}</TableCell>
+                <TableCell className="text-muted-foreground">{costStr(e.idleFuelGallons, dieselPrice)}</TableCell>
                 <TableCell>
                   {e.geofenceName
                     ? <Badge variant="secondary" className="text-[10px]">{e.geofenceName}</Badge>
@@ -259,7 +263,7 @@ function GroupedTab({
       <div className="flex gap-4 text-sm">
         <span className="text-muted-foreground">{groups.length} {label}s</span>
         <span className="font-medium">{formatDuration(totalMinutes)} total idle</span>
-        <span className="text-muted-foreground">{totalFuel.toFixed(1)} gal · ${totalCost.toFixed(0)}</span>
+        {totalFuel > 0 && <span className="text-muted-foreground">{fuelStr(totalFuel)} · {costStr(totalFuel, dieselPrice)}</span>}
       </div>
 
       <div className="overflow-x-auto">
@@ -285,8 +289,8 @@ function GroupedTab({
                   <TableCell className="font-medium text-sm">{g.key}</TableCell>
                   <TableCell className="text-sm text-muted-foreground">{g.events.length}</TableCell>
                   <TableCell className="text-sm font-semibold">{formatDuration(g.totalMinutes)}</TableCell>
-                  <TableCell className="text-sm text-muted-foreground">{g.totalFuel.toFixed(1)} gal</TableCell>
-                  <TableCell className="text-sm text-muted-foreground">${(g.totalFuel * dieselPrice).toFixed(0)}</TableCell>
+                  <TableCell className="text-sm text-muted-foreground">{fuelStr(g.totalFuel)}</TableCell>
+                  <TableCell className="text-sm text-muted-foreground">{costStr(g.totalFuel, dieselPrice)}</TableCell>
                   <TableCell className="text-sm">{g.insidePct}%</TableCell>
                   <TableCell>
                     {expanded === g.key
@@ -402,8 +406,8 @@ function GeofencesTab({ events, dieselPrice }: { events: EnrichedIdleEvent[]; di
                 </TableCell>
                 <TableCell className="text-sm text-muted-foreground">{g.count}</TableCell>
                 <TableCell className="text-sm">{formatDuration(g.totalMinutes)}</TableCell>
-                <TableCell className="text-sm text-muted-foreground">{g.totalFuel.toFixed(1)} gal</TableCell>
-                <TableCell className="text-sm text-muted-foreground">${(g.totalFuel * dieselPrice).toFixed(0)}</TableCell>
+                <TableCell className="text-sm text-muted-foreground">{fuelStr(g.totalFuel)}</TableCell>
+                <TableCell className="text-sm text-muted-foreground">{costStr(g.totalFuel, dieselPrice)}</TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -427,7 +431,7 @@ export default function IdleReportModal({
 
   const scopedEvents = useMemo(() => scopeEvents(events, scopeFilter), [events, scopeFilter]);
 
-  const title = getScopeLabel(scopeFilter);
+  const title = getScopeLabel(scopeFilter, scopedEvents);
   const dateLabel = dateRange.from === dateRange.to
     ? new Date(dateRange.from + 'T12:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
     : `${new Date(dateRange.from + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${new Date(dateRange.to + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
@@ -460,7 +464,7 @@ export default function IdleReportModal({
 
   return (
     <Dialog open onOpenChange={() => onClose()}>
-      <DialogContent className="max-w-5xl w-full max-h-[90vh] flex flex-col p-0 gap-0">
+      <DialogContent className="max-w-5xl w-full h-[85vh] flex flex-col p-0 gap-0 overflow-hidden">
         <DialogHeader className="px-6 pt-5 pb-3 border-b border-border shrink-0">
           <div className="flex items-start justify-between gap-4">
             <div>
@@ -477,7 +481,7 @@ export default function IdleReportModal({
           </div>
         </DialogHeader>
 
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col flex-1 min-h-0">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col flex-1 min-h-0 overflow-hidden">
           <TabsList className="px-6 py-0 h-10 rounded-none border-b border-border bg-transparent justify-start shrink-0">
             <TabsTrigger value="events" className="text-xs rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-3">
               All Events
@@ -493,7 +497,7 @@ export default function IdleReportModal({
             </TabsTrigger>
           </TabsList>
 
-          <ScrollArea className="flex-1">
+          <ScrollArea className="flex-1 min-h-0">
             <div className="px-6 py-4">
 
               {/* ── All Events tab ── */}
@@ -553,8 +557,8 @@ export default function IdleReportModal({
                   {/* Idle Cost */}
                   <div className="rounded-lg border border-border p-3 flex flex-col gap-2">
                     <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Idle Cost</p>
-                    <p className="text-2xl font-bold">${(analytics.totalFuel * dieselPrice).toFixed(0)}</p>
-                    <p className="text-xs text-muted-foreground">{analytics.totalFuel.toFixed(1)} gal wasted</p>
+                    <p className="text-2xl font-bold">{costStr(analytics.totalFuel, dieselPrice)}</p>
+                    <p className="text-xs text-muted-foreground">{fuelStr(analytics.totalFuel)} wasted</p>
                     {analytics.dailyData.length > 0 && (
                       <div className="h-16">
                         <ResponsiveContainer width="100%" height="100%">

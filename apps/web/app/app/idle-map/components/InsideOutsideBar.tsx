@@ -4,7 +4,7 @@ import { useMemo } from 'react';
 import { Skeleton } from '@/components/Skeleton';
 
 import type { EnrichedIdleEvent } from '../types';
-import { formatDuration } from '../types';
+import { formatDuration, fuelStr } from '../types';
 
 interface Props {
   events: EnrichedIdleEvent[];
@@ -64,7 +64,7 @@ export default function InsideOutsideBar({ events, loading, dieselPrice }: Props
         <div className="flex gap-2">
           <Chip label="Events" value={stats.inEvents.toLocaleString()} side="in" />
           <Chip label="Time" value={formatDuration(stats.inMinutes)} side="in" />
-          <Chip label="Fuel" value={`${stats.inFuel.toFixed(1)} gal`} side="in" />
+          <Chip label="Fuel" value={fuelStr(stats.inFuel)} side="in" />
         </div>
 
         {/* Divider */}
@@ -74,7 +74,7 @@ export default function InsideOutsideBar({ events, loading, dieselPrice }: Props
         <div className="flex gap-2">
           <Chip label="Events" value={stats.outEvents.toLocaleString()} side="out" />
           <Chip label="Time" value={formatDuration(stats.outMinutes)} side="out" />
-          <Chip label="Fuel" value={`${stats.outFuel.toFixed(1)} gal`} side="out" />
+          <Chip label="Fuel" value={fuelStr(stats.outFuel)} side="out" />
         </div>
       </div>
     </div>

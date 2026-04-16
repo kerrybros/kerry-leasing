@@ -67,11 +67,11 @@ export interface FilterState {
   geofenceScope: 'all' | 'inside' | 'outside';
 }
 
-export interface ModalTarget {
-  type: 'all' | 'unit' | 'driver';
-  value?: string;
-  initialTab?: 'events' | 'drivers' | 'vehicles' | 'geofences';
-}
+export type ModalTarget =
+  | { type: 'all';    initialTab?: 'events' | 'drivers' | 'vehicles' | 'geofences' }
+  | { type: 'unit';   value: string; initialTab?: 'events' | 'drivers' | 'vehicles' | 'geofences' }
+  | { type: 'driver'; value: string; initialTab?: 'events' | 'drivers' | 'vehicles' | 'geofences' }
+  | { type: 'event';  eventId: string; initialTab?: 'events' | 'drivers' | 'vehicles' | 'geofences' };
 
 export function formatDuration(minutes: number | null): string {
   if (minutes == null) return '—';
@@ -79,6 +79,18 @@ export function formatDuration(minutes: number | null): string {
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
   return m > 0 ? `${h}h ${m}m` : `${h}h`;
+}
+
+/** Returns formatted gallons or "—" when the value is null/zero (data not available from ELD). */
+export function fuelStr(gallons: number | null | undefined): string {
+  if (!gallons) return '—';
+  return `${gallons.toFixed(1)} gal`;
+}
+
+/** Returns formatted cost or "—" when fuel is null/zero. */
+export function costStr(gallons: number | null | undefined, pricePerGallon: number): string {
+  if (!gallons) return '—';
+  return `$${(gallons * pricePerGallon).toFixed(0)}`;
 }
 
 export function driverLabel(event: Pick<IdleEvent, 'driverFirstName' | 'driverLastName'>): string {

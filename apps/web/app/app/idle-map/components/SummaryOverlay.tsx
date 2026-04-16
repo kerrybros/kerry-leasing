@@ -8,7 +8,7 @@ import { TOOLTIP_STYLE } from '@/features/fleet/utils/chartColors';
 import { ArrowRight } from 'lucide-react';
 
 import type { EnrichedIdleEvent, DateRange } from '../types';
-import { formatDuration } from '../types';
+import { formatDuration, fuelStr, costStr } from '../types';
 
 interface Props {
   events: EnrichedIdleEvent[];
@@ -86,8 +86,8 @@ export default function SummaryOverlay({ events, loading, dieselPrice, dateRange
             <div className="grid grid-cols-2 gap-1.5">
               <MetricChip label="Events" value={stats.totalEvents.toLocaleString()} />
               <MetricChip label="Idle Time" value={formatDuration(stats.totalMinutes)} />
-              <MetricChip label="Fuel" value={`${stats.totalFuel.toFixed(1)} gal`} />
-              <MetricChip label="Est. Cost" value={`$${stats.estCost.toFixed(0)}`} />
+              <MetricChip label="Fuel" value={fuelStr(stats.totalFuel)} />
+              <MetricChip label="Est. Cost" value={costStr(stats.totalFuel, dieselPrice)} />
               <MetricChip label="Inside Geofence" value={`${stats.pctInside}%`} className="col-span-2" />
             </div>
 

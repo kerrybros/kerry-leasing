@@ -1,11 +1,12 @@
 'use client';
 
 import { useState } from 'react';
-import { CalendarIcon, SlidersHorizontal, ChevronDown } from 'lucide-react';
+import { CalendarIcon, SlidersHorizontal, ChevronDown, Info } from 'lucide-react';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Slider } from '@/components/ui/slider';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -229,6 +230,16 @@ export default function IdleMapToolbar({
         <Label htmlFor="geofence-toggle" className="text-xs cursor-pointer select-none">
           Geofences
         </Label>
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger className="text-muted-foreground/40 hover:text-muted-foreground transition-colors leading-none">
+              <Info className="w-3 h-3" />
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="max-w-56">
+              Toggle geofence zone boundaries on the map. Zones are named areas like yards, customer sites, and fuel stations. Events inside a zone are tagged so you can filter and compare inside vs. outside idle time.
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
       </div>
 
       {/* Filters popover */}
