@@ -162,35 +162,61 @@ export class WhiparoundClient {
 
   // -------------------------------------------------------------------------
   // Classic page-based fetch (defects)
-  // Exhausts all pages and returns every record.
+  // Exhausts all pages. Handles Whip Around's pagination object, Laravel-style
+  // last_page, or falls back to "full page => fetch next" when meta is missing.
   // -------------------------------------------------------------------------
   async getAllClassic<T>(
     endpoint: string,
     params: Record<string, unknown> = {}
   ): Promise<T[]> {
+    const pageLimit = 100;
+    const maxPages = 5000;
     const results: T[] = [];
     let page = 1;
-    let hasMore = true;
 
-    while (hasMore) {
+    while (page <= maxPages) {
       const res = await this.withRetry(() =>
-        this.http.get<ClassicPage<T>>(endpoint, {
-          params: { ...params, page, limit: 100 },
+        this.http.get(endpoint, {
+          params: { ...params, page, limit: pageLimit },
         })
       );
 
-      const { data, pagination } = res.data;
-      if (Array.isArray(data)) results.push(...data);
+      const body = res.data as Record<string, unknown>;
+      const data = body.data;
+      if (!Array.isArray(data) || data.length === 0) break;
 
-      if (pagination) {
-        const totalPages = Math.ceil(pagination.total / pagination.per_page);
-        hasMore = page < totalPages;
-        page++;
+      results.push(...(data as T[]));
+
+      const pag = (body.pagination ?? body.meta) as
+        | (ClassicPagination & { last_page?: number })
+        | undefined;
+      let hasMore = false;
+
+      if (pag && typeof pag.last_page === 'number' && typeof pag.current_page === 'number') {
+        hasMore = pag.current_page < pag.last_page;
+      } else if (
+        pag &&
+        typeof pag.total === 'number' &&
+        typeof pag.per_page === 'number' &&
+        pag.per_page > 0
+      ) {
+        const totalPages = Math.ceil(pag.total / pag.per_page);
+        const current = pag.current_page ?? page;
+        hasMore = current < totalPages;
       } else {
-        hasMore = false;
+        // API omitted pagination or unknown shape — if we filled a page, keep going
+        hasMore = data.length >= pageLimit;
       }
 
-      if (hasMore) await this.sleep(300);
+      if (!hasMore) break;
+      page++;
+      await this.sleep(300);
+    }
+
+    if (page > maxPages) {
+      console.warn(
+        `[WhipAround] getAllClassic: safety cap ${maxPages} pages reached for ${endpoint} (${results.length} rows)`
+      );
     }
 
     return results;

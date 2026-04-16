@@ -61,7 +61,7 @@ router.get('/defects', async (req: AuthRequest, res) => {
       ];
     }
 
-    const [defects, total] = await Promise.all([
+    const [defectRows, total] = await Promise.all([
       appPrisma.whiparoundDefect.findMany({
         where,
         orderBy: { defectCreatedAt: 'desc' },
@@ -94,6 +94,49 @@ router.get('/defects', async (req: AuthRequest, res) => {
       }),
       appPrisma.whiparoundDefect.count({ where }),
     ]);
+
+    const inspectionIds = [
+      ...new Set(
+        defectRows
+          .map((d) => d.inspectionId)
+          .filter((id): id is number => id != null)
+      ),
+    ];
+
+    const inspectionByWaId = new Map<
+      number,
+      {
+        whiparoundId: number;
+        driverName: string | null;
+        inspectedAt: Date;
+        durationSec: number | null;
+        passed: boolean | null;
+        pdfUrl: string | null;
+      }
+    >();
+
+    if (inspectionIds.length > 0) {
+      const inspections = await appPrisma.whiparoundInspection.findMany({
+        where: { clerkOrgId, whiparoundId: { in: inspectionIds } },
+        select: {
+          whiparoundId: true,
+          driverName: true,
+          inspectedAt: true,
+          durationSec: true,
+          passed: true,
+          pdfUrl: true,
+        },
+      });
+      for (const i of inspections) inspectionByWaId.set(i.whiparoundId, i);
+    }
+
+    const defects = defectRows.map((d) => ({
+      ...d,
+      inspection:
+        d.inspectionId != null
+          ? inspectionByWaId.get(d.inspectionId) ?? null
+          : null,
+    }));
 
     // Status counts for tab badges
     const statusCounts = await appPrisma.whiparoundDefect.groupBy({

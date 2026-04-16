@@ -176,6 +176,16 @@ export type RepairsResponse = {
 
 // --- Whip Around types ---
 
+/** Linked inspection row for defect detail (same org, whiparoundId === defect.inspectionId). */
+export type WhiparoundInspectionSummary = {
+  whiparoundId: number;
+  driverName: string | null;
+  inspectedAt: string;
+  durationSec: number | null;
+  passed: boolean | null;
+  pdfUrl: string | null;
+};
+
 export type WhiparoundDefect = {
   id: string;
   whiparoundId: number;
@@ -199,6 +209,8 @@ export type WhiparoundDefect = {
   createdBy: string | null;
   defectCreatedAt: string | null;
   defectUpdatedAt: string | null;
+  /** Present when API joins `whiparound_inspections` for `inspectionId`. */
+  inspection?: WhiparoundInspectionSummary | null;
 };
 
 export type WhiparoundDefectsResponse = {

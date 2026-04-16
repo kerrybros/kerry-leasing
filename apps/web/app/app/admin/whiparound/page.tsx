@@ -7,6 +7,8 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/Skeleton';
 
 interface WhiparoundStatus {
@@ -36,6 +38,7 @@ export default function AdminWhiparoundPage() {
   const [apiKey, setApiKey] = useState('');
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [fullInspectionBackfill, setFullInspectionBackfill] = useState(false);
 
   const [saveMsg, setSaveMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [syncMsg, setSyncMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -92,14 +95,25 @@ export default function AdminWhiparoundPage() {
       setSyncing(true);
       setSyncMsg(null);
       const api = await getApi();
-      const result = await api.post<{ success: boolean; inspectionsSynced: number; defectsSynced: number; errors: number; error?: string }>(
+      const result = await api.post<{
+        success: boolean;
+        inspectionsSynced: number;
+        defectsSynced: number;
+        errors: number;
+        error?: string;
+        upsertErrorDetail?: string;
+      }>(
         '/admin/orgs/whiparound/sync',
-        { clerkOrgId: organization.id }
+        { clerkOrgId: organization.id, forceFullInspectionBackfill: fullInspectionBackfill }
       );
       if (result.success) {
+        const warn =
+          result.errors > 0
+            ? ` (${result.errors} row(s) skipped${result.upsertErrorDetail ? `: ${result.upsertErrorDetail}` : ''})`
+            : '';
         setSyncMsg({
-          type: 'success',
-          text: `Sync complete — ${result.inspectionsSynced} inspections, ${result.defectsSynced} defects.`,
+          type: result.errors > 0 ? 'error' : 'success',
+          text: `Sync finished — ${result.inspectionsSynced} inspections, ${result.defectsSynced} defects.${warn}`,
         });
         await loadStatus();
       } else {
@@ -209,8 +223,19 @@ export default function AdminWhiparoundPage() {
             <h2 className="text-base font-semibold mb-1">Sync Now</h2>
             <p className="text-sm text-muted-foreground mb-4">
               Manually pull the latest inspections and defects from Whip Around.
-              On first run this performs a full historical backfill.
+              Incremental sync uses the last sync time; check the option below to re-fetch
+              the full inspection history (slow, safe to re-run — rows are upserted).
             </p>
+            <div className="flex items-center gap-2 mb-4">
+              <Checkbox
+                id="wa-full-backfill"
+                checked={fullInspectionBackfill}
+                onCheckedChange={(v) => setFullInspectionBackfill(v === true)}
+              />
+              <Label htmlFor="wa-full-backfill" className="text-sm font-normal cursor-pointer">
+                Full inspection history backfill (ignore last sync window)
+              </Label>
+            </div>
             <Button onClick={handleSync} disabled={syncing} variant="outline">
               <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}

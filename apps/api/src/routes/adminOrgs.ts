@@ -764,7 +764,10 @@ router.get('/whiparound/status', async (_req: AuthRequest, res) => {
 // ---------------------------------------------------------------------------
 router.post('/whiparound/sync', async (req: AuthRequest, res) => {
   try {
-    const { clerkOrgId } = req.body as { clerkOrgId?: string };
+    const { clerkOrgId, forceFullInspectionBackfill } = req.body as {
+      clerkOrgId?: string;
+      forceFullInspectionBackfill?: boolean;
+    };
     if (!clerkOrgId) {
       return res.status(400).json({ error: 'clerkOrgId is required' });
     }
@@ -779,7 +782,9 @@ router.post('/whiparound/sync', async (req: AuthRequest, res) => {
       return res.status(404).json({ error: 'No Whip Around account found for this org' });
     }
 
-    const result = await syncWhiparoundOrg(clerkOrgId, account.credentials);
+    const result = await syncWhiparoundOrg(clerkOrgId, account.credentials, {
+      forceFullInspectionBackfill: !!forceFullInspectionBackfill,
+    });
 
     res.status(result.success ? 200 : 500).json(result);
   } catch (error: any) {

@@ -76,6 +76,28 @@ function safeInt(val: unknown): number | null {
   return Number.isInteger(n) && !isNaN(n) ? n : null;
 }
 
+/** Postgres rejects NUL in text; API may return objects for some string-ish fields. */
+function textField(val: unknown): string | null {
+  if (val == null) return null;
+  let s: string;
+  if (typeof val === 'string') s = val;
+  else if (typeof val === 'number' || typeof val === 'boolean') s = String(val);
+  else s = JSON.stringify(val);
+  s = s.replace(/\0/g, '').trim();
+  return s.length ? s : null;
+}
+
+/** Ensure JSONB write always succeeds (BigInt, circular refs, etc.). */
+function jsonSafeForDb(raw: object): object {
+  try {
+    return JSON.parse(
+      JSON.stringify(raw, (_k, v) => (typeof v === 'bigint' ? v.toString() : v))
+    ) as object;
+  } catch {
+    return { _serializationFailed: true };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // syncInspections
 // ---------------------------------------------------------------------------
@@ -84,7 +106,7 @@ async function syncInspections(
   clerkOrgId: string,
   client: WhiparoundClient,
   lastSyncAt: Date | null
-): Promise<{ synced: number; errors: number }> {
+): Promise<{ synced: number; errors: number; firstUpsertError?: string }> {
   const params: Record<string, unknown> = {};
 
   if (lastSyncAt) {
@@ -99,64 +121,76 @@ async function syncInspections(
   } catch (err) {
     if (err instanceof WhiparoundAuthError) throw err;
     console.error(`[WhipAround] syncInspections fetch error for ${clerkOrgId}:`, err);
-    return { synced: 0, errors: 1 };
+    return { synced: 0, errors: 1, firstUpsertError: err instanceof Error ? err.message : String(err) };
   }
 
   const appPrisma = getAppPrisma();
   let synced = 0;
   let errors = 0;
+  let firstUpsertError: string | undefined;
 
   for (const raw of inspections) {
     try {
+      const whiparoundId = safeInt(raw.id);
+      if (whiparoundId == null) {
+        if (!firstUpsertError) firstUpsertError = 'Inspection missing numeric id';
+        errors++;
+        continue;
+      }
+
       const inspectedAt = toDateOrNull(raw.created_at);
       if (!inspectedAt) continue; // skip if no timestamp
+
+      const rawResponse = jsonSafeForDb(raw as object);
 
       await appPrisma.whiparoundInspection.upsert({
         where: {
           clerkOrgId_whiparoundId: {
             clerkOrgId,
-            whiparoundId: raw.id,
+            whiparoundId,
           },
         },
         create: {
           clerkOrgId,
-          whiparoundId: raw.id,
+          whiparoundId,
           driverId: safeInt(raw.driver_id),
-          driverName: raw.driver_name ?? null,
+          driverName: textField(raw.driver_name),
           assetId: safeInt(raw.asset_id),
           teamId: safeInt(raw.team_id),
           formId: safeInt(raw.form_id),
-          completion: raw.completion ?? null,
+          completion: textField(raw.completion),
           passed: raw.passed ?? null,
-          pdfUrl: raw.pdf_url ?? null,
+          pdfUrl: textField(raw.pdf_url),
           durationSec: safeInt(raw.inspection_duration_sec),
           inspectedAt,
           endedOnDeviceAt: toDateOrNull(raw.inspection_ended_on_device),
-          rawResponse: raw as object,
+          rawResponse,
         },
         update: {
           driverId: safeInt(raw.driver_id),
-          driverName: raw.driver_name ?? null,
+          driverName: textField(raw.driver_name),
           assetId: safeInt(raw.asset_id),
           teamId: safeInt(raw.team_id),
           formId: safeInt(raw.form_id),
-          completion: raw.completion ?? null,
+          completion: textField(raw.completion),
           passed: raw.passed ?? null,
-          pdfUrl: raw.pdf_url ?? null,
+          pdfUrl: textField(raw.pdf_url),
           durationSec: safeInt(raw.inspection_duration_sec),
           inspectedAt,
           endedOnDeviceAt: toDateOrNull(raw.inspection_ended_on_device),
-          rawResponse: raw as object,
+          rawResponse,
         },
       });
       synced++;
     } catch (err) {
-      console.error(`[WhipAround] upsert inspection ${raw.id} error:`, err);
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!firstUpsertError) firstUpsertError = msg;
+      console.error(`[WhipAround] upsert inspection ${String(raw.id)} error:`, err);
       errors++;
     }
   }
 
-  return { synced, errors };
+  return { synced, errors, firstUpsertError };
 }
 
 // ---------------------------------------------------------------------------
@@ -166,7 +200,7 @@ async function syncInspections(
 async function syncDefects(
   clerkOrgId: string,
   client: WhiparoundClient
-): Promise<{ synced: number; errors: number }> {
+): Promise<{ synced: number; errors: number; firstUpsertError?: string }> {
   let defects: RawDefect[];
   try {
     defects = await client.getAllClassic<RawDefect>('/defects', {
@@ -175,72 +209,80 @@ async function syncDefects(
   } catch (err) {
     if (err instanceof WhiparoundAuthError) throw err;
     console.error(`[WhipAround] syncDefects fetch error for ${clerkOrgId}:`, err);
-    return { synced: 0, errors: 1 };
+    return { synced: 0, errors: 1, firstUpsertError: err instanceof Error ? err.message : String(err) };
   }
 
   const appPrisma = getAppPrisma();
   let synced = 0;
   let errors = 0;
+  let firstUpsertError: string | undefined;
 
   for (const raw of defects) {
     try {
+      const whiparoundId = safeInt(raw.id);
+      if (whiparoundId == null) {
+        if (!firstUpsertError) firstUpsertError = 'Defect missing numeric id';
+        errors++;
+        continue;
+      }
+
       // Resolve nested includes
       const assetId = safeInt(raw.asset?.id ?? raw.asset_id);
-      const assetName: string | null = raw.asset?.name ?? raw.asset_name ?? null;
+      const assetName = textField(raw.asset?.name ?? raw.asset_name);
       const teamId = safeInt(raw.team?.id ?? raw.team_id);
-      const teamName: string | null = raw.team?.name ?? raw.team_name ?? null;
-      const assignee: string | null =
+      const teamName = textField(raw.team?.name ?? raw.team_name);
+      const assignee =
         typeof raw.assignee === 'object' && raw.assignee !== null
-          ? (raw.assignee as { name?: string }).name ?? null
-          : typeof raw.assignee === 'string'
-          ? raw.assignee
-          : null;
-      const createdBy: string | null =
+          ? textField((raw.assignee as { name?: string }).name)
+          : textField(raw.assignee as unknown);
+      const createdBy =
         typeof raw.created_by === 'object' && raw.created_by !== null
-          ? (raw.created_by as { name?: string }).name ?? null
-          : typeof raw.created_by === 'string'
-          ? raw.created_by
-          : null;
+          ? textField((raw.created_by as { name?: string }).name)
+          : textField(raw.created_by as unknown);
+
+      const rawResponse = jsonSafeForDb(raw as object);
 
       const data = {
-        defectRef: raw.reference ?? null,
+        defectRef: textField(raw.reference),
         inspectionId: safeInt(raw.inspection_id),
         assetId,
         assetName,
         teamId,
         teamName,
-        driverName: raw.driver_name ?? null,
-        defectName: raw.name ?? null,
-        description: raw.description ?? null,
-        status: raw.status ?? null,
-        defectPriority: raw.priority ?? null,
-        defectType: raw.type ?? null,
-        severity: raw.severity ?? null,
+        driverName: textField(raw.driver_name),
+        defectName: textField(raw.name),
+        description: textField(raw.description),
+        status: textField(raw.status),
+        defectPriority: textField(raw.priority),
+        defectType: textField(raw.type),
+        severity: textField(raw.severity),
         repeatedTimes: safeInt(raw.repeated_times),
         assignee,
-        workOrder: raw.work_order ?? null,
-        defectSource: raw.defect_source ?? null,
+        workOrder: textField(raw.work_order),
+        defectSource: textField(raw.defect_source),
         createdBy,
         defectCreatedAt: toDateOrNull(raw.created_at),
         defectUpdatedAt: toDateOrNull(raw.updated_at),
-        rawResponse: raw as object,
+        rawResponse,
       };
 
       await appPrisma.whiparoundDefect.upsert({
         where: {
-          clerkOrgId_whiparoundId: { clerkOrgId, whiparoundId: raw.id },
+          clerkOrgId_whiparoundId: { clerkOrgId, whiparoundId },
         },
-        create: { clerkOrgId, whiparoundId: raw.id, ...data },
+        create: { clerkOrgId, whiparoundId, ...data },
         update: data,
       });
       synced++;
     } catch (err) {
-      console.error(`[WhipAround] upsert defect ${raw.id} error:`, err);
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!firstUpsertError) firstUpsertError = msg;
+      console.error(`[WhipAround] upsert defect ${String(raw.id)} error:`, err);
       errors++;
     }
   }
 
-  return { synced, errors };
+  return { synced, errors, firstUpsertError };
 }
 
 // ---------------------------------------------------------------------------
@@ -255,11 +297,14 @@ export interface OrgSyncResult {
   errors: number;
   durationMs: number;
   error?: string;
+  /** First Prisma/API upsert failure message (when errors > 0). */
+  upsertErrorDetail?: string;
 }
 
 export async function syncWhiparoundOrg(
   clerkOrgId: string,
-  credentialsJson: unknown
+  credentialsJson: unknown,
+  options?: { forceFullInspectionBackfill?: boolean }
 ): Promise<OrgSyncResult> {
   const t0 = Date.now();
 
@@ -299,19 +344,32 @@ export async function syncWhiparoundOrg(
 
   const client = new WhiparoundClient(apiKey);
 
+  const inspectionSyncFrom: Date | null =
+    options?.forceFullInspectionBackfill ? null : (account?.lastSyncAt ?? null);
+
   try {
     const [inspResult, defResult] = await Promise.all([
-      syncInspections(clerkOrgId, client, account?.lastSyncAt ?? null),
+      syncInspections(clerkOrgId, client, inspectionSyncFrom),
       syncDefects(clerkOrgId, client),
     ]);
 
     const totalErrors = inspResult.errors + defResult.errors;
 
+    const upsertHints = [inspResult.firstUpsertError, defResult.firstUpsertError].filter(
+      Boolean
+    ) as string[];
+    const lastErrorMsg =
+      totalErrors > 0
+        ? upsertHints.length
+          ? `${totalErrors} upsert error(s): ${upsertHints.join(' | ')}`
+          : `${totalErrors} upsert error(s)`
+        : null;
+
     await appPrisma.whiparoundAccount.update({
       where: { clerkOrgId },
       data: {
         lastSyncAt: new Date(),
-        lastError: totalErrors > 0 ? `${totalErrors} upsert error(s)` : null,
+        lastError: lastErrorMsg,
         status: 'ACTIVE',
       },
     });
@@ -323,6 +381,8 @@ export async function syncWhiparoundOrg(
       defectsSynced: defResult.synced,
       errors: totalErrors,
       durationMs: Date.now() - t0,
+      upsertErrorDetail:
+        totalErrors > 0 ? upsertHints.join(' | ') || undefined : undefined,
     };
   } catch (err: any) {
     const msg: string = err?.message ?? String(err);

@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useMemo, useRef, useCallback } from 'react';
-import { ClipboardCheck, AlertCircle, CheckCircle2, Clock, Search, ExternalLink } from 'lucide-react';
+import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
+import { ClipboardCheck, AlertCircle, CheckCircle2, Clock, Search, ExternalLink, ChevronRight } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/Skeleton';
 import {
   useWhiparoundDefects,
@@ -32,6 +33,17 @@ function formatDate(iso: string | null | undefined): string {
   if (!iso) return '—';
   return new Date(iso).toLocaleDateString('en-US', {
     month: 'short', day: 'numeric', year: 'numeric',
+  });
+}
+
+function formatDateTime(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
   });
 }
 
@@ -107,6 +119,8 @@ const STATUS_TABS = [
   { key: 'no_correction_needed', label: 'No Correction Needed' },
 ] as const;
 
+const WHIPAROUND_PAGE_SIZE = 100;
+
 // ---------------------------------------------------------------------------
 // Skeleton rows
 // ---------------------------------------------------------------------------
@@ -138,7 +152,9 @@ function DefectsTable({
   defects: WhiparoundDefect[];
   isLoading: boolean;
 }) {
-  const cols = ['Defect', 'Status', 'Asset', 'Team', 'Priority', 'Type', 'Repeated', 'Inspection', 'Assignee'];
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const cols = ['', 'Defect', 'Status', 'Created', 'Asset', 'Team', 'Priority', 'Type', 'Repeated', 'Inspection', 'Assignee'];
+  const colCount = cols.length;
 
   return (
     <div className="overflow-x-auto">
@@ -146,7 +162,10 @@ function DefectsTable({
         <thead>
           <tr className="border-b border-border">
             {cols.map((h) => (
-              <th key={h} className="text-left py-2 font-medium text-muted-foreground whitespace-nowrap pr-6">
+              <th
+                key={h || 'expand'}
+                className={`text-left py-2 font-medium text-muted-foreground whitespace-nowrap ${h ? 'pr-6' : 'w-10 pr-2'}`}
+              >
                 {h}
               </th>
             ))}
@@ -154,35 +173,134 @@ function DefectsTable({
         </thead>
         <tbody>
           {isLoading ? (
-            <TableSkeleton cols={cols.length} />
+            <TableSkeleton cols={colCount} />
           ) : defects.length === 0 ? (
             <tr>
-              <td colSpan={cols.length} className="py-12 text-center text-sm text-muted-foreground">
+              <td colSpan={colCount} className="py-12 text-center text-sm text-muted-foreground">
                 No defects match the current filters.
               </td>
             </tr>
           ) : (
-            defects.map((d) => (
-              <tr key={d.id} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
-                <td className="py-3 pr-6 font-medium whitespace-nowrap">
-                  {d.defectRef ?? `#${d.whiparoundId}`}
-                </td>
-                <td className="py-3 pr-6">
-                  <StatusBadge status={d.status} />
-                </td>
-                <td className="py-3 pr-6 font-medium">{d.assetName ?? '—'}</td>
-                <td className="py-3 pr-6 text-muted-foreground">{d.teamName ?? '—'}</td>
-                <td className="py-3 pr-6 text-muted-foreground">{d.defectPriority ?? 'Undefined'}</td>
-                <td className="py-3 pr-6 text-muted-foreground">{d.defectType ?? '—'}</td>
-                <td className="py-3 pr-6 text-center text-muted-foreground">{d.repeatedTimes ?? 0}</td>
-                <td className="py-3 pr-6 text-muted-foreground">
-                  {d.inspectionId ? (
-                    <span className="font-mono text-xs text-primary">{d.inspectionId}</span>
-                  ) : '—'}
-                </td>
-                <td className="py-3 pr-6 text-muted-foreground">{d.assignee ?? '—'}</td>
-              </tr>
-            ))
+            defects.flatMap((d) => {
+              const open = expandedId === d.id;
+              const mainRow = (
+                <tr
+                  key={d.id}
+                  className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors"
+                >
+                  <td className="py-2 pr-2 align-middle">
+                    <button
+                      type="button"
+                      aria-expanded={open}
+                      aria-label={open ? 'Collapse details' : 'Expand details'}
+                      className="p-1 rounded-md hover:bg-muted text-muted-foreground"
+                      onClick={() => setExpandedId(open ? null : d.id)}
+                    >
+                      <ChevronRight className={`h-4 w-4 transition-transform ${open ? 'rotate-90' : ''}`} />
+                    </button>
+                  </td>
+                  <td className="py-3 pr-6 font-medium whitespace-nowrap">
+                    {d.defectRef ?? `#${d.whiparoundId}`}
+                  </td>
+                  <td className="py-3 pr-6">
+                    <StatusBadge status={d.status} />
+                  </td>
+                  <td className="py-3 pr-6 text-muted-foreground whitespace-nowrap">
+                    {formatDate(d.defectCreatedAt)}
+                  </td>
+                  <td className="py-3 pr-6 font-medium">{d.assetName ?? '—'}</td>
+                  <td className="py-3 pr-6 text-muted-foreground">{d.teamName ?? '—'}</td>
+                  <td className="py-3 pr-6 text-muted-foreground">{d.defectPriority ?? 'Undefined'}</td>
+                  <td className="py-3 pr-6 text-muted-foreground">{d.defectType ?? '—'}</td>
+                  <td className="py-3 pr-6 text-center text-muted-foreground">{d.repeatedTimes ?? 0}</td>
+                  <td className="py-3 pr-6 text-muted-foreground">
+                    {d.inspectionId ? (
+                      <span className="font-mono text-xs text-primary">{d.inspectionId}</span>
+                    ) : '—'}
+                  </td>
+                  <td className="py-3 pr-6 text-muted-foreground">{d.assignee ?? '—'}</td>
+                </tr>
+              );
+
+              if (!open) return [mainRow];
+
+              const ins = d.inspection;
+              const detailRow = (
+                <tr key={`${d.id}-detail`} className="border-b border-border bg-muted/20">
+                  <td colSpan={colCount} className="py-4 px-2 pl-10">
+                    <div className="grid gap-3 sm:grid-cols-2 max-w-4xl text-sm">
+                      <div>
+                        <p className="text-xs font-semibold uppercase text-muted-foreground mb-1">Description</p>
+                        <p className="text-foreground whitespace-pre-wrap">{d.description?.trim() || '—'}</p>
+                      </div>
+                      <div className="space-y-2">
+                        <p>
+                          <span className="text-muted-foreground">Created: </span>
+                          {formatDateTime(d.defectCreatedAt)}
+                        </p>
+                        <p>
+                          <span className="text-muted-foreground">Updated: </span>
+                          {formatDateTime(d.defectUpdatedAt)}
+                        </p>
+                        <p>
+                          <span className="text-muted-foreground">Created by: </span>
+                          {d.createdBy ?? '—'}
+                        </p>
+                        <p>
+                          <span className="text-muted-foreground">Driver (defect): </span>
+                          {d.driverName ?? '—'}
+                        </p>
+                      </div>
+                      <div className="sm:col-span-2 rounded-md border border-border bg-background/50 p-3">
+                        <p className="text-xs font-semibold uppercase text-muted-foreground mb-2">Linked inspection</p>
+                        {ins ? (
+                          <div className="flex flex-col gap-1.5 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-6">
+                            <span>
+                              <span className="text-muted-foreground">ID </span>
+                              <span className="font-mono text-xs">{ins.whiparoundId}</span>
+                            </span>
+                            <span>
+                              <span className="text-muted-foreground">Driver </span>
+                              {ins.driverName ?? '—'}
+                            </span>
+                            <span>
+                              <span className="text-muted-foreground">Inspected </span>
+                              {formatDateTime(ins.inspectedAt)}
+                            </span>
+                            <span>
+                              <span className="text-muted-foreground">Duration </span>
+                              {formatDuration(ins.durationSec)}
+                            </span>
+                            <span className="flex items-center gap-2">
+                              <span className="text-muted-foreground">Result </span>
+                              <PassBadge passed={ins.passed} />
+                            </span>
+                            {ins.pdfUrl ? (
+                              <a
+                                href={ins.pdfUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 text-primary hover:underline"
+                              >
+                                Open DVIR PDF <ExternalLink className="h-3 w-3" />
+                              </a>
+                            ) : (
+                              <span className="text-muted-foreground">No PDF URL</span>
+                            )}
+                          </div>
+                        ) : (
+                          <p className="text-muted-foreground">
+                            No matching inspection in this portal yet (sync inspections, or ID mismatch).
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              );
+
+              return [mainRow, detailRow];
+            })
           )}
         </tbody>
       </table>
@@ -231,7 +349,7 @@ function InspectionsTable({
                 <td className="py-3 pr-6">{ins.driverName ?? '—'}</td>
                 <td className="py-3 pr-6 font-medium">{ins.assetId ?? '—'}</td>
                 <td className="py-3 pr-6 text-muted-foreground whitespace-nowrap">
-                  {formatDate(ins.inspectedAt)}
+                  {formatDateTime(ins.inspectedAt)}
                 </td>
                 <td className="py-3 pr-6 text-muted-foreground">{formatDuration(ins.durationSec)}</td>
                 <td className="py-3 pr-6">
@@ -269,6 +387,8 @@ export default function WhiparoundPage() {
   const [search, setSearch] = useState('');
   const [deferredSearch, setDeferredSearch] = useState('');
   const [view, setView] = useState<'defects' | 'inspections'>('defects');
+  const [defectPage, setDefectPage] = useState(0);
+  const [inspPage, setInspPage] = useState(0);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleSearch = useCallback((val: string) => {
@@ -277,16 +397,30 @@ export default function WhiparoundPage() {
     debounceRef.current = setTimeout(() => setDeferredSearch(val), 300);
   }, []);
 
+  useEffect(() => {
+    setDefectPage(0);
+  }, [activeStatus, deferredSearch]);
+
   const defectFilters = useMemo(
     () => ({
       ...(activeStatus ? { status: activeStatus } : {}),
       ...(deferredSearch ? { search: deferredSearch } : {}),
+      limit: WHIPAROUND_PAGE_SIZE,
+      offset: defectPage * WHIPAROUND_PAGE_SIZE,
     }),
-    [activeStatus, deferredSearch]
+    [activeStatus, deferredSearch, defectPage]
+  );
+
+  const inspectionFilters = useMemo(
+    () => ({
+      limit: WHIPAROUND_PAGE_SIZE,
+      offset: inspPage * WHIPAROUND_PAGE_SIZE,
+    }),
+    [inspPage]
   );
 
   const { data: defectData, isLoading: defectsLoading } = useWhiparoundDefects(defectFilters);
-  const { data: inspData, isLoading: inspLoading } = useWhiparoundInspections();
+  const { data: inspData, isLoading: inspLoading } = useWhiparoundInspections(inspectionFilters);
   const { data: syncStatus } = useWhiparoundSyncStatus();
 
   const statusCounts = defectData?.statusCounts ?? {};
@@ -411,6 +545,38 @@ export default function WhiparoundPage() {
             </CardHeader>
             <CardContent>
               <DefectsTable defects={defects} isLoading={defectsLoading} />
+              {defectData && defectData.total > 0 && (
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between pt-4 border-t border-border mt-2">
+                  <p className="text-xs text-muted-foreground">
+                    Showing {Math.min(defectPage * WHIPAROUND_PAGE_SIZE + 1, defectData.total)}–
+                    {Math.min((defectPage + 1) * WHIPAROUND_PAGE_SIZE, defectData.total)} of{' '}
+                    {defectData.total}
+                  </p>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={defectPage === 0 || defectsLoading}
+                      onClick={() => setDefectPage((p) => p - 1)}
+                    >
+                      Previous
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={
+                        defectsLoading ||
+                        (defectPage + 1) * WHIPAROUND_PAGE_SIZE >= defectData.total
+                      }
+                      onClick={() => setDefectPage((p) => p + 1)}
+                    >
+                      Next
+                    </Button>
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
         </>
@@ -430,6 +596,37 @@ export default function WhiparoundPage() {
           </CardHeader>
           <CardContent>
             <InspectionsTable inspections={inspections} isLoading={inspLoading} />
+            {inspData && inspData.total > 0 && (
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between pt-4 border-t border-border mt-2">
+                <p className="text-xs text-muted-foreground">
+                  Showing {Math.min(inspPage * WHIPAROUND_PAGE_SIZE + 1, inspData.total)}–
+                  {Math.min((inspPage + 1) * WHIPAROUND_PAGE_SIZE, inspData.total)} of{' '}
+                  {inspData.total}
+                </p>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={inspPage === 0 || inspLoading}
+                    onClick={() => setInspPage((p) => p - 1)}
+                  >
+                    Previous
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={
+                      inspLoading || (inspPage + 1) * WHIPAROUND_PAGE_SIZE >= inspData.total
+                    }
+                    onClick={() => setInspPage((p) => p + 1)}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
