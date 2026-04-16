@@ -71,6 +71,12 @@ function toDateOrNull(val: string | null | undefined): Date | null {
   return isNaN(d.getTime()) ? null : d;
 }
 
+/** Whip Around rejects subsecond precision in query datetimes (must end with Z or ±offset). */
+function toWhiparoundDatetimeParam(d: Date): string {
+  const iso = d.toISOString();
+  return iso.includes('.') ? `${iso.slice(0, iso.indexOf('.'))}Z` : iso;
+}
+
 function safeInt(val: unknown): number | null {
   const n = Number(val);
   return Number.isInteger(n) && !isNaN(n) ? n : null;
@@ -112,7 +118,7 @@ async function syncInspections(
   if (lastSyncAt) {
     // 1-hour overlap to catch any records written near the boundary
     const from = new Date(lastSyncAt.getTime() - 60 * 60 * 1000);
-    params.datetime_from = from.toISOString();
+    params.datetime_from = toWhiparoundDatetimeParam(from);
   }
 
   let inspections: RawInspection[];
