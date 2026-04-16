@@ -588,14 +588,45 @@ router.get('/units/:identifier', clerkAuthMiddleware, requireOrg, async (req: Au
 });
 
 /**
+ * GET /fleet/geofences
+ * Returns active Motive geofences for the org (id, name, category, locationPoints, address).
+ */
+router.get('/geofences', clerkAuthMiddleware, requireOrg, async (req: AuthRequest, res) => {
+  try {
+    const clerkOrgId = req.auth!.orgId!;
+    const appPrisma = getAppPrisma();
+
+    const geofences = await appPrisma.motiveGeofence.findMany({
+      where: { clerkOrgId, status: 'active' },
+      select: {
+        id: true,
+        name: true,
+        category: true,
+        locationPoints: true,
+        address: true,
+      },
+      orderBy: { name: 'asc' },
+    });
+
+    res.json({ geofences });
+  } catch (error: any) {
+    console.error('[Fleet] Error fetching geofences:', error);
+    res.status(500).json({ error: 'Internal Server Error', message: error.message });
+  }
+});
+
+/**
  * GET /fleet/idle-events
  * Returns idle events for the org from Samsara or Motive, enriched with unit numbers.
- * Query params: startDate (YYYY-MM-DD), endDate (YYYY-MM-DD)
+ * Query params: startDate (YYYY-MM-DD), endDate (YYYY-MM-DD), limit (default 500, max 2000)
  */
 router.get('/idle-events', clerkAuthMiddleware, requireOrg, async (req: AuthRequest, res) => {
   try {
     const clerkOrgId = req.auth!.orgId!;
-    const { startDate, endDate } = req.query as { startDate?: string; endDate?: string };
+    const { startDate, endDate, limit: limitParam } = req.query as {
+      startDate?: string; endDate?: string; limit?: string;
+    };
+    const eventLimit = Math.min(Math.max(parseInt(limitParam || '500', 10) || 500, 1), 2000);
     const appPrisma = getAppPrisma();
 
     const providerAccount = await appPrisma.telematicsProviderAccount.findUnique({
@@ -641,6 +672,10 @@ router.get('/idle-events', clerkAuthMiddleware, requireOrg, async (req: AuthRequ
           location: true,
           city: true,
           state: true,
+          driverId: true,
+          driverFirstName: true,
+          driverLastName: true,
+          endType: true,
         },
         take: 2000,
       });
@@ -656,12 +691,17 @@ router.get('/idle-events', clerkAuthMiddleware, requireOrg, async (req: AuthRequ
             unitNumber: unitNumber ?? null,
             vin: r.vin ?? null,
             startTime: r.startTime,
+            endTime: r.endTime ?? null,
             date: r.date,
             durationMinutes: durationMs != null ? Math.round(durationMs / 60000) : null,
             idleFuelGallons: r.idleFuel ?? null,
             lat: r.lat ?? null,
             lon: r.lon ?? null,
             location: r.location ?? [r.city, r.state].filter(Boolean).join(', ') ?? null,
+            driverId: r.driverId ?? null,
+            driverFirstName: r.driverFirstName ?? null,
+            driverLastName: r.driverLastName ?? null,
+            endType: r.endType ?? null,
           };
         });
     } else if (providerAccount?.provider === 'SAMSARA') {
@@ -729,7 +769,7 @@ router.get('/idle-events', clerkAuthMiddleware, requireOrg, async (req: AuthRequ
       totalIdleFuel: parseFloat(totalIdleFuel.toFixed(2)),
       repeatOffenders,
       longestEvents,
-      events: events.slice(0, 500),
+      events: events.slice(0, eventLimit),
     });
   } catch (error: any) {
     console.error('[Fleet] Error fetching idle events:', error);
