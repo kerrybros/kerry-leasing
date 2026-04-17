@@ -19,6 +19,15 @@ export const config = {
   },
   cronSecret: process.env.CRON_SECRET,
   redisUrl: process.env.REDIS_URL ?? null,
+  microsoftGraph: process.env.MICROSOFT_GRAPH_TENANT_ID
+    ? {
+        tenantId: process.env.MICROSOFT_GRAPH_TENANT_ID,
+        clientId: process.env.MICROSOFT_GRAPH_CLIENT_ID!,
+        clientSecret: process.env.MICROSOFT_GRAPH_CLIENT_SECRET!,
+        siteHostname: process.env.MICROSOFT_GRAPH_SITE_HOSTNAME!,
+        sitePath: process.env.MICROSOFT_GRAPH_SITE_PATH!,
+      }
+    : null,
 };
 
 // Validate required env vars

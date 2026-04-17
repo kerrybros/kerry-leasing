@@ -17,6 +17,7 @@ import servicePlanRoutes from './servicePlan.js';
 import fleetRoutes from './fleet.js';
 import repairsRoutes from './repairs.js';
 import adminOrgsRoutes from './adminOrgs.js';
+import sharepointRoutes from './sharepoint.js';
 import whiparoundRoutes from './whiparound.js';
 import { LinkOrgSchema, RepairCustomerSchema, parseBody } from '../lib/validate.js';
 import { getRedis } from '../lib/redis.js';
@@ -450,6 +451,9 @@ router.use('/repairs', repairsRoutes);
 
 // Mount admin orgs routes (customer onboarding + management)
 router.use('/admin/orgs', adminOrgsRoutes);
+
+// Mount SharePoint document listing routes (Graph app-only, internal-only)
+router.use('/admin/sharepoint', sharepointRoutes);
 
 // Mount Whip Around read routes
 router.use('/whiparound', whiparoundRoutes);

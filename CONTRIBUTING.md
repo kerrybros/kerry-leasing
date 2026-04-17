@@ -14,6 +14,7 @@ How we work in this monorepo. **Extend this file as conventions solidify** — a
 | [Quality checks](#quality-checks-before-push) | Before push / CI |
 | [Databases & migrations](#databases--migrations) | Schema / Prisma changes |
 | [Docs & roadmap hygiene](#docs--roadmap-hygiene) | Placeholders, integrations, known gaps |
+| [SharePoint documents](./docs/sharepoint-documents.md) | Microsoft Graph + Entra for Admin → Documents |
 | [Security](#security) | Always |
 
 ---
@@ -82,6 +83,7 @@ After **app** schema changes: `pnpm prisma:app:generate` (or root documented com
   - Add/remove a “coming soon” or placeholder route.
   - Introduce or close a major integration gap (telematics, shop system, etc.).
 - **README.md** — Setup and architecture; link out to deeper docs instead of duplicating.
+- **[SharePoint documents](./docs/sharepoint-documents.md)** — Microsoft Graph env vars, Entra app registration, and site permissions for the Admin → Documents page.
 
 *(Add: ADR folder, internal wiki links.)*
 
@@ -91,6 +93,7 @@ After **app** schema changes: `pnpm prisma:app:generate` (or root documented com
 
 - Never commit API keys, `CRON_SECRET`, database URLs with passwords, or Clerk secrets.
 - Use `.env.example` / templates only for *names* and fake values.
+- Integration-specific secrets (e.g. Graph client secret): see that integration’s doc (e.g. [SharePoint documents](./docs/sharepoint-documents.md)).
 
 ---
 
