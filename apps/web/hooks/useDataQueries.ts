@@ -402,6 +402,8 @@ export function useUnitDetailQuery(vin: string) {
   });
 }
 
+export type UnitType = 'TRACTOR' | 'TRAILER' | 'SWITCHER' | 'BOX_TRUCK' | 'AUTO' | 'MISC';
+
 export type ServicePlanUnit = {
   id: string;
   repairUnitId: string;
@@ -410,6 +412,7 @@ export type ServicePlanUnit = {
   telematicsVin: string | null;
   telematicsVehicleId: string | null;
   customUnitName: string | null;
+  unitType: UnitType | null;
   isTelematicsOnly: boolean;
   isIncluded: boolean;
   isConfirmed: boolean;

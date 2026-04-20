@@ -381,6 +381,7 @@ router.get('/units/:identifier', clerkAuthMiddleware, requireOrg, async (req: Au
             vehicleName: true,
             distanceMiles: true,
             engineOnMinutes: true,
+            drivingMinutes: true,
             idleMinutes: true,
             fuelGallons: true,
             idleFuelGallons: true,
@@ -394,6 +395,7 @@ router.get('/units/:identifier', clerkAuthMiddleware, requireOrg, async (req: Au
           utilizationPercentage: null,
           totalDistance: rec.distanceMiles ?? null,
           idleTime: rec.idleMinutes != null ? rec.idleMinutes * 60 : null,
+          drivingTime: rec.drivingMinutes != null ? rec.drivingMinutes * 60 : null,
           totalFuel: rec.fuelGallons ?? null,
           idleFuel: rec.idleFuelGallons ?? null,
         }));
@@ -486,7 +488,7 @@ router.get('/units/:identifier', clerkAuthMiddleware, requireOrg, async (req: Au
             const customerFilter = servicePlanUnit.repairCustomerId
               ? { customer_external_id: servicePlanUnit.repairCustomerId }
               : customerUnit.customer
-                ? { customer: customerUnit.customer }
+                ? { customer: { equals: customerUnit.customer, mode: 'insensitive' as const } }
                 : {};
 
             const rows = await repairPrisma.revenue_details.findMany({

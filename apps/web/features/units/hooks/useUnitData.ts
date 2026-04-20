@@ -37,7 +37,7 @@ export function useUnitData(vin: string, startDate?: string, endDate?: string) {
   const fleetUnitsQuery = useFleetUnitsQuery();
   const vehicleUtilQuery = useVehicleUtilizationQuery();
 
-  const loading = unitQuery.isLoading;
+  const loading = unitQuery.isLoading || !organization?.id;
   const isRefetching = unitQuery.isFetching && !unitQuery.isLoading;
   const error = (unitQuery.error as Error | null)?.message ?? null;
   const unitData = unitQuery.data;

@@ -459,6 +459,7 @@ model ServicePlanUnit {
   isIncluded        Boolean   @default(true) @map("is_included")      // Whether this unit appears in the external portal
   isConfirmed       Boolean   @default(false) @map("is_confirmed")    // Acknowledged as intentionally having no telematics
   customUnitName    String?   @map("custom_unit_name")                // Admin-set display name override
+  unitType          UnitType? @map("unit_type")                       // Vehicle classification set by admin
   notes             String?
   
   // Audit trail
@@ -481,6 +482,15 @@ enum ServicePlanMatchType {
   AUTO          // Automatically matched via VIN
   MANUAL        // Manually matched by admin
   UNMATCHED     // No telematics match
+}
+
+enum UnitType {
+  TRACTOR
+  TRAILER
+  SWITCHER
+  BOX_TRUCK
+  AUTO
+  MISC
 }
 
 // SAMSARA Vehicle Utilization (normalized, per day per vehicle)

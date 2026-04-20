@@ -127,7 +127,7 @@ export default function UnitDetailPage() {
   if (error || !unit) {
     return (
       <div className="max-w-[1200px] mx-auto px-6 py-8">
-        <Button variant="ghost" size="sm" onClick={() => router.back()} className="mb-4 -ml-2">
+        <Button variant="ghost" size="sm" onClick={() => router.push('/app/fleet')} className="mb-4 -ml-2">
           <ArrowLeft className="h-4 w-4 mr-1" /> Back to Fleet
         </Button>
         <div className="text-destructive">{error || 'Unit not found'}</div>
@@ -147,7 +147,7 @@ export default function UnitDetailPage() {
       <div className="sticky top-0 z-20 bg-background border-b border-border">
         <div className="max-w-[1200px] mx-auto px-6 py-3">
           <button
-            onClick={() => router.back()}
+            onClick={() => router.push('/app/fleet')}
             className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors mb-2"
           >
             <ArrowLeft className="h-3.5 w-3.5" /> Back to Fleet

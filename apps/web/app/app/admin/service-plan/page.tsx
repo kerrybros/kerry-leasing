@@ -4,7 +4,7 @@ import { useOrganization } from '@clerk/nextjs';
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useApiClient } from '@/hooks/useApiClient';
-import { useServicePlanQuery, useOrgSettingsQuery, keys } from '@/hooks/useDataQueries';
+import { useServicePlanQuery, useOrgSettingsQuery, keys, type UnitType } from '@/hooks/useDataQueries';
 import { KpiCard } from '@/components/KpiCard';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -257,6 +257,29 @@ export default function AdminServicePlanPage() {
     },
   });
 
+  const unitTypeMutation = useMutation({
+    mutationFn: async ({ unitId, unitType }: { unitId: string; unitType: UnitType | null }) => {
+      const api = await getApi();
+      await api.put(`/admin/service-plan/units/${unitId}/type`, { unitType });
+    },
+    onMutate: async ({ unitId, unitType }) => {
+      await queryClient.cancelQueries({ queryKey: keys.servicePlan(orgId) });
+      const previous = queryClient.getQueryData(keys.servicePlan(orgId));
+      queryClient.setQueryData(keys.servicePlan(orgId), (old: any) => {
+        if (!old?.units) return old;
+        return { ...old, units: old.units.map((u: any) => u.id === unitId ? { ...u, unitType } : u) };
+      });
+      return { previous };
+    },
+    onError: (err: unknown, _, context: any) => {
+      if (context?.previous) queryClient.setQueryData(keys.servicePlan(orgId), context.previous);
+      addToast('error', err instanceof Error ? err.message : 'Failed to update unit type');
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: keys.servicePlan(orgId) });
+    },
+  });
+
   const loadAvailableVehicles = async () => {
     try {
       const api = await getApi();
@@ -474,13 +497,14 @@ export default function AdminServicePlanPage() {
                         </span>
                       </th>
                     ))}
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Unit Type</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
                   {filteredUnits.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
+                      <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">
                         {filter === 'included'
                           ? 'No included units.'
                           : filter === 'matched'
@@ -628,6 +652,26 @@ export default function AdminServicePlanPage() {
                             >
                               {pendingInclusionIds.has(unit.id) ? '...' : u.isIncluded ? 'Included' : 'Excluded'}
                             </button>
+                          </td>
+
+                          {/* Unit Type */}
+                          <td className="px-4 py-3 min-w-[140px]">
+                            <Select
+                              value={u.unitType ?? ''}
+                              onValueChange={v => unitTypeMutation.mutate({ unitId: unit.id, unitType: (v || null) as UnitType | null })}
+                            >
+                              <SelectTrigger className="h-7 text-xs w-[130px]">
+                                <SelectValue placeholder="Set type…" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="TRACTOR" className="text-xs">Tractor</SelectItem>
+                                <SelectItem value="TRAILER" className="text-xs">Trailer</SelectItem>
+                                <SelectItem value="SWITCHER" className="text-xs">Switcher</SelectItem>
+                                <SelectItem value="BOX_TRUCK" className="text-xs">Box Truck</SelectItem>
+                                <SelectItem value="AUTO" className="text-xs">Auto</SelectItem>
+                                <SelectItem value="MISC" className="text-xs">Misc</SelectItem>
+                              </SelectContent>
+                            </Select>
                           </td>
 
                           {/* Actions */}

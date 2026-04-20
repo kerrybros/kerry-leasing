@@ -12,7 +12,7 @@ import { Router } from 'express';
 import { AuthRequest } from '../middleware/auth.js';
 import { getAppPrisma, getRepairPrisma } from '../lib/prisma.js';
 import { REPAIR_SHOP_ORG_ID } from '../config/repairShop.js';
-import { ServicePlanMatchType } from '../generated/app-client/index.js';
+import { ServicePlanMatchType, UnitType } from '../generated/app-client/index.js';
 import { PaginationSchema, parseQuery } from '../lib/validate.js';
 import { createId } from '@paralleldrive/cuid2';
 import {
@@ -1053,6 +1053,43 @@ router.put('/units/:unitId/name', async (req: AuthRequest, res) => {
     res.json({ success: true, unit: updated });
   } catch (error) {
     console.error('[ServicePlan] Name update error:', error);
+    res.status(500).json({ error: 'Internal Server Error', message: (error as any).message });
+  }
+});
+
+/**
+ * PUT /admin/service-plan/units/:unitId/type
+ * Set or clear the vehicle classification type for a unit
+ */
+router.put('/units/:unitId/type', async (req: AuthRequest, res) => {
+  try {
+    const clerkOrgId = req.auth!.orgId!;
+    const appPrisma = getAppPrisma();
+    const { unitId } = req.params;
+    const { unitType } = req.body as { unitType: string | null };
+
+    const validTypes = ['TRACTOR', 'TRAILER', 'SWITCHER', 'BOX_TRUCK', 'AUTO', 'MISC'];
+    if (unitType !== null && !validTypes.includes(unitType)) {
+      return res.status(400).json({ error: `unitType must be one of ${validTypes.join(', ')} or null` });
+    }
+
+    const existingUnit = await appPrisma.servicePlanUnit.findFirst({
+      where: { id: unitId, clerkOrgId },
+    });
+    if (!existingUnit) {
+      return res.status(404).json({ error: 'Not Found', message: 'Unit not found' });
+    }
+
+    const updated = await appPrisma.servicePlanUnit.update({
+      where: { id: unitId },
+      data: { unitType: unitType as UnitType | null },
+    });
+
+    await invalidateCachesAfterServicePlanChange(clerkOrgId);
+
+    res.json({ success: true, unit: updated });
+  } catch (error) {
+    console.error('[ServicePlan] Unit type update error:', error);
     res.status(500).json({ error: 'Internal Server Error', message: (error as any).message });
   }
 });

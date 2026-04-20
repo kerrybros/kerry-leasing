@@ -14,7 +14,7 @@ export async function loadSamsaraTelematicsVehiclesForServicePlan(
 ): Promise<SamsaraPlanVehicle[]> {
   const [mapRows, utilRows] = await Promise.all([
     prisma.telematicsVehicleMap.findMany({
-      where: { clerkOrgId, provider: 'SAMSARA', vin: { not: null } },
+      where: { clerkOrgId, provider: 'SAMSARA' },
       select: { vin: true, providerVehicleName: true },
       distinct: ['vin'],
     }),
