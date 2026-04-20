@@ -5,6 +5,7 @@ import { useOrgSettingsQuery } from '@/hooks/useDataQueries';
 import { BRAND_PRESET_MAP } from '@/lib/brandPresets';
 
 const CSS_VARS = ['--primary', '--primary-foreground', '--primary-dark', '--primary-light', '--ring'] as const;
+const BRAND_VARS_KEY = 'brandVars';
 
 /**
  * Applies per-org brand color overrides as inline CSS custom properties on
@@ -19,12 +20,15 @@ export function OrgBrandTheme() {
 
   useEffect(() => {
     function apply() {
+      if (orgSettings === undefined) return;
+
       const preset = orgSettings?.brandColorPreset;
       const config = preset ? BRAND_PRESET_MAP[preset] : null;
       const el = document.documentElement;
 
       if (!config || config.key === 'KERRY_GOLD') {
         CSS_VARS.forEach((v) => el.style.removeProperty(v));
+        try { localStorage.removeItem(BRAND_VARS_KEY); } catch {}
         return;
       }
 
@@ -33,6 +37,7 @@ export function OrgBrandTheme() {
       (Object.entries(bundle) as [string, string][]).forEach(([k, v]) => {
         el.style.setProperty(k, v);
       });
+      try { localStorage.setItem(BRAND_VARS_KEY, JSON.stringify(bundle)); } catch {}
     }
 
     apply();

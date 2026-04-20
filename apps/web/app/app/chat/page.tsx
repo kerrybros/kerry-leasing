@@ -16,26 +16,26 @@ const mockMessages: ChatMessage[] = [
   {
     id: 1,
     sender: 'Kerry Brothers Shop',
-    text: "Hi! Unit 103 is in for its oil change. We noticed the left front tire is wearing unevenly — want us to rotate while it's here?",
-    timestamp: 'Apr 8, 2026 · 9:14 AM',
+    text: "Units 214, 389, 451, and 507 are due for LOFs. Can you bring them by this week?",
+    timestamp: 'Apr 18, 2026 · 8:02 AM',
   },
   {
     id: 2,
     sender: 'You',
-    text: "Yes, please go ahead with the rotation. Does the tire need to be replaced soon?",
-    timestamp: 'Apr 8, 2026 · 9:32 AM',
+    text: "Sure, I'll get them scheduled. Any preference on which days?",
+    timestamp: 'Apr 18, 2026 · 8:45 AM',
   },
   {
     id: 3,
     sender: 'Kerry Brothers Shop',
-    text: "It's got about 40% tread left, so you've got some time. We'll keep an eye on it. Unit 103 should be ready by end of day.",
-    timestamp: 'Apr 8, 2026 · 9:45 AM',
+    text: "Tuesday and Wednesday work best for us — two in each morning if possible.",
+    timestamp: 'Apr 18, 2026 · 8:51 AM',
   },
   {
     id: 4,
     sender: 'You',
-    text: "Perfect, thanks. Let me know when it's done.",
-    timestamp: 'Apr 8, 2026 · 9:47 AM',
+    text: "Works for me. I'll send 214 and 389 Tuesday, 451 and 507 Wednesday.",
+    timestamp: 'Apr 18, 2026 · 9:03 AM',
   },
 ];
 

@@ -34,6 +34,11 @@ export default function RootLayout({
               `,
             }}
           />
+          <script
+            dangerouslySetInnerHTML={{
+              __html: `(function(){try{var b=localStorage.getItem('brandVars');if(b){var v=JSON.parse(b);var r=document.documentElement;Object.entries(v).forEach(function(e){r.style.setProperty(e[0],e[1]);});}}catch(e){}})();`,
+            }}
+          />
         </head>
         <body>
           <Providers>

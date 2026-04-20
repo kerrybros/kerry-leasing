@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
-import { UserButton, OrganizationSwitcher, useAuth } from '@clerk/nextjs';
+import React, { useState, useEffect, useLayoutEffect, useRef, useMemo } from 'react';
+import { UserButton, OrganizationSwitcher } from '@clerk/nextjs';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { OrgBrandTheme } from '@/components/OrgBrandTheme';
 import Link from 'next/link';
@@ -20,7 +20,7 @@ import {
   SidebarMenuItem,
   SidebarProvider,
 } from '@/components/ui/sidebar';
-import { Truck, Settings, Users, Wrench, CalendarClock, MessageSquare, Building2, Activity, ClipboardCheck, Map } from 'lucide-react';
+import { Truck, Settings, Users, MessageSquare, Building2, Activity, ClipboardCheck, Map, KeyRound, Lock } from 'lucide-react';
 
 const defaultOrgSettings = {
   tracksDrivers: true,
@@ -33,15 +33,59 @@ const defaultOrgSettings = {
   telematicsDashboardPassword: null as string | null,
 };
 
+const INTERNAL_SESSION_KEY = 'kl_internal_unlocked';
+const INTERNAL_PIN = '5255';
+
 export default function AppLayout({ children }: { children: React.ReactNode }) {
-  const { has } = useAuth();
   const pathname = usePathname();
-  const isAdmin = has && has({ role: 'org:admin' });
   const { data: orgSettings = defaultOrgSettings } = useOrgSettingsQuery();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
   const showDrivers = orgSettings.tracksDrivers;
+
+  // Session-gated internal access — cleared on hard refresh.
+  // useLayoutEffect reads sessionStorage before first paint so there's no flash.
+  const [isUnlocked, setIsUnlocked] = useState(false);
+  useLayoutEffect(() => {
+    setIsUnlocked(sessionStorage.getItem(INTERNAL_SESSION_KEY) === '1');
+  }, []);
+
+  // PIN dialog
+  const [pinOpen, setPinOpen] = useState(false);
+  const [pin, setPin] = useState('');
+  const [pinError, setPinError] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const openPin = () => {
+    setPin('');
+    setPinError(false);
+    setPinOpen(true);
+    setTimeout(() => inputRef.current?.focus(), 50);
+  };
+
+  const lock = () => {
+    sessionStorage.removeItem(INTERNAL_SESSION_KEY);
+    setIsUnlocked(false);
+  };
+
+  const handlePinChange = (val: string) => {
+    const digits = val.replace(/\D/g, '').slice(0, 4);
+    setPin(digits);
+    setPinError(false);
+    if (digits.length === 4) {
+      if (digits === INTERNAL_PIN) {
+        sessionStorage.setItem(INTERNAL_SESSION_KEY, '1');
+        setIsUnlocked(true);
+        setPinOpen(false);
+        setPin('');
+      } else {
+        setPinError(true);
+        setPin('');
+        setTimeout(() => inputRef.current?.focus(), 0);
+      }
+    }
+  };
 
   const navItems = useMemo(() => [
     {
@@ -49,27 +93,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       label: 'Fleet',
       icon: Truck,
       active: !!pathname?.includes('/fleet') || !!pathname?.includes('/units'),
-    },
-    {
-      href: '/app/wip',
-      label: 'Shop',
-      icon: Wrench,
-      active: !!pathname?.includes('/wip'),
-      hidden: !isAdmin,
-    },
-    {
-      href: '/app/pm',
-      label: 'PM',
-      icon: CalendarClock,
-      active: !!pathname?.includes('/pm'),
-      hidden: !isAdmin,
-    },
-    {
-      href: '/app/chat',
-      label: 'Chat',
-      icon: MessageSquare,
-      active: !!pathname?.includes('/chat'),
-      hidden: !isAdmin,
     },
     {
       href: '/app/drivers',
@@ -89,16 +112,18 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       label: 'Whiparound',
       icon: ClipboardCheck,
       active: !!pathname?.includes('/whiparound'),
-      hidden: !isAdmin,
     },
     {
       href: '/app/idle-map',
       label: 'Idle Map',
       icon: Map,
       active: !!pathname?.includes('/idle-map'),
-      hidden: !isAdmin,
     },
-  ].filter((item) => !item.hidden), [pathname, isAdmin, showDrivers]);
+  ].filter((item) => !item.hidden), [pathname, isUnlocked, showDrivers]);
+
+  const comingSoonItems = [
+    { label: 'Chat', icon: MessageSquare, href: '/app/chat' },
+  ];
 
   return (
     <SidebarProvider
@@ -107,7 +132,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     >
       <OrgBrandTheme />
       <Sidebar collapsible="none">
-        {/* Logo — full logo when expanded, small "KL" square when collapsed */}
+        {/* Logo */}
         <SidebarHeader className="py-3 px-2">
           <Link href="/app/fleet" className="no-underline block">
             <div className="bg-white rounded-lg px-3 py-2 flex flex-col items-center gap-1.5">
@@ -148,8 +173,30 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             </SidebarGroupContent>
           </SidebarGroup>
 
-          {/* Internal section — KL-admin only */}
-          {isAdmin && (
+          {/* Coming Soon section */}
+          <SidebarGroup>
+            <div className="px-3 pb-1">
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-sidebar-foreground/40">Coming Soon</p>
+            </div>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {comingSoonItems.map((item) => (
+                  <SidebarMenuItem key={item.label}>
+                    <SidebarMenuButton
+                      render={<Link href={item.href} />}
+                      isActive={!!pathname?.includes(item.href)}
+                    >
+                      <item.icon />
+                      <span>{item.label}</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+
+          {/* Internal section — PIN-gated */}
+          {isUnlocked && (
             <SidebarGroup className="mt-auto">
               <div className="px-3 pb-1">
                 <p className="text-[10px] font-semibold uppercase tracking-widest text-sidebar-foreground/40">Internal</p>
@@ -188,7 +235,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             </SidebarGroup>
           )}
 
-          {/* Service Request Button — pinned to bottom of body */}
+          {/* Service Request Button */}
           <div className="mt-auto px-3 pb-2">
             <a
               href={orgSettings.serviceRequestUrl || '#'}
@@ -204,8 +251,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
         {/* Footer: org switcher + user controls */}
         <SidebarFooter className="border-t border-sidebar-border pb-3">
-          {mounted && (
-            <div className="px-1 pt-1">
+          <div className="px-1 pt-1">
+            {mounted ? (
               <OrganizationSwitcher
                 hidePersonal={true}
                 afterSelectOrganizationUrl="/app/fleet"
@@ -217,16 +264,28 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                   },
                 }}
               />
-            </div>
-          )}
+            ) : (
+              <div className="h-8 rounded-md bg-sidebar-accent/40" />
+            )}
+          </div>
 
           <div className="flex items-center gap-1 px-1 overflow-hidden">
             <ThemeToggle />
-            {mounted && (
+            {mounted ? (
               <div className="shrink-0 [&_button]:!w-7 [&_button]:!h-7 [&_img]:!w-7 [&_img]:!h-7">
                 <UserButton afterSignOutUrl="/sign-in" />
               </div>
+            ) : (
+              <div className="shrink-0 w-7 h-7 rounded-full bg-sidebar-accent/40" />
             )}
+            <button
+              type="button"
+              onClick={isUnlocked ? lock : openPin}
+              title={isUnlocked ? 'Lock internal access' : 'Internal access'}
+              className={`ml-auto shrink-0 rounded p-1 transition-colors hover:bg-sidebar-accent ${isUnlocked ? 'text-primary hover:text-destructive' : 'text-sidebar-foreground/20 hover:text-sidebar-foreground/50'}`}
+            >
+              {isUnlocked ? <Lock size={13} /> : <KeyRound size={13} />}
+            </button>
           </div>
         </SidebarFooter>
       </Sidebar>
@@ -236,6 +295,44 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           {children}
         </main>
       </SidebarInset>
+
+      {/* PIN overlay */}
+      {pinOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+          onClick={(e) => { if (e.target === e.currentTarget) setPinOpen(false); }}
+        >
+          <div className="bg-background border border-border rounded-xl shadow-xl p-6 w-64 flex flex-col items-center gap-4">
+            <KeyRound size={20} className="text-muted-foreground" />
+            <p className="text-sm font-medium text-foreground">Enter access code</p>
+            <input
+              ref={inputRef}
+              type="password"
+              inputMode="numeric"
+              maxLength={4}
+              value={pin}
+              onChange={(e) => handlePinChange(e.target.value)}
+              placeholder="····"
+              className={`w-28 text-center text-2xl tracking-[0.5em] border rounded-lg px-3 py-2 bg-background outline-none transition-colors ${
+                pinError
+                  ? 'border-destructive text-destructive focus:border-destructive'
+                  : 'border-border focus:border-primary'
+              }`}
+              autoComplete="off"
+            />
+            {pinError && (
+              <p className="text-xs text-destructive -mt-2">Incorrect code</p>
+            )}
+            <button
+              type="button"
+              onClick={() => setPinOpen(false)}
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
     </SidebarProvider>
   );
 }
