@@ -147,14 +147,14 @@ function EventsTable({
         {/* table-fixed keeps column widths stable when sort changes cell content length */}
         <Table className="table-fixed w-full">
           <colgroup>
-            <col className="w-20" />
-            <col className="w-28" />
-            <col className="w-20" />
-            <col className="w-20" />
-            <col className="w-40" />
+            <col className="w-16" />
+            <col className="w-24" />
+            <col className="w-16" />
+            <col className="w-16" />
+            <col className="w-36" />
+            <col className="w-14" />
             <col className="w-16" />
             <col className="w-20" />
-            <col className="w-24" />
           </colgroup>
           <TableHeader className="sticky top-0 z-10">
             <TableRow className="bg-muted hover:bg-muted">
@@ -527,7 +527,7 @@ export default function IdleReportModal({
 
   return (
     <Dialog open onOpenChange={() => onClose()}>
-      <DialogContent className="max-w-5xl sm:max-w-5xl w-full h-[85vh] flex flex-col p-0 gap-0 overflow-hidden" showCloseButton={false}>
+      <DialogContent className="max-w-[90vw] sm:max-w-[90vw] w-full h-[85vh] flex flex-col p-0 gap-0 overflow-hidden" showCloseButton={false}>
         <DialogHeader className="px-6 pt-5 pb-3 border-b border-border shrink-0">
           <div className="flex items-start justify-between gap-4">
             <div>

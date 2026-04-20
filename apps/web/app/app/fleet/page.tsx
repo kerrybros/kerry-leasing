@@ -84,9 +84,9 @@ export default function FleetOverviewPage() {
           <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Fleet Totals</h2>
           <p className="text-xs text-muted-foreground">{dateLabel}</p>
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+        <div className="grid grid-cols-3 gap-3">
           {(fleet.telematicsLoading || fleet.repairsLoading) ? (
-            Array.from({ length: 10 }).map((_, i) => <SkeletonKpiCard key={i} />)
+            Array.from({ length: 9 }).map((_, i) => <SkeletonKpiCard key={i} />)
           ) : (
             <>
               <KpiCard label="Total Fleet Miles" value={fleet.fleetKpis.totalMiles.toLocaleString()} subtext="miles" />

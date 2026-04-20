@@ -194,7 +194,7 @@ export function TelematicsTrendsView({
         </div>
 
         {/* RIGHT COLUMN — MONTHLY TABLE (sticky) */}
-        <div className="lg:col-span-4" style={{ position: 'sticky', top: 16, alignSelf: 'start' }}>
+        <div className="lg:col-span-4" style={{ position: 'sticky', top: 72, alignSelf: 'start' }}>
           <Card className="flex flex-col overflow-hidden">
             <CardHeader className="pb-1 pt-2 px-3 flex-row items-center justify-between space-y-0">
               <CardTitle className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
