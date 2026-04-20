@@ -1,11 +1,12 @@
 'use client';
 
 import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
-import { ClipboardCheck, AlertCircle, CheckCircle2, Clock, Search, ExternalLink, ChevronRight } from 'lucide-react';
+import { ClipboardCheck, AlertCircle, CheckCircle2, Search, ExternalLink, ChevronRight, FileText, Loader2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/Skeleton';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
   useWhiparoundDefects,
   useWhiparoundInspections,
@@ -65,7 +66,7 @@ const STATUS_CONFIG: Record<string, { label: string; className: string }> = {
   },
   in_progress: {
     label: 'In Progress',
-    className: 'bg-teal-100 text-teal-800 dark:bg-teal-900/40 dark:text-teal-300',
+    className: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300',
   },
   corrected: {
     label: 'Corrected',
@@ -78,7 +79,7 @@ const STATUS_CONFIG: Record<string, { label: string; className: string }> = {
 };
 
 function StatusBadge({ status }: { status: string | null }) {
-  const key = status?.toLowerCase() ?? '';
+  const key = status?.toLowerCase().replace(/[\s-]+/g, '_') ?? '';
   const cfg = STATUS_CONFIG[key] ?? { label: status ?? '—', className: 'bg-muted text-muted-foreground' };
   return (
     <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${cfg.className}`}>
@@ -101,8 +102,8 @@ function PassBadge({ passed }: { passed: boolean | null }) {
       </span>
     );
   return (
-    <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold bg-muted text-muted-foreground">
-      <Clock className="h-3 w-3" /> —
+    <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold bg-muted text-muted-foreground">
+      —
     </span>
   );
 }
@@ -116,7 +117,6 @@ const STATUS_TABS = [
   { key: 'new', label: 'New' },
   { key: 'in_progress', label: 'In Progress' },
   { key: 'corrected', label: 'Corrected' },
-  { key: 'no_correction_needed', label: 'No Correction Needed' },
 ] as const;
 
 const WHIPAROUND_PAGE_SIZE = 100;
@@ -148,12 +148,14 @@ function TableSkeleton({ cols, rows = 8 }: { cols: number; rows?: number }) {
 function DefectsTable({
   defects,
   isLoading,
+  onOpenPdf,
 }: {
   defects: WhiparoundDefect[];
   isLoading: boolean;
+  onOpenPdf: (url: string, label: string) => void;
 }) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const cols = ['', 'Defect', 'Status', 'Created', 'Asset', 'Team', 'Priority', 'Type', 'Repeated', 'Inspection', 'Assignee'];
+  const cols = ['', 'Defect', 'Status', 'Created', 'Asset', 'Priority', 'Type', 'Inspection'];
   const colCount = cols.length;
 
   return (
@@ -181,12 +183,13 @@ function DefectsTable({
               </td>
             </tr>
           ) : (
-            defects.flatMap((d) => {
+            defects.flatMap((d, idx) => {
               const open = expandedId === d.id;
+              const stripe = idx % 2 === 1 ? 'bg-muted/50' : '';
               const mainRow = (
                 <tr
                   key={d.id}
-                  className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors"
+                  className={`border-b border-border last:border-0 hover:bg-muted/60 transition-colors ${stripe}`}
                 >
                   <td className="py-2 pr-2 align-middle">
                     <button
@@ -209,16 +212,13 @@ function DefectsTable({
                     {formatDate(d.defectCreatedAt)}
                   </td>
                   <td className="py-3 pr-6 font-medium">{d.assetName ?? '—'}</td>
-                  <td className="py-3 pr-6 text-muted-foreground">{d.teamName ?? '—'}</td>
                   <td className="py-3 pr-6 text-muted-foreground">{d.defectPriority ?? 'Undefined'}</td>
                   <td className="py-3 pr-6 text-muted-foreground">{d.defectType ?? '—'}</td>
-                  <td className="py-3 pr-6 text-center text-muted-foreground">{d.repeatedTimes ?? 0}</td>
                   <td className="py-3 pr-6 text-muted-foreground">
                     {d.inspectionId ? (
                       <span className="font-mono text-xs text-primary">{d.inspectionId}</span>
                     ) : '—'}
                   </td>
-                  <td className="py-3 pr-6 text-muted-foreground">{d.assignee ?? '—'}</td>
                 </tr>
               );
 
@@ -226,7 +226,7 @@ function DefectsTable({
 
               const ins = d.inspection;
               const detailRow = (
-                <tr key={`${d.id}-detail`} className="border-b border-border bg-muted/20">
+                <tr key={`${d.id}-detail`} className="border-b border-border bg-muted/50">
                   <td colSpan={colCount} className="py-4 px-2 pl-10">
                     <div className="grid gap-3 sm:grid-cols-2 max-w-4xl text-sm">
                       <div>
@@ -242,14 +242,18 @@ function DefectsTable({
                           <span className="text-muted-foreground">Updated: </span>
                           {formatDateTime(d.defectUpdatedAt)}
                         </p>
-                        <p>
-                          <span className="text-muted-foreground">Created by: </span>
-                          {d.createdBy ?? '—'}
-                        </p>
-                        <p>
-                          <span className="text-muted-foreground">Driver (defect): </span>
-                          {d.driverName ?? '—'}
-                        </p>
+                        {d.createdBy && (
+                          <p>
+                            <span className="text-muted-foreground">Created by: </span>
+                            {d.createdBy}
+                          </p>
+                        )}
+                        {d.driverName && (
+                          <p>
+                            <span className="text-muted-foreground">Driver: </span>
+                            {d.driverName}
+                          </p>
+                        )}
                       </div>
                       <div className="sm:col-span-2 rounded-md border border-border bg-background/50 p-3">
                         <p className="text-xs font-semibold uppercase text-muted-foreground mb-2">Linked inspection</p>
@@ -276,16 +280,15 @@ function DefectsTable({
                               <PassBadge passed={ins.passed} />
                             </span>
                             {ins.pdfUrl ? (
-                              <a
-                                href={ins.pdfUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1 text-primary hover:underline"
+                              <button
+                                type="button"
+                                onClick={() => onOpenPdf(ins.pdfUrl!, `DVIR #${ins.whiparoundId}`)}
+                                className="inline-flex items-center gap-1 text-primary hover:underline text-sm"
                               >
-                                Open DVIR PDF <ExternalLink className="h-3 w-3" />
-                              </a>
+                                <FileText className="h-3.5 w-3.5" /> View DVIR PDF
+                              </button>
                             ) : (
-                              <span className="text-muted-foreground">No PDF URL</span>
+                              <span className="text-muted-foreground">No PDF</span>
                             )}
                           </div>
                         ) : (
@@ -315,11 +318,15 @@ function DefectsTable({
 function InspectionsTable({
   inspections,
   isLoading,
+  onOpenPdf,
 }: {
   inspections: WhiparoundInspection[];
   isLoading: boolean;
+  onOpenPdf: (url: string, label: string) => void;
 }) {
-  const cols = ['Inspection ID', 'Driver', 'Asset', 'Date', 'Duration', 'Result', 'PDF'];
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const cols = ['', 'Inspection', 'Driver', 'Asset', 'Date', 'Duration', 'Result', 'PDF'];
+  const colCount = cols.length;
 
   return (
     <div className="overflow-x-auto">
@@ -327,7 +334,10 @@ function InspectionsTable({
         <thead>
           <tr className="border-b border-border">
             {cols.map((h) => (
-              <th key={h} className="text-left py-2 font-medium text-muted-foreground whitespace-nowrap pr-6">
+              <th
+                key={h || 'expand'}
+                className={`text-left py-2 font-medium text-muted-foreground whitespace-nowrap ${h ? 'pr-6' : 'w-10 pr-2'}`}
+              >
                 {h}
               </th>
             ))}
@@ -335,42 +345,98 @@ function InspectionsTable({
         </thead>
         <tbody>
           {isLoading ? (
-            <TableSkeleton cols={cols.length} />
+            <TableSkeleton cols={colCount} />
           ) : inspections.length === 0 ? (
             <tr>
-              <td colSpan={cols.length} className="py-12 text-center text-sm text-muted-foreground">
+              <td colSpan={colCount} className="py-12 text-center text-sm text-muted-foreground">
                 No inspections found.
               </td>
             </tr>
           ) : (
-            inspections.map((ins) => (
-              <tr key={ins.id} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
-                <td className="py-3 pr-6 font-mono text-xs text-primary">{ins.whiparoundId}</td>
-                <td className="py-3 pr-6">{ins.driverName ?? '—'}</td>
-                <td className="py-3 pr-6 font-medium">{ins.assetId ?? '—'}</td>
-                <td className="py-3 pr-6 text-muted-foreground whitespace-nowrap">
-                  {formatDateTime(ins.inspectedAt)}
-                </td>
-                <td className="py-3 pr-6 text-muted-foreground">{formatDuration(ins.durationSec)}</td>
-                <td className="py-3 pr-6">
-                  <PassBadge passed={ins.passed} />
-                </td>
-                <td className="py-3 pr-6">
-                  {ins.pdfUrl ? (
-                    <a
-                      href={ins.pdfUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
-                    >
-                      PDF <ExternalLink className="h-3 w-3" />
-                    </a>
-                  ) : (
-                    <span className="text-muted-foreground text-xs">—</span>
-                  )}
-                </td>
-              </tr>
-            ))
+            inspections.flatMap((ins, idx) => {
+              const open = expandedId === ins.id;
+              const stripe = idx % 2 === 1 ? 'bg-muted/50' : '';
+              const hasDefects = ins.defects.length > 0;
+
+              const mainRow = (
+                <tr
+                  key={ins.id}
+                  className={`border-b border-border last:border-0 hover:bg-muted/60 transition-colors ${stripe}`}
+                >
+                  <td className="py-2 pr-2 align-middle">
+                    {hasDefects ? (
+                      <button
+                        type="button"
+                        aria-expanded={open}
+                        aria-label={open ? 'Collapse defects' : 'Expand defects'}
+                        className="p-1 rounded-md hover:bg-muted text-muted-foreground"
+                        onClick={() => setExpandedId(open ? null : ins.id)}
+                      >
+                        <ChevronRight className={`h-4 w-4 transition-transform ${open ? 'rotate-90' : ''}`} />
+                      </button>
+                    ) : (
+                      <span className="w-6 inline-block" />
+                    )}
+                  </td>
+                  <td className="py-3 pr-6 font-mono text-xs text-primary">{ins.whiparoundId}</td>
+                  <td className="py-3 pr-6">{ins.driverName ?? '—'}</td>
+                  <td className="py-3 pr-6 font-medium">{ins.assetId ?? '—'}</td>
+                  <td className="py-3 pr-6 text-muted-foreground whitespace-nowrap">
+                    {formatDateTime(ins.inspectedAt)}
+                  </td>
+                  <td className="py-3 pr-6 text-muted-foreground">{formatDuration(ins.durationSec)}</td>
+                  <td className="py-3 pr-6">
+                    <PassBadge passed={ins.passed} />
+                  </td>
+                  <td className="py-3 pr-6">
+                    {ins.pdfUrl ? (
+                      <button
+                        type="button"
+                        onClick={() => onOpenPdf(ins.pdfUrl!, `DVIR #${ins.whiparoundId}`)}
+                        className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                      >
+                        <FileText className="h-3 w-3" /> View
+                      </button>
+                    ) : (
+                      <span className="text-muted-foreground text-xs">—</span>
+                    )}
+                  </td>
+                </tr>
+              );
+
+              if (!open || !hasDefects) return [mainRow];
+
+              const defectRow = (
+                <tr key={`${ins.id}-defects`} className="border-b border-border bg-muted/50">
+                  <td colSpan={colCount} className="py-3 px-2 pl-10">
+                    <p className="text-xs font-semibold uppercase text-muted-foreground mb-2">
+                      Defects ({ins.defects.length})
+                    </p>
+                    <div className="flex flex-col gap-1.5">
+                      {ins.defects.map((d) => (
+                        <div key={d.id} className="flex items-start gap-3 text-sm rounded-md border border-border bg-background/60 px-3 py-2">
+                          <span className="font-mono text-xs text-primary shrink-0 mt-0.5">
+                            {d.defectRef ?? `#${d.whiparoundId}`}
+                          </span>
+                          <span className="font-medium shrink-0">{d.defectName ?? '—'}</span>
+                          {d.description && (
+                            <span className="text-muted-foreground text-xs truncate">{d.description}</span>
+                          )}
+                          <div className="ml-auto flex items-center gap-2 shrink-0">
+                            {d.defectPriority && (
+                              <span className="text-xs text-muted-foreground">{d.defectPriority}</span>
+                            )}
+                            <StatusBadge status={d.status} />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </td>
+                </tr>
+              );
+
+              return [mainRow, defectRow];
+            })
           )}
         </tbody>
       </table>
@@ -389,12 +455,23 @@ export default function WhiparoundPage() {
   const [view, setView] = useState<'defects' | 'inspections'>('defects');
   const [defectPage, setDefectPage] = useState(0);
   const [inspPage, setInspPage] = useState(0);
+  const [pdfModal, setPdfModal] = useState<{ url: string; label: string } | null>(null);
+  const [pdfLoading, setPdfLoading] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const openPdf = useCallback((url: string, label: string) => {
+    setPdfModal({ url, label });
+    setPdfLoading(true);
+  }, []);
 
   const handleSearch = useCallback((val: string) => {
     setSearch(val);
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => setDeferredSearch(val), 300);
+  }, []);
+
+  useEffect(() => {
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
   }, []);
 
   useEffect(() => {
@@ -419,8 +496,8 @@ export default function WhiparoundPage() {
     [inspPage]
   );
 
-  const { data: defectData, isLoading: defectsLoading } = useWhiparoundDefects(defectFilters);
-  const { data: inspData, isLoading: inspLoading } = useWhiparoundInspections(inspectionFilters);
+  const { data: defectData, isPending: defectsLoading } = useWhiparoundDefects(defectFilters);
+  const { data: inspData, isPending: inspLoading } = useWhiparoundInspections(inspectionFilters);
   const { data: syncStatus } = useWhiparoundSyncStatus();
 
   const statusCounts = defectData?.statusCounts ?? {};
@@ -544,7 +621,7 @@ export default function WhiparoundPage() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <DefectsTable defects={defects} isLoading={defectsLoading} />
+              <DefectsTable defects={defects} isLoading={defectsLoading} onOpenPdf={openPdf} />
               {defectData && defectData.total > 0 && (
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between pt-4 border-t border-border mt-2">
                   <p className="text-xs text-muted-foreground">
@@ -595,7 +672,7 @@ export default function WhiparoundPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <InspectionsTable inspections={inspections} isLoading={inspLoading} />
+            <InspectionsTable inspections={inspections} isLoading={inspLoading} onOpenPdf={openPdf} />
             {inspData && inspData.total > 0 && (
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between pt-4 border-t border-border mt-2">
                 <p className="text-xs text-muted-foreground">
@@ -630,6 +707,53 @@ export default function WhiparoundPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* PDF viewer modal */}
+      <Dialog open={!!pdfModal} onOpenChange={(open) => { if (!open) { setPdfModal(null); setPdfLoading(false); } }}>
+        <DialogContent
+          className="max-w-5xl sm:max-w-5xl w-full h-[85vh] p-0 gap-0 flex flex-col overflow-hidden"
+          showCloseButton={false}
+        >
+          <DialogHeader className="flex-row items-center justify-between px-4 py-3 border-b border-border shrink-0">
+            <DialogTitle className="text-sm font-medium">{pdfModal?.label ?? 'DVIR PDF'}</DialogTitle>
+            <div className="flex items-center gap-2">
+              {pdfModal?.url && (
+                <a
+                  href={`/api/whiparound/pdf?url=${encodeURIComponent(pdfModal.url)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" /> Open in tab
+                </a>
+              )}
+              <button
+                type="button"
+                onClick={() => { setPdfModal(null); setPdfLoading(false); }}
+                className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                aria-label="Close"
+              >
+                ✕
+              </button>
+            </div>
+          </DialogHeader>
+          <div className="relative flex-1 w-full">
+            {pdfLoading && (
+              <div className="absolute inset-0 flex items-center justify-center bg-background/80 z-10">
+                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+              </div>
+            )}
+            {pdfModal?.url && (
+              <iframe
+                src={`/api/whiparound/pdf?url=${encodeURIComponent(pdfModal.url)}`}
+                className="w-full h-full border-0"
+                title={pdfModal.label}
+                onLoad={() => setPdfLoading(false)}
+              />
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

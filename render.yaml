@@ -27,3 +27,19 @@ services:
         sync: false
       - key: CRON_SECRET
         sync: false
+
+  - type: cron
+    name: kerry-whiparound-sync
+    runtime: node
+    region: oregon
+    plan: starter
+    schedule: "0 */4 * * *"  # every 4 hours
+    buildCommand: cd apps/api && pnpm install && pnpm prisma:app:generate && pnpm prisma:repair:generate && pnpm build
+    startCommand: cd apps/api && node dist/scripts/run-whiparound-daily.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: APP_DATABASE_URL
+        sync: false
+      - key: CREDENTIALS_ENCRYPTION_KEY
+        sync: false

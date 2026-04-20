@@ -47,7 +47,21 @@ router.get('/defects', async (req: AuthRequest, res) => {
 
     // Build where clause
     const where: Record<string, unknown> = { clerkOrgId };
-    if (status) where.status = status;
+    if (status) {
+      // Find all raw DB status strings that normalize to the requested key.
+      // This handles whatever casing/spacing Whiparound happened to return.
+      const distinctStatuses = await appPrisma.whiparoundDefect.findMany({
+        where: { clerkOrgId },
+        select: { status: true },
+        distinct: ['status'],
+      });
+      const matchingRaw = distinctStatuses
+        .map((r) => r.status)
+        .filter((s): s is string =>
+          s != null && s.toLowerCase().replace(/[\s-]+/g, '_') === status
+        );
+      where.status = matchingRaw.length > 0 ? { in: matchingRaw } : '__no_match__';
+    }
     if (teamId) where.teamId = Number(teamId);
     if (defectType) where.defectType = defectType;
     if (priority) where.defectPriority = priority;
@@ -147,8 +161,8 @@ router.get('/defects', async (req: AuthRequest, res) => {
     const counts: Record<string, number> = {};
     let totalAll = 0;
     for (const row of statusCounts) {
-      const key = row.status ?? 'unknown';
-      counts[key] = row._count.id;
+      const key = (row.status ?? 'unknown').toLowerCase().replace(/[\s-]+/g, '_');
+      counts[key] = (counts[key] ?? 0) + row._count.id;
       totalAll += row._count.id;
     }
     counts.all = totalAll;
@@ -198,7 +212,7 @@ router.get('/inspections', async (req: AuthRequest, res) => {
     if (assetId) where.assetId = Number(assetId);
     if (passed !== undefined) where.passed = passed === 'true';
 
-    const [inspections, total] = await Promise.all([
+    const [inspectionRows, total] = await Promise.all([
       appPrisma.whiparoundInspection.findMany({
         where,
         orderBy: { inspectedAt: 'desc' },
@@ -222,6 +236,39 @@ router.get('/inspections', async (req: AuthRequest, res) => {
       }),
       appPrisma.whiparoundInspection.count({ where }),
     ]);
+
+    // Attach defects to each inspection
+    const inspectionWaIds = inspectionRows.map((i) => i.whiparoundId);
+    const defectRows = inspectionWaIds.length > 0
+      ? await appPrisma.whiparoundDefect.findMany({
+          where: { clerkOrgId, inspectionId: { in: inspectionWaIds } },
+          select: {
+            id: true,
+            whiparoundId: true,
+            defectRef: true,
+            inspectionId: true,
+            defectName: true,
+            description: true,
+            status: true,
+            defectPriority: true,
+            defectType: true,
+            assetName: true,
+          },
+          orderBy: { defectCreatedAt: 'asc' },
+        })
+      : [];
+
+    const defectsByInspectionId = new Map<number, typeof defectRows>();
+    for (const d of defectRows) {
+      if (d.inspectionId == null) continue;
+      if (!defectsByInspectionId.has(d.inspectionId)) defectsByInspectionId.set(d.inspectionId, []);
+      defectsByInspectionId.get(d.inspectionId)!.push(d);
+    }
+
+    const inspections = inspectionRows.map((i) => ({
+      ...i,
+      defects: defectsByInspectionId.get(i.whiparoundId) ?? [],
+    }));
 
     res.json({ inspections, total, limit, offset });
   } catch (error: any) {

@@ -258,7 +258,7 @@ async function syncDefects(
         driverName: textField(raw.driver_name),
         defectName: textField(raw.name),
         description: textField(raw.description),
-        status: textField(raw.status),
+        status: textField(raw.status)?.toLowerCase().replace(/[\s-]+/g, '_') ?? null,
         defectPriority: textField(raw.priority),
         defectType: textField(raw.type),
         severity: textField(raw.severity),

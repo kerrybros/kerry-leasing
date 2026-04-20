@@ -221,6 +221,19 @@ export type WhiparoundDefectsResponse = {
   statusCounts: Record<string, number>;
 };
 
+export type WhiparoundInspectionDefect = {
+  id: string;
+  whiparoundId: number;
+  defectRef: string | null;
+  inspectionId: number | null;
+  defectName: string | null;
+  description: string | null;
+  status: string | null;
+  defectPriority: string | null;
+  defectType: string | null;
+  assetName: string | null;
+};
+
 export type WhiparoundInspection = {
   id: string;
   whiparoundId: number;
@@ -235,6 +248,7 @@ export type WhiparoundInspection = {
   durationSec: number | null;
   inspectedAt: string;
   endedOnDeviceAt: string | null;
+  defects: WhiparoundInspectionDefect[];
 };
 
 export type WhiparoundInspectionsResponse = {
