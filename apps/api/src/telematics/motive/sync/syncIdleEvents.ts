@@ -56,13 +56,13 @@ export async function syncIdleEvents(
           }
         });
 
-        // Compute idle fuel from fuel tank readings — API's idle_fuel field is always null.
-        // Units: gallons (Motive imperial mode, X-Metric-Units: false).
+        // Compute idle fuel from cumulative fuel counters — veh_fuel_end > veh_fuel_start.
+        // API's idle_fuel field is always null so we derive it ourselves.
         const vehFuelStart = record.veh_fuel_start ?? null;
         const vehFuelEnd = record.veh_fuel_end ?? null;
         const computedIdleFuel =
-          vehFuelStart != null && vehFuelEnd != null && vehFuelStart >= vehFuelEnd
-            ? vehFuelStart - vehFuelEnd
+          vehFuelStart != null && vehFuelEnd != null
+            ? Math.max(0, vehFuelEnd - vehFuelStart)
             : null;
 
         const recordData: any = {

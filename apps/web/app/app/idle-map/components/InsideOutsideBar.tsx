@@ -51,7 +51,7 @@ export default function InsideOutsideBar({ events, loading, onViewGeofenceReport
       {/* Centered header with view link */}
       <div className="flex flex-col items-center gap-0.5">
         <p className="text-xs font-semibold text-foreground text-center">
-          Idling in geofence versus idling not in geofence or outside of geofence
+          Idling in geofence vs. outside
         </p>
         {onViewGeofenceReport && (
           <Button
@@ -68,11 +68,12 @@ export default function InsideOutsideBar({ events, loading, onViewGeofenceReport
       {/* Proportional bar */}
       <div className="flex items-center gap-2">
         <span className="text-[10px] text-muted-foreground w-20 text-right shrink-0">In geofence</span>
-        <div className="flex-1 h-3 rounded-full overflow-hidden bg-muted flex">
+        <div className="flex-1 h-3 rounded-full overflow-hidden flex">
           <div
-            className="h-full rounded-full bg-primary transition-all duration-500"
+            className="h-full bg-primary transition-all duration-500"
             style={{ width: `${stats.inPct}%` }}
           />
+          <div className="h-full flex-1 bg-slate-300 dark:bg-slate-600" />
         </div>
         <span className="text-[10px] text-muted-foreground w-24 shrink-0">Outside geofence</span>
       </div>

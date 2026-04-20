@@ -623,10 +623,9 @@ router.get('/geofences', clerkAuthMiddleware, requireOrg, async (req: AuthReques
 router.get('/idle-events', clerkAuthMiddleware, requireOrg, async (req: AuthRequest, res) => {
   try {
     const clerkOrgId = req.auth!.orgId!;
-    const { startDate, endDate, limit: limitParam } = req.query as {
-      startDate?: string; endDate?: string; limit?: string;
+    const { startDate, endDate } = req.query as {
+      startDate?: string; endDate?: string;
     };
-    const eventLimit = Math.min(Math.max(parseInt(limitParam || '500', 10) || 500, 1), 2000);
     const appPrisma = getAppPrisma();
 
     const providerAccount = await appPrisma.telematicsProviderAccount.findUnique({
@@ -677,7 +676,6 @@ router.get('/idle-events', clerkAuthMiddleware, requireOrg, async (req: AuthRequ
           driverLastName: true,
           endType: true,
         },
-        take: 2000,
       });
       events = rows
         .filter(r => !r.vin || includedVins.has(r.vin))
@@ -724,7 +722,6 @@ router.get('/idle-events', clerkAuthMiddleware, requireOrg, async (req: AuthRequ
           durationMilliseconds: true,
           fuelConsumedMilliliters: true,
         },
-        take: 2000,
       });
       // Build set of included Samsara assetIds via VIN cross-reference
       const includedAssetIds = new Set(
@@ -777,7 +774,7 @@ router.get('/idle-events', clerkAuthMiddleware, requireOrg, async (req: AuthRequ
       totalIdleFuel: parseFloat(totalIdleFuel.toFixed(2)),
       repeatOffenders,
       longestEvents,
-      events: events.slice(0, eventLimit),
+      events,
     });
   } catch (error: any) {
     console.error('[Fleet] Error fetching idle events:', error);

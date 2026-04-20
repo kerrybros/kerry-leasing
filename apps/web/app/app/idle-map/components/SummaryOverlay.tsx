@@ -48,15 +48,7 @@ export default function SummaryOverlay({ events, loading, dieselPrice, dateRange
     const insideCount = events.filter(e => e.geofenceId != null).length;
     const pctInside = totalEvents > 0 ? Math.round((insideCount / totalEvents) * 100) : 0;
 
-    // Worst unit by total minutes
-    const byUnit = new Map<string, number>();
-    events.forEach(e => {
-      const k = e.groupKey;
-      byUnit.set(k, (byUnit.get(k) ?? 0) + (e.durationMinutes ?? 0));
-    });
-    const worst = [...byUnit.entries()].sort((a, b) => b[1] - a[1])[0];
-
-    return { totalEvents, totalMinutes, totalFuel, estCost, pctInside, worst };
+    return { totalEvents, totalMinutes, totalFuel, estCost, pctInside };
   }, [events, dieselPrice]);
 
   const dailyBars = useMemo(
@@ -90,13 +82,6 @@ export default function SummaryOverlay({ events, loading, dieselPrice, dateRange
               <MetricChip label="Est. Cost" value={costStr(stats.totalFuel, dieselPrice)} />
               <MetricChip label="Inside Geofence" value={`${stats.pctInside}%`} className="col-span-2" />
             </div>
-
-            {/* Worst unit badge */}
-            {stats.worst && (
-              <div className="text-[10px] text-amber-600 dark:text-amber-400 font-medium truncate">
-                Worst: {stats.worst[0]} — {formatDuration(stats.worst[1])}
-              </div>
-            )}
 
             {/* Mini daily bar chart */}
             {dailyBars.length > 0 && (

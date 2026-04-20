@@ -1,10 +1,10 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import Map, { Layer, Marker, Source, type MapRef, type MapLayerMouseEvent } from 'react-map-gl/maplibre';
+import Map, { Layer, Popup, Source, type MapRef, type MapLayerMouseEvent } from 'react-map-gl/maplibre';
 import type { ExpressionSpecification } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { MapPin } from 'lucide-react';
+import { MapPin, Loader2 } from 'lucide-react';
 
 import type { EnrichedIdleEvent, Geofence, ViewMode, BubbleMode } from '../types';
 
@@ -127,6 +127,7 @@ export default function IdleMapCanvas({
   const mapRef = useRef<MapRef>(null);
   const mapStyle = useMapTheme();
   const [mapLoaded, setMapLoaded] = useState(false);
+  const [geofenceTooltip, setGeofenceTooltip] = useState<{ lng: number; lat: number; name: string; category: string | null } | null>(null);
 
   const eventsWithCoords = useMemo(() => events.filter(e => e.lat != null && e.lon != null), [events]);
 
@@ -143,14 +144,6 @@ export default function IdleMapCanvas({
   );
 
   const geofenceGeoJSON = useMemo(() => geofencesToGeoJSON(geofences), [geofences]);
-
-  // Find highest-minute cluster candidate for pulsing marker
-  const topEvent = useMemo(() => {
-    if (!isClustered || eventsWithCoords.length === 0) return null;
-    return eventsWithCoords.reduce((best, e) =>
-      (e.durationMinutes ?? 0) > (best.durationMinutes ?? 0) ? e : best
-    );
-  }, [eventsWithCoords, isClustered]);
 
   const handleMapLoad = useCallback(() => {
     setMapLoaded(true);
@@ -199,39 +192,47 @@ export default function IdleMapCanvas({
     return () => { map.off('idle', handler); };
   }, [mapLoaded, eventsWithCoords.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const handleMouseMove = useCallback((e: MapLayerMouseEvent) => {
+    if (!mapRef.current || !geofenceVisible) { setGeofenceTooltip(null); return; }
+    const map = mapRef.current.getMap();
+    if (!map.getLayer('geofence-fill')) { setGeofenceTooltip(null); return; }
+    const features = map.queryRenderedFeatures(e.point, { layers: ['geofence-fill'] });
+    if (features.length > 0) {
+      const props = features[0]!.properties as any;
+      setGeofenceTooltip({ lng: e.lngLat.lng, lat: e.lngLat.lat, name: props.name ?? '', category: props.category ?? null });
+    } else {
+      setGeofenceTooltip(null);
+    }
+  }, [geofenceVisible]);
+
+  const handleMouseLeave = useCallback(() => setGeofenceTooltip(null), []);
+
   const handleMapClick = useCallback(
     (e: MapLayerMouseEvent) => {
       if (!mapRef.current) return;
       const map = mapRef.current.getMap();
 
       if (isClustered) {
-        // Cluster bubble: retrieve the actual leaf event IDs so the modal is scoped correctly.
         const clusterFeatures = map.queryRenderedFeatures(e.point, { layers: ['cluster-circles'] });
         if (clusterFeatures.length > 0) {
           const f = clusterFeatures[0]!;
           const clusterId = (f.properties as any).cluster_id;
           const pointCount: number = (f.properties as any).point_count ?? 0;
           const source = map.getSource('clustered-source') as any;
-          // Cap at 500 leaves per call; clusters larger than this are rare in fleet idle data
-          source.getClusterLeaves(clusterId, Math.min(pointCount, 500), 0, (err: unknown, leaves: any[]) => {
-            if (err || !leaves || leaves.length === 0) {
-              // Fallback: open full report
-              onClusterClick('');
-              return;
-            }
-            const ids = leaves.map((l: any) => String(l.properties?.id ?? '')).filter(Boolean);
-            if (ids.length > 0) onClusterEventsClick(ids);
-            else onClusterClick('');
-          });
+          source.getClusterLeaves(clusterId, Math.min(pointCount, 2000), 0)
+            .then((leaves: any[]) => {
+              if (!leaves || leaves.length === 0) { onClusterClick(''); return; }
+              const ids = leaves.map((l: any) => String(l.properties?.id ?? '')).filter(Boolean);
+              if (ids.length > 0) onClusterEventsClick(ids);
+              else onClusterClick('');
+            })
+            .catch(() => onClusterClick(''));
           return;
         }
-        // Individual un-clustered point: scope to that point's groupKey.
         const individualFeatures = map.queryRenderedFeatures(e.point, { layers: ['individual-circles'] });
         if (individualFeatures.length > 0) {
-          const f = individualFeatures[0]!;
-          const groupKey = (f.properties as any).groupKey ?? '';
-          if (groupKey) onClusterClick(groupKey);
-          else onEventClick((f.properties as any).id);
+          const id = String((individualFeatures[0]!.properties as any).id ?? '');
+          if (id) onEventClick(id);
           return;
         }
       }
@@ -239,27 +240,18 @@ export default function IdleMapCanvas({
       if (isRaw) {
         const features = map.queryRenderedFeatures(e.point, { layers: ['raw-circles'] });
         if (features.length > 0) {
-          onEventClick((features[0]!.properties as any).id);
+          onEventClick(String((features[0]!.properties as any).id ?? ''));
         }
         return;
       }
 
       if (isHeatmap) {
-        // At zoom >= 13 the heatmap fades out and circle points appear — query both layers.
+        // Only individual circles (zoom ≥ 13) are clickable — the heatmap density layer
+        // doesn't expose per-event data, so we don't attempt to hit-test it.
         const circleFeatures = map.queryRenderedFeatures(e.point, { layers: ['heatmap-circles'] });
         if (circleFeatures.length > 0) {
-          const f = circleFeatures[0]!;
-          const groupKey = (f.properties as any)?.groupKey;
-          if (groupKey) onClusterClick(groupKey);
-          else onEventClick((f.properties as any).id);
-          return;
-        }
-        const heatFeatures = map.queryRenderedFeatures(e.point, { layers: ['heatmap-layer'] });
-        if (heatFeatures.length > 0) {
-          const f = heatFeatures[0]!;
-          const groupKey = (f.properties as any)?.groupKey;
-          if (groupKey) onClusterClick(groupKey);
-          else onEventClick((f.properties as any).id);
+          const id = String((circleFeatures[0]!.properties as any).id ?? '');
+          if (id) onEventClick(id);
         }
       }
     },
@@ -274,12 +266,15 @@ export default function IdleMapCanvas({
         initialViewState={{ longitude: -83, latitude: 42, zoom: 6 }}
         style={{ width: '100%', height: '100%' }}
         onLoad={handleMapLoad}
+        attributionControl={false}
+        onMouseMove={handleMouseMove}
+        onMouseLeave={handleMouseLeave}
         interactiveLayerIds={
           isClustered
             ? ['cluster-circles', 'individual-circles']
             : isRaw
             ? ['raw-circles']
-            : ['heatmap-layer', 'heatmap-circles']
+            : ['heatmap-circles']
         }
         onClick={handleMapClick}
         cursor="pointer"
@@ -396,20 +391,6 @@ export default function IdleMapCanvas({
           </Source>
         )}
 
-        {/* Pulsing ring on highest-minute cluster */}
-        {isClustered && topEvent && (
-          <Marker longitude={topEvent.lon!} latitude={topEvent.lat!} anchor="center">
-            <div
-              className="rounded-full border-2 border-amber-400 pointer-events-none"
-              style={{
-                width: 52,
-                height: 52,
-                animation: 'pulse-ring 2s ease-out infinite',
-              }}
-            />
-          </Marker>
-        )}
-
         {/* ── Raw bubbles mode ───────────────────────────────── */}
         {isRaw && (
           <Source id="raw-source" type="geojson" data={pointsGeoJSON}>
@@ -426,7 +407,33 @@ export default function IdleMapCanvas({
             />
           </Source>
         )}
+
+        {geofenceTooltip && (
+          <Popup
+            longitude={geofenceTooltip.lng}
+            latitude={geofenceTooltip.lat}
+            closeButton={false}
+            closeOnClick={false}
+            anchor="bottom"
+            offset={12}
+            className="!p-0 !bg-transparent !shadow-none !border-none"
+          >
+            <div className="bg-card border border-border rounded-lg shadow-md px-3 py-2 text-xs pointer-events-none">
+              <p className="font-semibold text-foreground">{geofenceTooltip.name}</p>
+              {geofenceTooltip.category && (
+                <p className="text-muted-foreground mt-0.5">{geofenceTooltip.category}</p>
+              )}
+            </div>
+          </Popup>
+        )}
       </Map>
+
+      {/* ── Loading spinner ───────────────────────────────── */}
+      {loading && (
+        <div className="absolute inset-0 flex items-center justify-center bg-background/40 backdrop-blur-[2px] pointer-events-none">
+          <Loader2 className="w-8 h-8 text-primary animate-spin" />
+        </div>
+      )}
 
       {/* ── Empty / no-coords states ───────────────────────── */}
       {isEmpty && !noCoords && (
@@ -445,13 +452,6 @@ export default function IdleMapCanvas({
         </div>
       )}
 
-      <style>{`
-        @keyframes pulse-ring {
-          0%   { transform: scale(1);   opacity: 0.8; }
-          70%  { transform: scale(1.6); opacity: 0; }
-          100% { transform: scale(1.6); opacity: 0; }
-        }
-      `}</style>
     </div>
   );
 }

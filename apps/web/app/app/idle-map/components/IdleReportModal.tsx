@@ -1,7 +1,7 @@
 'use client';
 
 import { Fragment, useEffect, useMemo, useState } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -9,7 +9,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
-import { Download, ChevronDown, ChevronRight } from 'lucide-react';
+import { Download, ChevronDown, ChevronRight, X } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend,
 } from 'recharts';
@@ -143,7 +143,7 @@ function EventsTable({
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="overflow-x-auto">
+      <div>
         {/* table-fixed keeps column widths stable when sort changes cell content length */}
         <Table className="table-fixed w-full">
           <colgroup>
@@ -156,7 +156,7 @@ function EventsTable({
             <col className="w-20" />
             <col className="w-24" />
           </colgroup>
-          <TableHeader>
+          <TableHeader className="sticky top-0 z-10">
             <TableRow className="bg-muted hover:bg-muted">
               <SortTh k="unit">Unit</SortTh>
               <SortTh k="driver">Driver</SortTh>
@@ -233,6 +233,8 @@ function EventsTable({
 
 // ── Driver / Vehicle grouped tab ──────────────────────────────────────────────
 
+type GroupSortKey = 'key' | 'events' | 'minutes' | 'fuel' | 'cost' | 'insidePct';
+
 function GroupedTab({
   events,
   dieselPrice,
@@ -249,6 +251,28 @@ function GroupedTab({
   onExpandApplied?: () => void;
 }) {
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [sortKey, setSortKey] = useState<GroupSortKey>('minutes');
+  const [sortDir, setSortDir] = useState<SortDir>('desc');
+
+  function toggleSort(k: GroupSortKey) {
+    if (sortKey === k) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortKey(k); setSortDir('desc'); }
+  }
+
+  function GSortTh({ k, children, className }: { k: GroupSortKey; children: React.ReactNode; className?: string }) {
+    const active = sortKey === k;
+    return (
+      <TableHead
+        className={`cursor-pointer select-none text-xs hover:text-foreground whitespace-nowrap ${className ?? ''}`}
+        onClick={() => toggleSort(k)}
+      >
+        <span className="flex items-center gap-0.5">
+          {children}
+          {active && (sortDir === 'asc' ? ' ↑' : ' ↓')}
+        </span>
+      </TableHead>
+    );
+  }
 
   // When a drill-down key arrives, expand that row and notify parent to clear drilldown.
   // Clearing drilldown allows the same unit to be re-clicked from All Events and re-expand.
@@ -268,16 +292,28 @@ function GroupedTab({
       cur.totalFuel += e.idleFuelGallons ?? 0;
       map.set(k, cur);
     }
-    return [...map.entries()]
-      .map(([key, data]) => ({
-        key,
-        ...data,
-        insidePct: data.events.length > 0
-          ? Math.round((data.events.filter(e => e.geofenceId != null).length / data.events.length) * 100)
-          : 0,
-      }))
-      .sort((a, b) => b.totalMinutes - a.totalMinutes);
-  }, [events, getKey]);
+    const rows = [...map.entries()].map(([key, data]) => ({
+      key,
+      ...data,
+      insidePct: data.events.length > 0
+        ? Math.round((data.events.filter(e => e.geofenceId != null).length / data.events.length) * 100)
+        : 0,
+    }));
+
+    rows.sort((a, b) => {
+      let av: number | string = 0, bv: number | string = 0;
+      if (sortKey === 'key') { av = a.key; bv = b.key; }
+      else if (sortKey === 'events') { av = a.events.length; bv = b.events.length; }
+      else if (sortKey === 'minutes') { av = a.totalMinutes; bv = b.totalMinutes; }
+      else if (sortKey === 'fuel') { av = a.totalFuel; bv = b.totalFuel; }
+      else if (sortKey === 'cost') { av = a.totalFuel * dieselPrice; bv = b.totalFuel * dieselPrice; }
+      else if (sortKey === 'insidePct') { av = a.insidePct; bv = b.insidePct; }
+      if (av < bv) return sortDir === 'asc' ? -1 : 1;
+      if (av > bv) return sortDir === 'asc' ? 1 : -1;
+      return 0;
+    });
+    return rows;
+  }, [events, getKey, sortKey, sortDir, dieselPrice]);
 
   const totalMinutes = groups.reduce((s, g) => s + g.totalMinutes, 0);
   const totalFuel = groups.reduce((s, g) => s + g.totalFuel, 0);
@@ -291,16 +327,16 @@ function GroupedTab({
         {totalFuel > 0 && <span className="text-muted-foreground">{fuelStr(totalFuel)} · {costStr(totalFuel, dieselPrice)}</span>}
       </div>
 
-      <div className="overflow-x-auto">
+      <div>
         <Table>
-          <TableHeader>
+          <TableHeader className="sticky top-0 z-10">
             <TableRow className="bg-muted hover:bg-muted">
-              <TableHead className="text-xs">{label}</TableHead>
-              <TableHead className="text-xs">Events</TableHead>
-              <TableHead className="text-xs">Total Time</TableHead>
-              <TableHead className="text-xs">Fuel</TableHead>
-              <TableHead className="text-xs">Est. Cost</TableHead>
-              <TableHead className="text-xs">% In geofence</TableHead>
+              <GSortTh k="key">{label}</GSortTh>
+              <GSortTh k="events">Events</GSortTh>
+              <GSortTh k="minutes">Total Time</GSortTh>
+              <GSortTh k="fuel">Fuel</GSortTh>
+              <GSortTh k="cost">Est. Cost</GSortTh>
+              <GSortTh k="insidePct">% In geofence</GSortTh>
               <TableHead className="text-xs w-6"></TableHead>
             </TableRow>
           </TableHeader>
@@ -382,7 +418,7 @@ function GeofencesTab({ events, dieselPrice }: { events: EnrichedIdleEvent[]; di
     return [...rows, outsideRow];
   }, [events, dieselPrice]);
 
-  const chartData = groups.slice(0, 10).map(g => ({ name: g.name.length > 16 ? g.name.slice(0, 14) + '…' : g.name, minutes: g.totalMinutes }));
+  const chartData = groups.slice(0, 10).map(g => ({ name: g.name.length > 16 ? g.name.slice(0, 14) + '…' : g.name, fullName: g.name, minutes: g.totalMinutes }));
 
   const insideTotal = groups.filter(g => g.id !== '__outside__').reduce((s, g) => s + g.count, 0);
   const outsideTotal = groups.find(g => g.id === '__outside__')?.count ?? 0;
@@ -401,18 +437,18 @@ function GeofencesTab({ events, dieselPrice }: { events: EnrichedIdleEvent[]; di
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={chartData} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
               <CartesianGrid strokeDasharray="3 3" stroke={CHART_COLORS.grid} vertical={false} />
-              <XAxis dataKey="name" fontSize={10} tick={{ fill: CHART_COLORS.tick }} tickLine={false} axisLine={false} />
+              <XAxis dataKey="name" fontSize={10} tick={{ fill: CHART_COLORS.tick }} tickLine={false} axisLine={false} interval={0} />
               <YAxis fontSize={10} tick={{ fill: CHART_COLORS.tick }} tickLine={false} axisLine={false} />
-              <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v: unknown) => [`${v}m`, 'Idle']} />
+              <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v: unknown) => [`${v}m`, 'Idle']} labelFormatter={(_label, payload) => (payload?.[0]?.payload as { fullName?: string })?.fullName ?? _label} />
               <Bar dataKey="minutes" fill={CHART_COLORS.primary} radius={[3, 3, 0, 0]} isAnimationActive={false} />
             </BarChart>
           </ResponsiveContainer>
         </div>
       )}
 
-      <div className="overflow-x-auto">
+      <div>
         <Table>
-          <TableHeader>
+          <TableHeader className="sticky top-0 z-10">
             <TableRow className="bg-muted hover:bg-muted">
               <TableHead className="text-xs">Geofence</TableHead>
               <TableHead className="text-xs">Category</TableHead>
@@ -491,7 +527,7 @@ export default function IdleReportModal({
 
   return (
     <Dialog open onOpenChange={() => onClose()}>
-      <DialogContent className="max-w-5xl sm:max-w-5xl w-full h-[85vh] flex flex-col p-0 gap-0 overflow-hidden">
+      <DialogContent className="max-w-5xl sm:max-w-5xl w-full h-[85vh] flex flex-col p-0 gap-0 overflow-hidden" showCloseButton={false}>
         <DialogHeader className="px-6 pt-5 pb-3 border-b border-border shrink-0">
           <div className="flex items-start justify-between gap-4">
             <div>
@@ -501,44 +537,34 @@ export default function IdleReportModal({
                 <span className="text-xs text-muted-foreground">{scopedEvents.length.toLocaleString('en-US')} events</span>
               </div>
             </div>
-            <Button variant="outline" size="sm" className="gap-1.5 shrink-0" onClick={handleDownloadCSV}>
-              <Download className="w-3.5 h-3.5" />
-              CSV
-            </Button>
+            <div className="flex items-center gap-2 shrink-0">
+              <Button variant="outline" size="sm" className="gap-1.5" onClick={handleDownloadCSV}>
+                <Download className="w-3.5 h-3.5" />
+                CSV
+              </Button>
+              <DialogClose render={<Button variant="ghost" size="icon-sm" aria-label="Close" />}>
+                <X className="w-4 h-4" />
+              </DialogClose>
+            </div>
           </div>
         </DialogHeader>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col flex-1 min-h-0 overflow-hidden">
           <TabsList className="px-6 py-0 h-10 rounded-none border-b border-border bg-transparent justify-start shrink-0">
-            {/* data-active:* targets Base UI's active attribute; data-[state=active]:* would not match */}
-            <TabsTrigger
-              value="events"
-              className="text-xs rounded-none border-b-2 border-transparent data-active:border-primary data-active:text-foreground data-active:font-medium px-3"
-              onClick={() => setDrilldown(null)}
-            >
-              All Events
-            </TabsTrigger>
-            <TabsTrigger
-              value="drivers"
-              className="text-xs rounded-none border-b-2 border-transparent data-active:border-primary data-active:text-foreground data-active:font-medium px-3"
-              onClick={() => setDrilldown(null)}
-            >
-              Drivers
-            </TabsTrigger>
-            <TabsTrigger
-              value="vehicles"
-              className="text-xs rounded-none border-b-2 border-transparent data-active:border-primary data-active:text-foreground data-active:font-medium px-3"
-              onClick={() => setDrilldown(null)}
-            >
-              Vehicles
-            </TabsTrigger>
-            <TabsTrigger
-              value="geofences"
-              className="text-xs rounded-none border-b-2 border-transparent data-active:border-primary data-active:text-foreground data-active:font-medium px-3"
-              onClick={() => setDrilldown(null)}
-            >
-              Geofences
-            </TabsTrigger>
+            {(['events', 'drivers', 'vehicles', 'geofences'] as const).map((tab) => (
+              <TabsTrigger
+                key={tab}
+                value={tab}
+                className={`text-xs rounded-none border-b-2 px-3 transition-none ${
+                  activeTab === tab
+                    ? 'border-primary font-semibold text-foreground bg-muted'
+                    : 'border-transparent text-muted-foreground'
+                }`}
+                onClick={() => setDrilldown(null)}
+              >
+                {tab === 'events' ? 'All Events' : tab.charAt(0).toUpperCase() + tab.slice(1)}
+              </TabsTrigger>
+            ))}
           </TabsList>
 
           <ScrollArea className="flex-1 min-h-0">

@@ -60,10 +60,6 @@ export interface GeofencesResponse {
 }
 
 export interface FilterState {
-  vehicles: string[];   // unit numbers
-  drivers: string[];    // driver display names
-  minDurationMinutes: number;
-  endTypes: string[];   // 'vehicle_moving' | 'engine_stop'
   geofenceScope: 'all' | 'inside' | 'outside';
 }
 

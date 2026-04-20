@@ -95,13 +95,10 @@ export default function IdleMapClient() {
   );
 
   const [filters, setFilters] = useState<FilterState>({
-    vehicles: [],
-    drivers: [],
-    minDurationMinutes: 0,
-    endTypes: [],
     geofenceScope: 'all',
   });
 
+  const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [modalTarget, setModalTarget] = useState<ModalTarget | null>(null);
   const [unitPanelOpen, setUnitPanelOpen] = useState(true);
 
@@ -133,6 +130,7 @@ export default function IdleMapClient() {
   const handleGroupByChange = useCallback(
     (v: GroupBy) => {
       setGroupBy(v);
+      setSelectedKeys([]);
       updateParams({ groupBy: v });
     },
     [updateParams]
@@ -147,12 +145,12 @@ export default function IdleMapClient() {
   );
 
   // --- API Fetches ---
-  const { data: eventsData, isLoading: eventsLoading } = useQuery<IdleEventsResponse>({
+  const { data: eventsData, isLoading: eventsQueryLoading } = useQuery<IdleEventsResponse>({
     queryKey: ['idle-map-events', organization?.id, dateRange.from, dateRange.to],
     queryFn: async () => {
       const api = await getApi();
       return api.get<IdleEventsResponse>(
-        `/fleet/idle-events?startDate=${dateRange.from}&endDate=${dateRange.to}&limit=2000`
+        `/fleet/idle-events?startDate=${dateRange.from}&endDate=${dateRange.to}`
       );
     },
     enabled: !!organization?.id,
@@ -213,15 +211,15 @@ export default function IdleMapClient() {
   // --- Apply filters ---
   const filteredEvents = useMemo<EnrichedIdleEvent[]>(() => {
     return enrichedEvents.filter(e => {
-      if (filters.vehicles.length > 0 && !filters.vehicles.includes(e.unitNumber ?? '')) return false;
-      if (filters.drivers.length > 0 && !filters.drivers.includes(driverLabel(e))) return false;
-      if (filters.minDurationMinutes > 0 && (e.durationMinutes ?? 0) < filters.minDurationMinutes) return false;
-      if (filters.endTypes.length > 0 && !filters.endTypes.includes(e.endType ?? '')) return false;
+      if (selectedKeys.length > 0 && !selectedKeys.includes(e.groupKey)) return false;
       if (filters.geofenceScope === 'inside' && e.geofenceId == null) return false;
       if (filters.geofenceScope === 'outside' && e.geofenceId != null) return false;
       return true;
     });
-  }, [enrichedEvents, filters]);
+  }, [enrichedEvents, filters, selectedKeys]);
+
+  // Treat as loading until org is resolved — prevents "No data" flash before the query starts
+  const eventsLoading = eventsQueryLoading || !organization?.id;
 
   const dieselPrice = orgSettings?.dieselPricePerGallon ?? 5.0;
 
@@ -238,7 +236,6 @@ export default function IdleMapClient() {
         onGeofenceVisibleChange={handleGeofenceVisibleChange}
         filters={filters}
         onFiltersChange={setFilters}
-        events={enrichedEvents}
         loading={eventsLoading}
       />
 
@@ -282,8 +279,11 @@ export default function IdleMapClient() {
           events={filteredEvents}
           groupBy={groupBy}
           onGroupByChange={handleGroupByChange}
+          selectedKeys={selectedKeys}
+          onSelectionChange={setSelectedKeys}
           open={unitPanelOpen}
           onToggle={() => setUnitPanelOpen(v => !v)}
+          loading={eventsLoading}
         />
       </div>
 

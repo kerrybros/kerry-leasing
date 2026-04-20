@@ -1,20 +1,15 @@
 'use client';
 
 import { useState } from 'react';
-import { CalendarIcon, SlidersHorizontal, ChevronDown, Info } from 'lucide-react';
+import { CalendarIcon, ChevronDown, Info } from 'lucide-react';
 import { Button, buttonVariants } from '@/components/ui/button';
-import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
-import { Slider } from '@/components/ui/slider';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 
-import type { DateRange, ViewMode, BubbleMode, FilterState, EnrichedIdleEvent } from '../types';
-import { driverLabel } from '../types';
+import type { DateRange, ViewMode, BubbleMode, FilterState } from '../types';
 
 interface Props {
   dateRange: DateRange;
@@ -27,7 +22,6 @@ interface Props {
   onGeofenceVisibleChange: (v: boolean) => void;
   filters: FilterState;
   onFiltersChange: (f: FilterState) => void;
-  events: EnrichedIdleEvent[];
   loading: boolean;
 }
 
@@ -90,24 +84,11 @@ export default function IdleMapToolbar({
   onGeofenceVisibleChange,
   filters,
   onFiltersChange,
-  events,
   loading,
 }: Props) {
   const [dateOpen, setDateOpen] = useState(false);
   const [customFrom, setCustomFrom] = useState(dateRange.from);
   const [customTo, setCustomTo] = useState(dateRange.to);
-  const [filterOpen, setFilterOpen] = useState(false);
-
-  // Derived options from event data
-  const vehicleOptions = [...new Set(events.map(e => e.unitNumber).filter(Boolean))].sort() as string[];
-  const driverOptions = [...new Set(events.map(e => driverLabel(e)))].sort();
-
-  const activeFilterCount =
-    filters.vehicles.length +
-    filters.drivers.length +
-    (filters.minDurationMinutes > 0 ? 1 : 0) +
-    filters.endTypes.length +
-    (filters.geofenceScope !== 'all' ? 1 : 0);
 
   function applyPreset(preset: DatePreset) {
     const range = { from: preset.from(), to: preset.to() };
@@ -207,13 +188,15 @@ export default function IdleMapToolbar({
 
       {/* Geofences toggle */}
       <div className="flex items-center gap-1.5 h-8 px-2 border border-input rounded-md">
-        <Switch
-          id="geofence-toggle"
-          checked={geofenceVisible}
-          onCheckedChange={onGeofenceVisibleChange}
-          className="scale-75"
-        />
-        <Label htmlFor="geofence-toggle" className="text-xs cursor-pointer select-none">
+        <button
+          role="switch"
+          aria-checked={geofenceVisible}
+          onClick={() => onGeofenceVisibleChange(!geofenceVisible)}
+          className={`relative inline-flex h-[18px] w-[32px] shrink-0 rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${geofenceVisible ? 'bg-primary' : 'bg-zinc-400'}`}
+        >
+          <span className={`inline-block h-[14px] w-[14px] rounded-full bg-white shadow-sm transition-transform duration-200 mt-[2px] ${geofenceVisible ? 'translate-x-[16px]' : 'translate-x-[2px]'}`} />
+        </button>
+        <Label className="text-xs cursor-pointer select-none" onClick={() => onGeofenceVisibleChange(!geofenceVisible)}>
           Geofences
         </Label>
         <TooltipProvider>
@@ -228,148 +211,23 @@ export default function IdleMapToolbar({
         </TooltipProvider>
       </div>
 
-      {/* Filters popover */}
-      <Popover open={filterOpen} onOpenChange={setFilterOpen}>
-        <PopoverTrigger
-          className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'gap-1.5 h-8 text-xs relative')}
-        >
-          <SlidersHorizontal className="w-3.5 h-3.5" />
-          Filters
-          {activeFilterCount > 0 && (
-            <Badge variant="secondary" className="ml-1 px-1 py-0 h-4 text-[10px]">
-              {activeFilterCount}
-            </Badge>
-          )}
-        </PopoverTrigger>
-        <PopoverContent className="w-80 p-4" align="start">
-          <div className="flex flex-col gap-4">
-            <p className="text-sm font-semibold">Filters</p>
+      {/* Location scope toggle */}
+      <ToggleGroup
+        value={[filters.geofenceScope]}
+        onValueChange={(values) => {
+          const next = values[values.length - 1] as FilterState['geofenceScope'] | undefined;
+          if (next && next !== filters.geofenceScope) onFiltersChange({ ...filters, geofenceScope: next });
+        }}
+        className="h-8 border border-input rounded-md overflow-hidden"
+      >
+        <ToggleGroupItem value="all" className="h-8 px-3 text-xs rounded-none">All</ToggleGroupItem>
+        <ToggleGroupItem value="inside" className="h-8 px-3 text-xs rounded-none">In geofence</ToggleGroupItem>
+        <ToggleGroupItem value="outside" className="h-8 px-3 text-xs rounded-none">Outside</ToggleGroupItem>
+      </ToggleGroup>
 
-            {/* Vehicle multi-select */}
-            {vehicleOptions.length > 0 && (
-              <div className="flex flex-col gap-1.5">
-                <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                  Vehicles ({filters.vehicles.length > 0 ? `${filters.vehicles.length} selected` : 'all'})
-                </Label>
-                <div className="max-h-28 overflow-y-auto flex flex-col gap-1">
-                  {vehicleOptions.map(v => (
-                    <div key={v} className="flex items-center gap-2">
-                      <Checkbox
-                        id={`v-${v}`}
-                        checked={filters.vehicles.includes(v)}
-                        onCheckedChange={(checked) => {
-                          const next = checked
-                            ? [...filters.vehicles, v]
-                            : filters.vehicles.filter(x => x !== v);
-                          onFiltersChange({ ...filters, vehicles: next });
-                        }}
-                      />
-                      <Label htmlFor={`v-${v}`} className="text-xs cursor-pointer">{v}</Label>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Driver multi-select */}
-            {driverOptions.length > 0 && (
-              <div className="flex flex-col gap-1.5">
-                <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                  Drivers ({filters.drivers.length > 0 ? `${filters.drivers.length} selected` : 'all'})
-                </Label>
-                <div className="max-h-28 overflow-y-auto flex flex-col gap-1">
-                  {driverOptions.map(d => (
-                    <div key={d} className="flex items-center gap-2">
-                      <Checkbox
-                        id={`d-${d}`}
-                        checked={filters.drivers.includes(d)}
-                        onCheckedChange={(checked) => {
-                          const next = checked
-                            ? [...filters.drivers, d]
-                            : filters.drivers.filter(x => x !== d);
-                          onFiltersChange({ ...filters, drivers: next });
-                        }}
-                      />
-                      <Label htmlFor={`d-${d}`} className="text-xs cursor-pointer">{d}</Label>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Min duration slider — Base UI Slider value is number | readonly number[] */}
-            <div className="flex flex-col gap-2">
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                Min Duration: {filters.minDurationMinutes > 0 ? `${filters.minDurationMinutes}m` : 'any'}
-              </Label>
-              <Slider
-                min={0}
-                max={120}
-                step={5}
-                value={[filters.minDurationMinutes]}
-                onValueChange={(raw) => {
-                  const v = Array.isArray(raw) ? raw[0] : raw;
-                  onFiltersChange({ ...filters, minDurationMinutes: v ?? 0 });
-                }}
-              />
-            </div>
-
-            {/* End type checkboxes */}
-            <div className="flex flex-col gap-1.5">
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">End Type</Label>
-              {(['vehicle_moving', 'engine_stop'] as const).map(et => (
-                <div key={et} className="flex items-center gap-2">
-                  <Checkbox
-                    id={`et-${et}`}
-                    checked={filters.endTypes.includes(et)}
-                    onCheckedChange={(checked) => {
-                      const next = checked
-                        ? [...filters.endTypes, et]
-                        : filters.endTypes.filter(x => x !== et);
-                      onFiltersChange({ ...filters, endTypes: next });
-                    }}
-                  />
-                  <Label htmlFor={`et-${et}`} className="text-xs cursor-pointer capitalize">
-                    {et.replace('_', ' ')}
-                  </Label>
-                </div>
-              ))}
-            </div>
-
-            {/* Geofence scope radio */}
-            <div className="flex flex-col gap-1.5">
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Location</Label>
-              {(['all', 'inside', 'outside'] as const).map(scope => (
-                <div key={scope} className="flex items-center gap-2">
-                  <input
-                    type="radio"
-                    id={`scope-${scope}`}
-                    name="geofenceScope"
-                    value={scope}
-                    checked={filters.geofenceScope === scope}
-                    onChange={() => onFiltersChange({ ...filters, geofenceScope: scope })}
-                    className="accent-primary"
-                  />
-                  <Label htmlFor={`scope-${scope}`} className="text-xs cursor-pointer capitalize">
-                    {scope === 'all' ? 'All locations' : scope === 'inside' ? 'Inside geofences' : 'Outside geofences'}
-                  </Label>
-                </div>
-              ))}
-            </div>
-
-            <Button
-              variant="ghost"
-              size="sm"
-              className={cn('h-7 text-xs', activeFilterCount === 0 && 'opacity-40 pointer-events-none')}
-              onClick={() =>
-                onFiltersChange({ vehicles: [], drivers: [], minDurationMinutes: 0, endTypes: [], geofenceScope: 'all' })
-              }
-            >
-              Clear all filters
-            </Button>
-          </div>
-        </PopoverContent>
-      </Popover>
+      {viewMode === 'heatmap' && !loading && (
+        <span className="text-xs text-muted-foreground/60 ml-1">Switch to Bubbles to explore individual events</span>
+      )}
 
       {loading && (
         <span className="text-xs text-muted-foreground animate-pulse ml-1">Loading…</span>
