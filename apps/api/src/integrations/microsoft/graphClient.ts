@@ -178,6 +178,52 @@ function mapItem(raw: GraphDriveItemRaw): DriveItem {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Preview (embed URL)
+// ---------------------------------------------------------------------------
+
+export interface PreviewResult {
+  embedUrl: string;
+}
+
+interface GraphPreviewResponse {
+  getUrl?: string;
+  postUrl?: string;
+}
+
+export async function getItemPreviewUrl(
+  cfg: GraphClientConfig,
+  itemId: string
+): Promise<PreviewResult> {
+  const token = await getAccessToken(cfg.tenantId, cfg.clientId, cfg.clientSecret);
+  const siteId = await resolveSiteId(token, cfg.siteHostname, cfg.sitePath);
+  const drive = await resolveDriveId(token, siteId);
+
+  const url = `${GRAPH_BASE}/drives/${drive.id}/items/${itemId}/preview`;
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({}),
+  });
+
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({})) as { error?: { message?: string } };
+    const msg = body?.error?.message ?? resp.statusText;
+    throw new Error(`Graph preview failed (${resp.status}) [${url}]: ${msg}`);
+  }
+
+  const data = await resp.json() as GraphPreviewResponse;
+  if (!data.getUrl) {
+    throw new Error('Graph preview response did not include a getUrl');
+  }
+
+  return { embedUrl: data.getUrl };
+}
+
 export async function listDriveItems(
   cfg: GraphClientConfig,
   folderPath: string | null,

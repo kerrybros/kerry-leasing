@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { ExternalLink, FileText, Folder, File, ChevronRight, Home, ArrowLeft, AlertCircle, Loader2 } from 'lucide-react';
+import { ExternalLink, FileText, Folder, File, ChevronRight, Home, ArrowLeft, AlertCircle, Loader2, X } from 'lucide-react';
 import { useApiClient } from '@/hooks/useApiClient';
 import { Button } from '@/components/ui/button';
 
@@ -74,6 +74,12 @@ export default function AdminDocumentsPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Preview modal state
+  const [previewItem, setPreviewItem] = useState<DriveItem | null>(null);
+  const [previewEmbedUrl, setPreviewEmbedUrl] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+
   const fetchItems = useCallback(
     async (path: string, next: string | null, append: boolean) => {
       if (append) setLoadingMore(true);
@@ -113,6 +119,28 @@ export default function AdminDocumentsPage() {
   }, [currentPath, fetchItems]);
 
   const navigate = (path: string) => setCurrentPath(path);
+
+  const openPreview = useCallback(async (item: DriveItem) => {
+    setPreviewItem(item);
+    setPreviewEmbedUrl(null);
+    setPreviewError(null);
+    setPreviewLoading(true);
+    try {
+      const api = await getApi();
+      const data = await api.get<{ embedUrl: string }>(`/admin/sharepoint/preview/${item.id}`);
+      setPreviewEmbedUrl(data.embedUrl);
+    } catch (err) {
+      setPreviewError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPreviewLoading(false);
+    }
+  }, [getApi]);
+
+  const closePreview = () => {
+    setPreviewItem(null);
+    setPreviewEmbedUrl(null);
+    setPreviewError(null);
+  };
 
   const segments = pathSegments(currentPath);
   const parentPath = segments.length > 1
@@ -270,21 +298,28 @@ export default function AdminDocumentsPage() {
                     {formatDate(item.lastModifiedDateTime)}
                   </td>
 
-                  {/* Open link — files only */}
+                  {/* Open/Preview — files only */}
                   <td className="py-2.5 px-4 text-right">
                     {item.isFolder ? (
                       <ChevronRight className="w-4 h-4 text-muted-foreground ml-auto" />
                     ) : (
-                      <a
-                        href={item.webUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={(e) => e.stopPropagation()}
-                        className="inline-flex items-center gap-1 text-primary hover:underline no-underline whitespace-nowrap"
-                      >
-                        Open
-                        <ExternalLink className="w-3 h-3" />
-                      </a>
+                      <div className="inline-flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          onClick={() => openPreview(item)}
+                          className="text-primary hover:underline text-sm whitespace-nowrap"
+                        >
+                          Preview
+                        </button>
+                        <a
+                          href={item.webUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-muted-foreground hover:text-foreground transition-colors"
+                          title="Open in SharePoint"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </a>
+                      </div>
                     )}
                   </td>
                 </tr>
@@ -319,6 +354,80 @@ export default function AdminDocumentsPage() {
           Open library directly in SharePoint.
         </a>
       </p>
+
+      {/* Preview modal */}
+      {previewItem && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onClick={closePreview}
+        >
+          <div
+            className="relative flex flex-col bg-background rounded-xl shadow-2xl w-full max-w-5xl"
+            style={{ height: '85vh' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal header */}
+            <div className="flex items-center justify-between gap-4 px-4 py-3 border-b border-border shrink-0">
+              <div className="flex items-center gap-2 min-w-0">
+                <File className="w-4 h-4 text-muted-foreground shrink-0" />
+                <span className="text-sm font-medium truncate">{previewItem.name}</span>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <a
+                  href={previewItem.webUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors no-underline"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  Open in SharePoint
+                </a>
+                <button
+                  onClick={closePreview}
+                  className="rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                  aria-label="Close preview"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal body */}
+            <div className="flex-1 min-h-0">
+              {previewLoading && (
+                <div className="flex items-center justify-center h-full gap-3 text-muted-foreground">
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  <span className="text-sm">Loading preview…</span>
+                </div>
+              )}
+              {!previewLoading && previewError && (
+                <div className="flex flex-col items-center justify-center h-full gap-3 text-center px-6">
+                  <AlertCircle className="w-8 h-8 text-destructive/70" />
+                  <p className="text-sm font-medium">Preview unavailable</p>
+                  <p className="text-xs text-muted-foreground max-w-sm">{previewError}</p>
+                  <a
+                    href={previewItem.webUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline no-underline"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    Open in SharePoint instead
+                  </a>
+                </div>
+              )}
+              {!previewLoading && previewEmbedUrl && (
+                <iframe
+                  src={previewEmbedUrl}
+                  className="w-full h-full rounded-b-xl border-0"
+                  title={previewItem.name}
+                  sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+                />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

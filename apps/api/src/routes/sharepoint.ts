@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { clerkAuthMiddleware, requireRole, AuthRequest } from '../middleware/auth.js';
 import { config } from '../config.js';
-import { listDriveItems } from '../integrations/microsoft/graphClient.js';
+import { listDriveItems, getItemPreviewUrl } from '../integrations/microsoft/graphClient.js';
 
 const router = Router();
 
@@ -57,6 +57,47 @@ router.get(
             'Microsoft Graph returned 403. ' +
             'Ensure the app has been granted site-level access (Sites.Selected) ' +
             'and that tenant + path config is correct.',
+        });
+      }
+
+      res.status(502).json({ error: 'Graph Error', message });
+    }
+  }
+);
+
+/**
+ * GET /admin/sharepoint/preview/:itemId
+ * Returns a short-lived embed URL for an individual drive item.
+ * Requires internal Clerk role.
+ */
+router.get(
+  '/preview/:itemId',
+  clerkAuthMiddleware,
+  requireRole(['internal']),
+  async (req: AuthRequest, res) => {
+    if (!config.microsoftGraph) {
+      return res.status(503).json({
+        error: 'Service Unavailable',
+        message: 'Microsoft Graph integration is not configured.',
+      });
+    }
+
+    const { itemId } = req.params;
+    if (!itemId || !/^[\w-]+$/.test(itemId)) {
+      return res.status(400).json({ error: 'Bad Request', message: 'Invalid itemId.' });
+    }
+
+    try {
+      const result = await getItemPreviewUrl(config.microsoftGraph, itemId);
+      res.json({ embedUrl: result.embedUrl });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('[SharePoint] preview error:', message);
+
+      if (message.includes('(403)')) {
+        return res.status(502).json({
+          error: 'Graph Forbidden',
+          message: 'Microsoft Graph returned 403. Check site-level access grant.',
         });
       }
 
