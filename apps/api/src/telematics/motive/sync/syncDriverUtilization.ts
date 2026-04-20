@@ -31,10 +31,15 @@ export async function syncDriverUtilization(
     const records = await fetchDriverUtilization(client, date);
     
     result.recordCount = records.length;
-    // Store all rollups; driver optional (null when missing) — no skip for missing driver
     for (const record of records) {
       try {
         const driverId = record.driver?.id ?? null;
+
+        // Skip unassigned records — no driver to attribute, and composite key requires non-null driverId
+        if (driverId === null) {
+          result.recordCount--;
+          continue;
+        }
 
         // Check if record exists
         const existing = await appPrisma.motiveDriverUtilization.findUnique({

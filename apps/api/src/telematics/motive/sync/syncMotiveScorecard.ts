@@ -61,8 +61,7 @@ export async function syncMotiveScorecard(
     for (const record of records) {
       try {
         if (!record.driver?.id) {
-          result.errorCount++;
-          result.errors.push({ recordId: 'unknown', error: 'Missing driver ID in scorecard record' });
+          result.recordCount--;
           continue;
         }
 
