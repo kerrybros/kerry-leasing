@@ -231,6 +231,8 @@ export default function DriverDetailPage() {
     return { totalMiles, totalIdleFuel, totalIdleTimeMinutes, avgMpg, idlePct };
   }, [tableMonths]);
 
+  const dieselPrice = orgSettingsQuery.data?.dieselPricePerGallon ?? 5.0;
+
   const isLoading = orgSettingsQuery.isLoading || driverUtilQuery.isLoading;
   const isRefetching = driverUtilQuery.isFetching && !driverUtilQuery.isLoading;
 
@@ -320,7 +322,7 @@ export default function DriverDetailPage() {
         <KpiCard label="Total Drive Time" value={`${Math.round(kpis.driveTimeHours).toLocaleString()} hrs`} />
         <KpiCard label="Idle Time" value={`${Math.round(kpis.idleTimeHrs).toLocaleString()} hrs`} variant={kpis.idleTimeHrs > 0 ? 'warning' : 'default'} />
         <KpiCard label="Engine Time" value={`${Math.round(kpis.engineTimeHrs).toLocaleString()} hrs`} />
-        <KpiCard label="Est. Fuel Cost" value={`$${Math.round(kpis.totalFuel * 3.50).toLocaleString()}`} />
+        <KpiCard label="Est. Fuel Cost" value={`$${Math.round(kpis.totalFuel * dieselPrice).toLocaleString()}`} />
         {hardEvents !== null && (
           <KpiCard
             label="Hard Events"
@@ -552,59 +554,53 @@ export default function DriverDetailPage() {
 
         {/* Safety Events Section */}
         <Card className="flex-1">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-            Safety Events
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {hardEvents !== null ? (
-            <div className="flex flex-col gap-3">
-              <p className="text-sm text-muted-foreground">
-                Hard events include hard braking, harsh acceleration, and sudden maneuvers recorded by the telematics provider.
-              </p>
-              <div className="flex items-center gap-4">
-                <div className={`rounded-lg border p-5 text-center min-w-[120px] ${
-                  hardEvents > 10 ? 'bg-destructive/10 border-destructive/30' :
-                  hardEvents > 5 ? 'bg-amber-500/10 border-amber-500/30' :
-                  'bg-muted/40 border-border'
-                }`}>
-                  <div className={`text-3xl font-bold ${
-                    hardEvents > 10 ? 'text-destructive' :
-                    hardEvents > 5 ? 'text-amber-600 dark:text-amber-400' :
-                    'text-foreground'
-                  }`}>{hardEvents}</div>
-                  <div className="text-xs text-muted-foreground mt-1 uppercase tracking-wide">Hard Events</div>
-                </div>
-                <div className="text-sm text-muted-foreground">
-                  {hardEvents === 0 && 'No hard events recorded for this driver in the selected period.'}
-                  {hardEvents > 0 && hardEvents <= 5 && 'Low hard event count — good driving behavior.'}
-                  {hardEvents > 5 && hardEvents <= 10 && 'Moderate hard events. Consider a coaching conversation.'}
-                  {hardEvents > 10 && 'High hard event count. Safety coaching is recommended.'}
-                </div>
-              </div>
-            </div>
-          ) : (
-            <>
-              <p className="text-sm text-muted-foreground mb-4">
-                Safety event data (speeding, hard stops, stop sign violations) is not yet available from the telematics provider.
-                This section will populate automatically when the API is connected.
-              </p>
-              <div className="grid grid-cols-3 gap-4">
-                {[
-                  { label: 'Speeding Events', value: '—' },
-                  { label: 'Hard Stops', value: '—' },
-                  { label: 'Stop Sign Violations', value: '—' },
-                ].map(item => (
-                  <div key={item.label} className="rounded-lg bg-muted/40 border border-border p-4 text-center">
-                    <div className="text-2xl font-bold text-muted-foreground">{item.value}</div>
-                    <div className="text-xs text-muted-foreground mt-1 uppercase tracking-wide">{item.label}</div>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+              Safety Events
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {hardEvents !== null ? (
+              <div className="flex flex-col gap-4">
+                <div className="flex items-center gap-4">
+                  <div className={`rounded-lg border p-5 text-center min-w-[120px] ${
+                    hardEvents > 10 ? 'bg-destructive/10 border-destructive/30' :
+                    hardEvents > 5 ? 'bg-amber-500/10 border-amber-500/30' :
+                    'bg-muted/40 border-border'
+                  }`}>
+                    <div className={`text-3xl font-bold ${
+                      hardEvents > 10 ? 'text-destructive' :
+                      hardEvents > 5 ? 'text-amber-600 dark:text-amber-400' :
+                      'text-foreground'
+                    }`}>{hardEvents}</div>
+                    <div className="text-xs text-muted-foreground mt-1 uppercase tracking-wide">Total</div>
                   </div>
-                ))}
+                  <div className="text-sm text-muted-foreground">
+                    {hardEvents === 0 && 'No hard events recorded for this driver in the selected period.'}
+                    {hardEvents > 0 && hardEvents <= 5 && 'Low hard event count — good driving behavior.'}
+                    {hardEvents > 5 && hardEvents <= 10 && 'Moderate hard events. Consider a coaching conversation.'}
+                    {hardEvents > 10 && 'High hard event count. Safety coaching is recommended.'}
+                  </div>
+                </div>
+                {hardEventBreakdown && (
+                  <div className="grid grid-cols-3 gap-3">
+                    {[
+                      { label: 'Hard Brakes', value: hardEventBreakdown.hardBrakes },
+                      { label: 'Hard Accels', value: hardEventBreakdown.hardAccels },
+                      { label: 'Hard Corners', value: hardEventBreakdown.hardCorners },
+                    ].map(item => (
+                      <div key={item.label} className="rounded-lg bg-muted/40 border border-border p-4 text-center">
+                        <div className="text-2xl font-bold text-foreground">{item.value}</div>
+                        <div className="text-xs text-muted-foreground mt-1 uppercase tracking-wide">{item.label}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
-            </>
-          )}
-        </CardContent>
+            ) : (
+              <p className="text-sm text-muted-foreground">No safety event data available for this driver.</p>
+            )}
+          </CardContent>
         </Card>
       </div>
     </div>

@@ -321,35 +321,6 @@ export function aggregateFleetTotals(
 }
 
 // ---------------------------------------------------------------------------
-// Unit option generation (for MultiSelect)
-// ---------------------------------------------------------------------------
-
-export function buildUnitOptions(data: VehicleUtilization[]): { label: string; value: string }[] {
-  const unique = new Set<string>();
-  const opts: { label: string; value: string }[] = [];
-  data.forEach(v => {
-    if (v.vin && !unique.has(v.vin)) {
-      unique.add(v.vin);
-      opts.push({ label: v.vehicleNumber || v.vin.slice(-6), value: v.vin });
-    }
-  });
-  return opts.sort((a, b) => a.label.localeCompare(b.label));
-}
-
-export function buildDriverOptions(data: DriverUtilization[]): { label: string; value: string }[] {
-  const unique = new Set<number>();
-  const opts: { label: string; value: string }[] = [];
-  data.forEach(d => {
-    if (d.driverId && !unique.has(d.driverId)) {
-      unique.add(d.driverId);
-      const name = `${d.driverFirstName || ''} ${d.driverLastName || ''}`.trim() || `Driver ${d.driverId}`;
-      opts.push({ label: name, value: d.driverId.toString() });
-    }
-  });
-  return opts.sort((a, b) => a.label.localeCompare(b.label));
-}
-
-// ---------------------------------------------------------------------------
 // Fleet KPI summary (for KPI bar)
 // ---------------------------------------------------------------------------
 

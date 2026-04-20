@@ -56,7 +56,7 @@ export default function FleetOverviewPage() {
               endDate={fleet.endDate}
               onStartDateChange={fleet.setStartDate}
               onEndDateChange={fleet.setEndDate}
-              contractStartDate={fleet.orgSettings?.contractStartDate ?? undefined}
+              minDate={fleet.earliestDataDate}
             />
           </div>
         </div>
@@ -101,13 +101,7 @@ export default function FleetOverviewPage() {
                 subtext={`@ $${(fleet.orgSettings.dieselPricePerGallon ?? 3.85).toFixed(2)}/gal (EIA Midwest)`}
                 variant="warning"
               />
-              {(() => {
-                const totalCost = fleet.fleetKpis.estimatedFuelCost + fleet.repairKpis.totalRepairSpend;
-                const miles = fleet.fleetKpis.totalMiles;
-                const cpm = miles > 0 ? (totalCost / miles).toFixed(2) : '—';
-                return <KpiCard label="Cost Per Mile" value={cpm === '—' ? '—' : `$${cpm}`} />;
-              })()}
-              <KpiCard label="Total Repair Jobs" value={fleet.repairKpis.totalJobs} />
+<KpiCard label="Total Repair Jobs" value={fleet.repairKpis.totalJobs} />
               <KpiCard
                 label="Jobs with Damage"
                 value={fleet.repairKpis.damageJobs}

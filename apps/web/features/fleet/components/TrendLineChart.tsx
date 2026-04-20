@@ -13,8 +13,7 @@ import {
   LabelList,
 } from 'recharts';
 import type { MonthlyMetrics } from '@/features/fleet/types';
-import { CHART_COLORS } from '@/features/fleet/utils/chartColors';
-import { ChartTooltip } from '@/features/fleet/components/ChartTooltip';
+import { CHART_COLORS, TOOLTIP_STYLE } from '@/features/fleet/utils/chartColors';
 
 const PLACEHOLDER_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -92,7 +91,8 @@ export function TrendLineChart({ title, dataKey, data, loading, labelFormatter }
               tickFormatter={(v: number) => v >= 1000 ? `${(v / 1000).toFixed(v % 1000 === 0 ? 0 : 1)}K` : v.toLocaleString()}
             />
             <Tooltip
-              content={<ChartTooltip formatter={(v) => typeof v === 'number' ? v.toLocaleString() : String(v)} />}
+              contentStyle={TOOLTIP_STYLE}
+              formatter={(v: unknown) => [typeof v === 'number' ? v.toLocaleString() : String(v)]}
             />
             {hasData && (
               <Line

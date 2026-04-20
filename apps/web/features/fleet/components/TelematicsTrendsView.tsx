@@ -145,7 +145,7 @@ export function TelematicsTrendsView({
                         dataKey="value"
                       >
                         <Cell fill="#ef4444" />
-                        <Cell fill={CHART_COLORS.success} />
+                        <Cell fill={CHART_COLORS.primary} />
                       </Pie>
                       <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(val) => [fmtIdleTime(Number(val))]} />
                       <Legend formatter={(name) => <span style={LEGEND_STYLE}>{name}</span>} />

@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { CalendarClock, Settings, FileText, FileSpreadsheet, Wrench, Radio, AlertTriangle, CheckCircle } from 'lucide-react';
+import { CalendarClock, Settings, Wrench, Radio, AlertTriangle, CheckCircle } from 'lucide-react';
 import { useOrgSettingsQuery, useServicePlanSummaryQuery } from '@/hooks/useDataQueries';
 import { useOrganization } from '@clerk/nextjs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -35,11 +35,9 @@ function formatRenewalDate(startDate: string | null, termYears: number | null): 
 }
 
 const quickLinks = [
-  { label: 'Customer Settings',  href: '/app/admin/org-settings', icon: Settings,       description: 'Customer info, contract term, service URL' },
-  { label: 'Service Plan',  href: '/app/admin/service-plan',  icon: Wrench,         description: 'Units on the lease program' },
-  { label: 'Telematics',    href: '/app/admin/telematics',    icon: Radio,          description: 'Telematics provider configuration' },
-  { label: 'Contract',      href: '/app/admin/contract',      icon: FileText,       description: 'Active contract and version history' },
-  { label: 'Exhibit B',     href: '/app/admin/exhibit-b',     icon: FileSpreadsheet, description: 'Fleet pricing table' },
+  { label: 'Customer Settings', href: '/app/admin/org-settings', icon: Settings, description: 'Customer info, contract term, service URL' },
+  { label: 'Service Plan',      href: '/app/admin/service-plan',  icon: Wrench,   description: 'Units on the lease program' },
+  { label: 'Telematics',        href: '/app/admin/telematics',    icon: Radio,    description: 'Telematics provider configuration' },
 ];
 
 export default function AdminOverviewPage() {

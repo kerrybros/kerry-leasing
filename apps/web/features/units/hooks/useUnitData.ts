@@ -235,7 +235,6 @@ export function useUnitData(vin: string, startDate?: string, endDate?: string) {
     isRefetching,
     error,
     unit,
-    rawTelematicsData,
     telematicsData,
     repairLines,
     repairJobs,

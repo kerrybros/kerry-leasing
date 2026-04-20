@@ -60,7 +60,7 @@ function buildDriverSums(records: DriverUtilization[]): Map<number, DriverSums> 
   return grouped;
 }
 
-function sumsToRow(sums: DriverSums, fleetAvgMpg: number | undefined): DriverRow {
+function sumsToRow(sums: DriverSums, fleetAvgMpg: number | undefined, dieselPrice = 5.0): DriverRow {
   const engineOnSec = sums.totalIdleTime + sums.totalDrivingTime;
   const idlePct = engineOnSec > 0 ? (sums.totalIdleTime / engineOnSec) * 100 : 0;
   const driveTimePct = engineOnSec > 0 ? (sums.totalDrivingTime / engineOnSec) * 100 : 0;
@@ -87,7 +87,7 @@ function sumsToRow(sums: DriverSums, fleetAvgMpg: number | undefined): DriverRow
     driveTimeHrs: Math.round((sums.totalDrivingTime / 3600) * 10) / 10,
     idleTimeHrs: Math.round((sums.totalIdleTime / 3600) * 10) / 10,
     engineTimeHrs: Math.round((engineOnSec / 3600) * 10) / 10,
-    estimatedFuelCost: Math.round(sums.totalFuel * 3.50),
+    estimatedFuelCost: Math.round(sums.totalFuel * dieselPrice),
     safetyViolations: 0,
     hardEvents: 0,
     score,
@@ -97,6 +97,7 @@ function sumsToRow(sums: DriverSums, fleetAvgMpg: number | undefined): DriverRow
 export function useDriversData(startDate: string, endDate: string, scorecardEnabled = true) {
   const orgSettingsQuery = useOrgSettingsQuery();
   const orgSettings = orgSettingsQuery.data;
+  const dieselPrice = orgSettings?.dieselPricePerGallon ?? 5.0;
 
   const isMotive = orgSettings?.telematicsProvider === 'MOTIVE';
   const tracksDrivers = orgSettings?.tracksDrivers === true;
@@ -139,7 +140,7 @@ export function useDriversData(startDate: string, endDate: string, scorecardEnab
     scorecardQuery.data?.data.forEach(d => hardEventsMap.set(d.driverId, d.hardEvents ?? 0));
     return Array.from(grouped.values())
       .map(sums => {
-        const row = sumsToRow(sums, fleetAvgMpg);
+        const row = sumsToRow(sums, fleetAvgMpg, dieselPrice);
         row.hardEvents = hardEventsMap.get(sums.driverId) ?? 0;
         return row;
       })
@@ -209,7 +210,7 @@ export function useDriversData(startDate: string, endDate: string, scorecardEnab
       const driverName = driverNames.get(driverId) || `Driver ${driverId}`;
       const weekRows = new Map<string, DriverRow>();
       weekMap.forEach((sums, weekKey) => {
-        weekRows.set(weekKey, sumsToRow(sums, fleetAvgMpg));
+        weekRows.set(weekKey, sumsToRow(sums, fleetAvgMpg, dieselPrice));
       });
       result.set(driverId, { driverName, weeks: weekRows });
     });
@@ -253,7 +254,7 @@ export function useDriversData(startDate: string, endDate: string, scorecardEnab
       const driverName = driverNames.get(driverId) || `Driver ${driverId}`;
       const monthRows = new Map<string, DriverRow>();
       monthMap.forEach((sums, monthKey) => {
-        monthRows.set(monthKey, sumsToRow(sums, fleetAvgMpg));
+        monthRows.set(monthKey, sumsToRow(sums, fleetAvgMpg, dieselPrice));
       });
       result.set(driverId, { driverName, months: monthRows });
     });
@@ -262,15 +263,13 @@ export function useDriversData(startDate: string, endDate: string, scorecardEnab
 
   return {
     orgSettingsQuery,
-    isMotive,
-    tracksDrivers,
     canShow,
     driverRows,
     months,
     monthlyByDriver,
     weeks,
     weeklyByDriver,
-    isLoading: orgSettingsQuery.isLoading || driverUtilQuery.isLoading,
-    isRefetching: (driverUtilQuery.isFetching || scorecardQuery.isFetching) && !driverUtilQuery.isLoading,
+    isLoading: orgSettingsQuery.isPending || driverUtilQuery.isPending,
+    isRefetching: (driverUtilQuery.isFetching || scorecardQuery.isFetching) && !driverUtilQuery.isPending,
   };
 }

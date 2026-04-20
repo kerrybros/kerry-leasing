@@ -9,8 +9,6 @@ import {
   aggregateMonthlyMetrics,
   aggregateFleetTotals,
   aggregateFleetKpis,
-  buildUnitOptions,
-  buildDriverOptions,
 } from '@/features/fleet/utils/aggregations';
 
 interface FleetAggregationsInput {
@@ -23,8 +21,6 @@ interface FleetAggregationsInput {
   endDate: string;
   repairStartDate: string;
   repairEndDate: string;
-  telematicsSelectedUnits: string[];
-  telematicsSelectedDrivers: string[];
   selectedTableYear: number;
   fuelPricePerGallon?: number;
 }
@@ -39,8 +35,6 @@ export function useFleetAggregations({
   endDate,
   repairStartDate,
   repairEndDate,
-  telematicsSelectedUnits,
-  telematicsSelectedDrivers,
   selectedTableYear,
   fuelPricePerGallon,
 }: FleetAggregationsInput) {
@@ -54,64 +48,40 @@ export function useFleetAggregations({
     [driverData, startDate, endDate]
   );
 
-  const filteredVehicleData = useMemo(() => {
-    if (telematicsSelectedUnits.length === 0) return dateFilteredVehicleData;
-    return dateFilteredVehicleData.filter(r => r.vin && telematicsSelectedUnits.includes(r.vin));
-  }, [dateFilteredVehicleData, telematicsSelectedUnits]);
-
-  const filteredDriverData = useMemo(() => {
-    if (telematicsSelectedDrivers.length === 0) return dateFilteredDriverData;
-    return dateFilteredDriverData.filter(
-      r => r.driverId && telematicsSelectedDrivers.includes(r.driverId.toString())
-    );
-  }, [dateFilteredDriverData, telematicsSelectedDrivers]);
-
   const unitMetrics = useMemo(
-    () => aggregateUnitMetrics(filteredVehicleData),
-    [filteredVehicleData]
+    () => aggregateUnitMetrics(dateFilteredVehicleData),
+    [dateFilteredVehicleData]
   );
 
   const driverMetrics = useMemo(
-    () => aggregateDriverMetrics(filteredDriverData),
-    [filteredDriverData]
+    () => aggregateDriverMetrics(dateFilteredDriverData),
+    [dateFilteredDriverData]
   );
-
-  // allVehicle/DriverData: full dataset without date filter — used by the monthly table
-  // so the table always shows complete year data regardless of the date picker selection
-  const allVehicleData = useMemo(() => {
-    if (telematicsSelectedUnits.length === 0) return vehicleData;
-    return vehicleData.filter(r => r.vin && telematicsSelectedUnits.includes(r.vin));
-  }, [vehicleData, telematicsSelectedUnits]);
-
-  const allDriverData = useMemo(() => {
-    if (telematicsSelectedDrivers.length === 0) return driverData;
-    return driverData.filter(r => r.driverId && telematicsSelectedDrivers.includes(r.driverId.toString()));
-  }, [driverData, telematicsSelectedDrivers]);
 
   const monthlyMetrics = useMemo(
     () =>
       aggregateMonthlyMetrics({
-        vehicleData: filteredVehicleData,
-        driverData: filteredDriverData,
-        allVehicleData,
-        allDriverData,
+        vehicleData: dateFilteredVehicleData,
+        driverData: dateFilteredDriverData,
+        allVehicleData: vehicleData,
+        allDriverData: driverData,
         viewMode,
         selectedId,
         selectedTableYear,
         startDate,
         endDate,
       }),
-    [filteredVehicleData, filteredDriverData, allVehicleData, allDriverData, viewMode, selectedId, selectedTableYear, startDate, endDate]
+    [dateFilteredVehicleData, dateFilteredDriverData, vehicleData, driverData, viewMode, selectedId, selectedTableYear, startDate, endDate]
   );
 
   const fleetTotals = useMemo(
     () =>
       aggregateFleetTotals(
-        viewMode === 'unit' ? filteredVehicleData : filteredDriverData,
+        viewMode === 'unit' ? dateFilteredVehicleData : dateFilteredDriverData,
         viewMode,
         fuelPricePerGallon
       ),
-    [filteredVehicleData, filteredDriverData, viewMode, fuelPricePerGallon]
+    [dateFilteredVehicleData, dateFilteredDriverData, viewMode, fuelPricePerGallon]
   );
 
   const fleetKpis = useMemo(
@@ -141,23 +111,11 @@ export function useFleetAggregations({
     return { totalJobs, damageJobs, totalRepairSpend };
   }, [repairUnits, repairStartDate, repairEndDate]);
 
-  const unitOptions = useMemo(
-    () => buildUnitOptions(dateFilteredVehicleData),
-    [dateFilteredVehicleData]
-  );
-
-  const driverOptions = useMemo(
-    () => buildDriverOptions(dateFilteredDriverData),
-    [dateFilteredDriverData]
-  );
-
   const availableYears = useMemo(() => {
-    // Only show years that have actual data, not every year in the date range
     const yearSet = new Set<number>();
     vehicleData.forEach(r => yearSet.add(new Date(r.date).getFullYear()));
     driverData.forEach(r => yearSet.add(new Date(r.date).getFullYear()));
     const years = Array.from(yearSet).sort();
-    // Always include the current year as a fallback
     if (years.length === 0) years.push(new Date().getFullYear());
     return years;
   }, [vehicleData, driverData]);
@@ -169,16 +127,12 @@ export function useFleetAggregations({
 
   return {
     dateFilteredVehicleData,
-    filteredVehicleData,
-    filteredDriverData,
     unitMetrics,
     driverMetrics,
     monthlyMetrics,
     fleetTotals,
     fleetKpis,
     repairKpis,
-    unitOptions,
-    driverOptions,
     showYearToggle,
     availableYears,
   };

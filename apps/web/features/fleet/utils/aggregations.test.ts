@@ -4,8 +4,6 @@ import {
   aggregateUnitMetrics,
   aggregateDriverMetrics,
   aggregateFleetKpis,
-  buildUnitOptions,
-  buildDriverOptions,
 } from './aggregations';
 import type { VehicleUtilization, DriverUtilization } from '@/hooks/useDataQueries';
 
@@ -170,38 +168,3 @@ describe('aggregateFleetKpis', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// buildUnitOptions / buildDriverOptions
-// ---------------------------------------------------------------------------
-
-describe('buildUnitOptions', () => {
-  it('deduplicates by VIN and sorts alphabetically', () => {
-    const data = [
-      makeVehicle({ vin: 'ZZZ', vehicleNumber: 'Z-UNIT' }),
-      makeVehicle({ vin: 'AAA', vehicleNumber: 'A-UNIT' }),
-      makeVehicle({ vin: 'ZZZ', vehicleNumber: 'Z-UNIT' }), // duplicate
-    ];
-    const opts = buildUnitOptions(data);
-    expect(opts).toHaveLength(2);
-    expect(opts[0].label).toBe('A-UNIT');
-    expect(opts[1].label).toBe('Z-UNIT');
-  });
-
-  it('skips records with null VIN', () => {
-    expect(buildUnitOptions([makeVehicle({ vin: null })])).toHaveLength(0);
-  });
-});
-
-describe('buildDriverOptions', () => {
-  it('deduplicates by driverId and sorts alphabetically', () => {
-    const data = [
-      makeDriver({ driverId: 2, driverFirstName: 'Bob', driverLastName: 'Smith' }),
-      makeDriver({ driverId: 1, driverFirstName: 'Alice', driverLastName: 'Jones' }),
-      makeDriver({ driverId: 2, driverFirstName: 'Bob', driverLastName: 'Smith' }), // duplicate
-    ];
-    const opts = buildDriverOptions(data);
-    expect(opts).toHaveLength(2);
-    expect(opts[0].label).toBe('Alice Jones');
-    expect(opts[1].label).toBe('Bob Smith');
-  });
-});

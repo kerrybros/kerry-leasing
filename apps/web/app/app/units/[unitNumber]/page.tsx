@@ -336,7 +336,7 @@ export default function UnitDetailPage() {
                 <CardHeader className="pb-2 pt-4">
                   <CardTitle className="text-sm font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
                     <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
-                    Safety Events <span className="font-normal normal-case text-muted-foreground">(last 90 days)</span>
+                    Safety Events <span className="font-normal normal-case text-muted-foreground">({periodLabel})</span>
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="flex flex-col gap-4">

@@ -8,7 +8,7 @@ interface DateRangePickerProps {
   endDate: string;
   onStartDateChange: (date: string) => void;
   onEndDateChange: (date: string) => void;
-  contractStartDate?: string;
+  minDate?: string;
 }
 
 type PresetId =
@@ -19,13 +19,11 @@ type PresetId =
   | 'last_quarter'
   | 'this_year'
   | 'last_year'
-  | 'all_time'
-  | 'since_contract'
   | 'custom';
 
 const formatDate = (d: Date) => d.toISOString().split('T')[0];
 
-function computePreset(preset: PresetId, contractStartDate?: string): { start: string; end: string } | null {
+function computePreset(preset: PresetId): { start: string; end: string } | null {
   const today = new Date();
   const todayStr = formatDate(today);
   switch (preset) {
@@ -64,36 +62,28 @@ function computePreset(preset: PresetId, contractStartDate?: string): { start: s
         start: formatDate(new Date(today.getFullYear() - 1, 0, 1)),
         end: formatDate(new Date(today.getFullYear() - 1, 11, 31)),
       };
-    case 'all_time':
-      return { start: '2020-01-01', end: todayStr };
-    case 'since_contract':
-      if (!contractStartDate) return null;
-      return { start: contractStartDate, end: todayStr };
     default:
       return null;
   }
 }
 
 const PRESETS: { id: PresetId; label: string }[] = [
-  { id: 'last_7_days',    label: 'Last 7 Days' },
-  { id: 'last_30_days',   label: 'Last 30 Days' },
-  { id: 'this_month',     label: 'This Month' },
-  { id: 'last_month',     label: 'Last Month' },
-  { id: 'last_quarter',   label: 'Last Quarter' },
-  { id: 'this_year',      label: 'This Year' },
-  { id: 'last_year',      label: 'Last Year' },
-  { id: 'all_time',       label: 'All Time' },
-  { id: 'since_contract', label: 'Since Contract' },
+  { id: 'last_7_days',  label: 'Last 7 Days' },
+  { id: 'last_30_days', label: 'Last 30 Days' },
+  { id: 'this_month',   label: 'This Month' },
+  { id: 'last_month',   label: 'Last Month' },
+  { id: 'last_quarter', label: 'Last Quarter' },
+  { id: 'this_year',    label: 'This Year' },
+  { id: 'last_year',    label: 'Last Year' },
 ];
 
-function detectPreset(start: string, end: string, contractStartDate?: string): PresetId {
+function detectPreset(start: string, end: string): PresetId {
   const presetIds: PresetId[] = [
     'last_7_days', 'last_30_days', 'this_month', 'last_month',
-    'last_quarter', 'this_year', 'last_year', 'all_time', 'since_contract',
+    'last_quarter', 'this_year', 'last_year',
   ];
   for (const id of presetIds) {
-    if (id === 'since_contract' && !contractStartDate) continue;
-    const range = computePreset(id, contractStartDate);
+    const range = computePreset(id);
     if (range && range.start === start && range.end === end) return id;
   }
   return 'custom';
@@ -104,19 +94,20 @@ export function DateRangePicker({
   endDate,
   onStartDateChange,
   onEndDateChange,
-  contractStartDate,
+  minDate,
 }: DateRangePickerProps) {
+  const todayStr = formatDate(new Date());
+
   const [activePreset, setActivePreset] = useState<PresetId>(
-    () => detectPreset(startDate, endDate, contractStartDate)
+    () => detectPreset(startDate, endDate)
   );
 
-  // Keep label in sync when dates are changed externally
   useEffect(() => {
-    setActivePreset(detectPreset(startDate, endDate, contractStartDate));
-  }, [startDate, endDate, contractStartDate]);
+    setActivePreset(detectPreset(startDate, endDate));
+  }, [startDate, endDate]);
 
   const applyPreset = (preset: PresetId) => {
-    const range = computePreset(preset, contractStartDate);
+    const range = computePreset(preset);
     if (!range) return;
     setActivePreset(preset);
     onStartDateChange(range.start);
@@ -129,10 +120,6 @@ export function DateRangePicker({
     else onEndDateChange(value);
   };
 
-  const visiblePresets = contractStartDate
-    ? PRESETS
-    : PRESETS.filter(p => p.id !== 'since_contract');
-
   return (
     <div className="flex items-center gap-2">
       <select
@@ -144,7 +131,7 @@ export function DateRangePicker({
         }}
         className="h-9 rounded-md border border-input bg-background px-2.5 py-1 text-sm text-foreground shadow-sm focus:outline-none focus:ring-1 focus:ring-ring cursor-pointer"
       >
-        {visiblePresets.map(p => (
+        {PRESETS.map(p => (
           <option key={p.id} value={p.id}>{p.label}</option>
         ))}
         <option value="custom">Custom Range</option>
@@ -153,6 +140,8 @@ export function DateRangePicker({
       <Input
         type="date"
         value={startDate}
+        min={minDate}
+        max={todayStr}
         onChange={e => handleManualChange('start', e.target.value)}
         className="w-[138px] h-9 text-sm"
       />
@@ -160,6 +149,8 @@ export function DateRangePicker({
       <Input
         type="date"
         value={endDate}
+        min={startDate}
+        max={todayStr}
         onChange={e => handleManualChange('end', e.target.value)}
         className="w-[138px] h-9 text-sm"
       />

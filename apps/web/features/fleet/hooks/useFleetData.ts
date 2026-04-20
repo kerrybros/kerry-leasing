@@ -41,6 +41,12 @@ export function useFleetData() {
   const driverData = useMemo(() => driverUtilQuery.data ?? [], [driverUtilQuery.data]);
   const repairUnits = useMemo(() => repairsQuery.data?.units ?? [], [repairsQuery.data]);
 
+  const earliestDataDate = useMemo(() => {
+    if (vehicleData.length === 0) return undefined;
+    const min = vehicleData.reduce((acc, r) => (r.date < acc ? r.date : acc), vehicleData[0].date);
+    return min.substring(0, 10);
+  }, [vehicleData]);
+
   const aggregations = useFleetAggregations({
     vehicleData,
     driverData,
@@ -51,21 +57,20 @@ export function useFleetData() {
     endDate: filters.endDate,
     repairStartDate: filters.startDate,
     repairEndDate: filters.endDate,
-    telematicsSelectedUnits: filters.telematicsSelectedUnits,
-    telematicsSelectedDrivers: filters.telematicsSelectedDrivers,
     selectedTableYear: filters.selectedTableYear,
     fuelPricePerGallon: orgSettings.dieselPricePerGallon ?? undefined,
   });
 
   const telematicsLoading =
-    orgSettingsQuery.isLoading ||
-    fleetUnitsQuery.isLoading ||
-    vehicleUtilQuery.isLoading ||
+    orgSettingsQuery.isPending ||
+    fleetUnitsQuery.isPending ||
+    vehicleUtilQuery.isPending ||
     // Keep skeleton when re-fetching but stale cached data yields nothing to show.
     // Prevents "No data available" flash when cache is stale or cross-org.
     (vehicleUtilQuery.isFetching && vehicleData.length === 0);
 
-  const repairsLoading = repairsQuery.isLoading;
+  // isPending covers both "org not loaded yet" (enabled=false) and "fetching first time"
+  const repairsLoading = repairsQuery.isPending;
   const repairsError = (repairsQuery.error as Error | null)?.message || null;
   const orgSettingsError = filters.orgErrorDismissed
     ? null
@@ -86,7 +91,6 @@ export function useFleetData() {
     isRefetching,
     repairsError,
     orgSettingsError,
-    fleetUnitsData: fleetUnitsQuery.data,
-    vehicleUtilData: vehicleUtilQuery.data,
+    earliestDataDate,
   };
 }
