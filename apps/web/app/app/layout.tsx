@@ -102,12 +102,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       hidden: !showDrivers,
     },
     {
-      href: '/app/team',
-      label: 'Users',
-      icon: Users,
-      active: !!pathname?.includes('/team'),
-    },
-    {
       href: '/app/whiparound',
       label: 'Whiparound',
       icon: ClipboardCheck,
@@ -118,6 +112,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       label: 'Idle Map',
       icon: Map,
       active: !!pathname?.includes('/idle-map'),
+    },
+    {
+      href: '/app/team',
+      label: 'Users',
+      icon: Users,
+      active: !!pathname?.includes('/team'),
     },
   ].filter((item) => !item.hidden), [pathname, isUnlocked, showDrivers]);
 
