@@ -499,11 +499,9 @@ router.get('/units/:identifier', clerkAuthMiddleware, requireOrg, async (req: Au
           // still fetch if only the unit number is known — unit numbers are unique
           // within a repair shop org so cross-customer contamination is unlikely.
           if (customerUnit.number) {
-            const customerFilter = servicePlanUnit.repairCustomerId
-              ? { customer_external_id: servicePlanUnit.repairCustomerId }
-              : customerUnit.customer
-                ? { customer: { equals: customerUnit.customer, mode: 'insensitive' as const } }
-                : {};
+            const customerFilter = customerUnit.customer
+              ? { customer: { equals: customerUnit.customer, mode: 'insensitive' as const } }
+              : {};
 
             const rows = await repairPrisma.revenue_details.findMany({
               where: {
