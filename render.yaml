@@ -33,7 +33,7 @@ services:
     runtime: node
     region: oregon
     plan: starter
-    schedule: "0 */4 * * *"  # every 4 hours
+    schedule: "0 12,14,17,20,23 * * *"  # EST business hours: 7am, 9am, 12pm, 3pm, 6pm (UTC-5; runs ~1h early during EDT)
     buildCommand: cd apps/api && pnpm install && pnpm prisma:app:generate && pnpm prisma:repair:generate && pnpm build
     startCommand: cd apps/api && node dist/scripts/run-whiparound-daily.js
     envVars:
