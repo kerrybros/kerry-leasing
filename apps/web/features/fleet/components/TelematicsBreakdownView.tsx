@@ -21,6 +21,7 @@ interface TelematicsBreakdownViewProps {
   fleetTotals: FleetTotals;
   selectedId: string | number | null;
   onRowClick: (id: string | number) => void;
+  vinToRepairUnitNumber?: Map<string, string>;
 }
 
 type SortKey = 'label' | 'totalMiles' | 'avgMpg' | 'idlePercentage' | 'idleFuel' | 'idleTimeMinutes' | 'totalFuelGal' | 'drivingFuelGal' | 'driveTimeHrs';
@@ -94,6 +95,7 @@ export function TelematicsBreakdownView({
   fleetTotals,
   selectedId,
   onRowClick,
+  vinToRepairUnitNumber,
 }: TelematicsBreakdownViewProps) {
   const router = useRouter();
   const [sortKey, setSortKey] = useState<SortKey>('totalMiles');
@@ -185,7 +187,7 @@ export function TelematicsBreakdownView({
   const handleItemClick = (m: UnitMetrics | DriverMetrics) => {
     const label = isUnit ? (m as UnitMetrics).unitNumber : (m as DriverMetrics).driverName;
     const href = isUnit
-      ? `/app/units/${encodeURIComponent((m as UnitMetrics).vin || (m as UnitMetrics).unitNumber || '')}`
+      ? `/app/units/${encodeURIComponent(vinToRepairUnitNumber?.get((m as UnitMetrics).vin) || (m as UnitMetrics).unitNumber || (m as UnitMetrics).vin || '')}`
       : `/app/drivers/${(m as DriverMetrics).driverId}`;
     setNavConfirm({ label, href });
   };

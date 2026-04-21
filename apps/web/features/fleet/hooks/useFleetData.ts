@@ -38,6 +38,14 @@ export function useFleetData() {
     return vehicleUtilQuery.data.filter(v => v.vin && includedVins.has(v.vin));
   }, [fleetUnitsQuery.data, vehicleUtilQuery.data]);
 
+  const vinToRepairUnitNumber = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const u of fleetUnitsQuery.data?.units ?? []) {
+      if (u.telematicsVin && u.repairUnitNumber) map.set(u.telematicsVin, u.repairUnitNumber);
+    }
+    return map;
+  }, [fleetUnitsQuery.data]);
+
   const driverData = useMemo(() => driverUtilQuery.data ?? [], [driverUtilQuery.data]);
   const repairUnits = useMemo(() => repairsQuery.data?.units ?? [], [repairsQuery.data]);
 
@@ -86,6 +94,7 @@ export function useFleetData() {
     ...aggregations,
     orgSettings,
     repairUnits,
+    vinToRepairUnitNumber,
     telematicsLoading,
     repairsLoading,
     isRefetching,

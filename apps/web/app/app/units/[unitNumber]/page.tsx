@@ -16,7 +16,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Skeleton } from '@/components/Skeleton';
-import { ArrowLeft, Loader2, Gauge, Clock, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, Loader2, Gauge, Clock, AlertTriangle, Hash } from 'lucide-react';
 import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid,
@@ -50,7 +50,7 @@ function periodToDates(period: Period): { startDate?: string; endDate?: string }
 export default function UnitDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const vin = params.unitNumber as string;
+  const vin = decodeURIComponent(params.unitNumber as string);
   const [activeTab, setActiveTab] = useState<TabId>('overview');
   const [selectedPeriod, setSelectedPeriod] = useState<Period>('90d');
   const [selectedTableYear, setSelectedTableYear] = useState<number>(() => new Date().getFullYear());
@@ -152,28 +152,18 @@ export default function UnitDetailPage() {
           >
             <ArrowLeft className="h-3.5 w-3.5" /> Back to Fleet
           </button>
-          <div className="flex items-end justify-between gap-4">
-            <div>
-              <div className="flex items-center gap-3">
-                <h1 className="text-2xl font-bold leading-none">Unit {unit.unitNumber}</h1>
-                {isRefetching && (
-                  <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <Loader2 className="h-3 w-3 animate-spin" /> Updating…
-                  </span>
-                )}
-              </div>
-              <div className="flex items-center gap-2 mt-1 text-sm text-muted-foreground">
-                <span className="font-mono text-xs">{unit.vin}</span>
-                {(unit.year || unit.make || unit.model) && (
-                  <>
-                    <span className="text-border">·</span>
-                    <span>{[unit.year, unit.make, unit.model].filter(Boolean).join(' ')}</span>
-                  </>
-                )}
-              </div>
+
+          {/* Row 1: title + period selector */}
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-2">
+              <h1 className="text-xl font-bold leading-none">Unit {unit.unitNumber}</h1>
+              {isRefetching && (
+                <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <Loader2 className="h-3 w-3 animate-spin" /> Updating…
+                </span>
+              )}
             </div>
-            {/* Period selector */}
-            <div className="flex items-center gap-1 pb-0.5">
+            <div className="flex items-center gap-1">
               {PERIODS.map(p => (
                 <button
                   key={p.id}
@@ -188,29 +178,38 @@ export default function UnitDetailPage() {
                 </button>
               ))}
             </div>
+          </div>
 
-            {/* Inline live stats */}
-            {liveStats && (liveStats.odometerMiles != null || liveStats.engineHours != null) && (
-              <div className="flex items-center gap-4 text-xs text-muted-foreground pb-0.5">
-                {liveStats.odometerMiles != null && (
-                  <div className="flex items-center gap-1">
-                    <Gauge className="h-3 w-3" />
-                    <span className="font-semibold text-foreground">{liveStats.odometerMiles.toLocaleString()}</span>
-                    <span>mi</span>
-                  </div>
-                )}
-                {liveStats.engineHours != null && (
-                  <div className="flex items-center gap-1">
-                    <Clock className="h-3 w-3" />
-                    <span className="font-semibold text-foreground">{liveStats.engineHours.toLocaleString()}</span>
-                    <span>hrs</span>
-                  </div>
-                )}
-                {liveStats.capturedAt && (
-                  <span className="opacity-60">as of {new Date(liveStats.capturedAt).toLocaleDateString()}</span>
-                )}
-              </div>
-            )}
+          {/* Row 2: subtitle + data chips */}
+          <div className="flex items-center justify-between gap-4 mt-0.5">
+            <p className="text-sm text-muted-foreground">
+              {[unit.year, unit.make, unit.model].filter(Boolean).join(' ')}
+            </p>
+            <div className="flex items-center gap-3 text-xs text-muted-foreground">
+              {unit.vin && (
+                <div className="flex items-center gap-1">
+                  <Hash className="h-3 w-3" />
+                  <span className="font-semibold text-foreground font-mono">{unit.vin}</span>
+                </div>
+              )}
+              {liveStats?.odometerMiles != null && (
+                <div className="flex items-center gap-1">
+                  <Gauge className="h-3 w-3" />
+                  <span className="font-semibold text-foreground">{liveStats.odometerMiles.toLocaleString()}</span>
+                  <span>mi</span>
+                </div>
+              )}
+              {liveStats?.engineHours != null && (
+                <div className="flex items-center gap-1">
+                  <Clock className="h-3 w-3" />
+                  <span className="font-semibold text-foreground">{liveStats.engineHours.toLocaleString()}</span>
+                  <span>hrs</span>
+                </div>
+              )}
+              {liveStats?.capturedAt && (liveStats.odometerMiles != null || liveStats.engineHours != null) && (
+                <span className="opacity-60">as of {new Date(liveStats.capturedAt).toLocaleDateString()}</span>
+              )}
+            </div>
           </div>
 
           {/* Tab nav */}
@@ -269,20 +268,6 @@ export default function UnitDetailPage() {
                   value={damageJobCount}
                   variant="warning"
                   subtext={`${repairJobs.size > 0 ? Math.round((damageJobCount / repairJobs.size) * 100) : 0}% of jobs`}
-                />
-              )}
-              {liveStats?.odometerMiles != null && (
-                <KpiCard
-                  label="Odometer"
-                  value={`${liveStats.odometerMiles.toLocaleString()} mi`}
-                  subtext={liveStats.capturedAt ? `as of ${new Date(liveStats.capturedAt).toLocaleDateString()}` : undefined}
-                />
-              )}
-              {liveStats?.engineHours != null && (
-                <KpiCard
-                  label="Engine Hours"
-                  value={`${liveStats.engineHours.toLocaleString()} hrs`}
-                  subtext={liveStats.capturedAt ? `as of ${new Date(liveStats.capturedAt).toLocaleDateString()}` : undefined}
                 />
               )}
             </div>

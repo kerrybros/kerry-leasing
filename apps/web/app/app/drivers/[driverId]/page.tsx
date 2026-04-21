@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useDriverUtilizationQuery, useVehicleUtilizationQuery, useFleetUnitsQuery, useOrgSettingsQuery, useDriverScorecardQuery } from '@/hooks/useDataQueries';
-import { Loader2 } from 'lucide-react';
+import { Loader2, ArrowLeft } from 'lucide-react';
 import { computeDriverScore } from '@/lib/driverScore';
 import { KpiCard } from '@/components/KpiCard';
 import { Skeleton } from '@/components/Skeleton';
@@ -277,39 +277,51 @@ export default function DriverDetailPage() {
   }
 
   return (
-    <div className="w-full p-6">
-      {/* Header */}
-      <div className="mb-6">
-        <Button variant="outline" size="sm" onClick={() => router.back()} className="mb-4">
-          Back to Drivers
-        </Button>
-        <div className="flex items-center justify-between gap-4 flex-wrap">
-          <div className="flex items-center gap-3">
-            <h1 className="text-3xl font-bold">{driverName}</h1>
-            {isRefetching && (
-              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <Loader2 className="h-3 w-3 animate-spin" /> Updating...
-              </span>
-            )}
+    <div className="flex flex-col min-h-full">
+      {/* Sticky page header */}
+      <div className="sticky top-0 z-20 bg-background border-b border-border">
+        <div className="max-w-[1200px] mx-auto px-6 py-3">
+          <button
+            onClick={() => router.back()}
+            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors mb-2"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" /> Back to Drivers
+          </button>
+
+          {/* Row 1: name + period selector */}
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-2">
+              <h1 className="text-xl font-bold leading-none">{driverName}</h1>
+              {isRefetching && (
+                <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <Loader2 className="h-3 w-3 animate-spin" /> Updating…
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-1">
+              {PERIODS.map(p => (
+                <button
+                  key={p.id}
+                  onClick={() => setSelectedPeriod(p.id)}
+                  className={`px-2 py-1 text-xs font-medium rounded transition-colors border ${
+                    selectedPeriod === p.id
+                      ? 'bg-primary text-primary-foreground border-primary'
+                      : 'border-border text-muted-foreground hover:text-foreground hover:border-foreground/40'
+                  }`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
           </div>
-          {/* Period selector */}
-          <div className="flex items-center gap-1">
-            {PERIODS.map(p => (
-              <button
-                key={p.id}
-                onClick={() => setSelectedPeriod(p.id)}
-                className={`px-2 py-1 text-xs font-medium rounded transition-colors border ${
-                  selectedPeriod === p.id
-                    ? 'bg-primary text-primary-foreground border-primary'
-                    : 'border-border text-muted-foreground hover:text-foreground hover:border-foreground/40'
-                }`}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
+
+          {/* Row 2: driver id */}
+          <p className="text-sm text-muted-foreground mt-0.5">Driver #{driverId}</p>
         </div>
       </div>
+
+      {/* Page content */}
+      <div className="max-w-[1200px] mx-auto px-6 py-6 w-full flex flex-col gap-6">
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 mb-8">
@@ -602,6 +614,7 @@ export default function DriverDetailPage() {
             )}
           </CardContent>
         </Card>
+      </div>
       </div>
     </div>
   );

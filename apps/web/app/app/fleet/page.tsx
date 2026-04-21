@@ -192,6 +192,7 @@ export default function FleetOverviewPage() {
           fleetTotals={fleet.fleetTotals}
           selectedId={fleet.selectedId}
           onRowClick={id => startTransition(() => fleet.setSelectedId(fleet.selectedId === id ? null : id))}
+          vinToRepairUnitNumber={fleet.vinToRepairUnitNumber}
         />
       ) : (
         <TelematicsBreakdownView
@@ -203,6 +204,7 @@ export default function FleetOverviewPage() {
           fleetTotals={fleet.fleetTotals}
           selectedId={fleet.selectedId}
           onRowClick={id => startTransition(() => fleet.setSelectedId(fleet.selectedId === id ? null : id))}
+          vinToRepairUnitNumber={fleet.vinToRepairUnitNumber}
         />
       )}
       </div>

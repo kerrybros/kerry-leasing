@@ -138,7 +138,7 @@ router.get('/units', clerkAuthMiddleware, requireOrg, async (req: AuthRequest, r
 
     // Bulk fetch repair unit info
     const repairUnitIds = servicePlanUnits
-      .filter((u) => u.repairVin && !u.repairUnitId.startsWith('telematics-'))
+      .filter((u) => !u.isTelematicsOnly)
       .map((u) => u.repairUnitId);
 
     const customerUnitsMap = new Map();
@@ -216,7 +216,7 @@ router.get('/units', clerkAuthMiddleware, requireOrg, async (req: AuthRequest, r
         }
       }
 
-      if (unit.repairVin && !unit.repairUnitId.startsWith('telematics-')) {
+      if (!unit.isTelematicsOnly) {
         const customerUnit = customerUnitsMap.get(unit.repairUnitId);
         if (customerUnit) {
           const latestRepair = customerUnit.number ? latestRepairsMap.get(customerUnit.number) : null;
@@ -370,6 +370,20 @@ router.get('/units/:identifier', clerkAuthMiddleware, requireOrg, async (req: Au
           },
           orderBy: { date: 'desc' },
         });
+
+        // Derive odometer from the latest driving period that has an odometer reading
+        const latestPeriod = await appPrisma.motiveDrivingPeriod.findFirst({
+          where: { clerkOrgId, vin: servicePlanUnit.telematicsVin, endKilometers: { not: null } },
+          orderBy: { endTime: 'desc' },
+          select: { endKilometers: true, endTime: true },
+        });
+        if (latestPeriod?.endKilometers != null) {
+          liveStats = {
+            odometerMiles: Math.round(latestPeriod.endKilometers / 1.609344),
+            engineHours: null,
+            capturedAt: latestPeriod.endTime ?? null,
+          };
+        }
       } else if (providerAccount?.provider === 'SAMSARA') {
         const records = await appPrisma.samsaraVehicleUtilization.findMany({
           where: { clerkOrgId, vin: servicePlanUnit.telematicsVin },
@@ -448,7 +462,7 @@ router.get('/units/:identifier', clerkAuthMiddleware, requireOrg, async (req: Au
 
     console.log(`[Fleet] Unit ${identifier}: repairUnitId=${servicePlanUnit.repairUnitId ?? 'null'}, telematicsVin=${servicePlanUnit.telematicsVin ?? 'null'}`);
 
-    if (servicePlanUnit.repairUnitId && !servicePlanUnit.repairUnitId.startsWith('telematics-')) {
+    if (!servicePlanUnit.isTelematicsOnly && servicePlanUnit.repairUnitId) {
       try {
         console.log(`[Fleet] Getting repair data for unit ID: ${servicePlanUnit.repairUnitId}`);
         
