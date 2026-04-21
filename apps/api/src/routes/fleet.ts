@@ -245,6 +245,7 @@ router.get('/units', clerkAuthMiddleware, requireOrg, async (req: AuthRequest, r
         matchType: unit.matchType,
         repairVin: unit.repairVin,
         telematicsVin: unit.telematicsVin,
+        unitType: unit.unitType ?? null,
         telematics: telematicsData,
         repair: repairData,
         lastSyncedAt: unit.lastSyncedAt,
@@ -661,10 +662,12 @@ router.get('/idle-events', clerkAuthMiddleware, requireOrg, async (req: AuthRequ
     // Get included service plan units only — excluded units are filtered out
     const servicePlanUnits = await appPrisma.servicePlanUnit.findMany({
       where: { clerkOrgId, isIncluded: true },
-      select: { telematicsVin: true, repairUnitNumber: true },
+      select: { telematicsVin: true, repairUnitNumber: true, unitType: true },
     });
     const includedVins = new Set(servicePlanUnits.filter(u => u.telematicsVin).map(u => u.telematicsVin!));
     const unitNumberByVin = new Map(servicePlanUnits.filter(u => u.telematicsVin).map(u => [u.telematicsVin!, u.repairUnitNumber ?? null]));
+    const unitTypeByVin = new Map(servicePlanUnits.filter(u => u.telematicsVin).map(u => [u.telematicsVin!, u.unitType ?? null]));
+    const unitTypeByUnitNumber = new Map(servicePlanUnits.filter(u => u.repairUnitNumber).map(u => [u.repairUnitNumber!, u.unitType ?? null]));
 
     let events: any[] = [];
 
@@ -698,6 +701,14 @@ router.get('/idle-events', clerkAuthMiddleware, requireOrg, async (req: AuthRequ
             ? new Date(r.endTime).getTime() - new Date(r.startTime).getTime()
             : null;
           const unitNumber = r.vin ? (unitNumberByVin.get(r.vin) ?? r.vehicleNumber) : r.vehicleNumber;
+          const unitType = (() => {
+            if (r.vin) {
+              const t = unitTypeByVin.get(r.vin);
+              if (t !== undefined) return t;
+            }
+            if (unitNumber) return unitTypeByUnitNumber.get(unitNumber) ?? null;
+            return null;
+          })();
           return {
             id: String(r.motiveEventId),
             unitNumber: unitNumber ?? null,
@@ -714,7 +725,6 @@ router.get('/idle-events', clerkAuthMiddleware, requireOrg, async (req: AuthRequ
               const city = r.city?.trim() ?? '';
               const state = r.state?.trim() ?? '';
               if (!loc) return [city, state].filter(Boolean).join(', ') || null;
-              // If state is known but not already present in location string, append it
               if (state && !loc.includes(state)) return `${loc}, ${state}`;
               return loc;
             })(),
@@ -722,6 +732,7 @@ router.get('/idle-events', clerkAuthMiddleware, requireOrg, async (req: AuthRequ
             driverFirstName: r.driverFirstName ?? null,
             driverLastName: r.driverLastName ?? null,
             endType: r.endType ?? null,
+            unitType,
           };
         });
     } else if (providerAccount?.provider === 'SAMSARA') {
@@ -741,6 +752,9 @@ router.get('/idle-events', clerkAuthMiddleware, requireOrg, async (req: AuthRequ
       const includedAssetIds = new Set(
         vehicleMaps.filter(v => v.vin && includedVins.has(v.vin)).map(v => v.providerVehicleId)
       );
+      const unitTypeByAssetId = new Map(
+        vehicleMaps.filter(v => v.vin).map(v => [v.providerVehicleId, unitTypeByVin.get(v.vin!) ?? null])
+      );
       events = rows
         .filter(r => includedAssetIds.size === 0 || includedAssetIds.has(r.assetId))
         .map(r => ({
@@ -754,6 +768,7 @@ router.get('/idle-events', clerkAuthMiddleware, requireOrg, async (req: AuthRequ
           lat: null,
           lon: null,
           location: null,
+          unitType: unitTypeByAssetId.get(r.assetId) ?? null,
         }));
     }
 

@@ -4,7 +4,7 @@ import { useState, useMemo, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useOrganization } from '@clerk/nextjs';
 import { useUser } from '@clerk/nextjs';
-import { Loader2, Info, X, Settings2, ArrowRight } from 'lucide-react';
+import { Loader2, Info, X, Settings2, ArrowRight, Download } from 'lucide-react';
 import { Skeleton } from '@/components/Skeleton';
 import { EmptyState } from '@/components/EmptyState';
 import {
@@ -90,13 +90,6 @@ const ALL_COLUMNS: {
     label: 'Idle Time (hrs)',
     shortLabel: 'Idle (hrs)',
     higherIsBetter: false,
-    format: v => v.toLocaleString(),
-  },
-  {
-    key: 'engineTimeHrs',
-    label: 'Engine Time (hrs)',
-    shortLabel: 'Engine (hrs)',
-    higherIsBetter: true,
     format: v => v.toLocaleString(),
   },
   {
@@ -223,7 +216,6 @@ function ScoreFormulaPopover() {
               { label: 'Idle %',       weight: '30%', desc: '0% idle → 100 pts · ≥50% idle → 0 pts (linear)' },
               { label: 'Safety',       weight: '20%', desc: '0 hard events → 100 pts; exponential decay per event' },
               { label: 'MPG vs Fleet', weight: '25%', desc: 'Fleet average earns 60 pts; scaled proportionally' },
-              { label: 'Utilization',  weight: '15%', desc: 'Drive time ÷ total engine-on time (0–100%)' },
               { label: 'Fuel Economy', weight: '10%', desc: 'Driving fuel ÷ total fuel — lower idle burn = higher pts' },
             ].map(row => (
               <div key={row.label} className="flex items-start gap-2">
@@ -419,6 +411,25 @@ export default function ScorecardPage() {
 
   const prevLabel = granularity === 'monthly' ? 'previous month' : 'previous week';
 
+  const handleExportCsv = () => {
+    const headers = ['Driver', ...activeCols.map(c => c.label), 'Score'];
+    const rows = sorted.map(row => [
+      row.driverName,
+      ...activeCols.map(c => {
+        const raw = c.format(row[c.key] as number);
+        // Replace display-only em-dashes with 0 so Excel reads it as a number
+        return raw === '—' ? '0' : raw;
+      }),
+      row.score.toFixed(0),
+    ]);
+    const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const filename = `scorecard-${currentPeriod.label.replace(/\s/g, '-').toLowerCase()}.csv`;
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+    const a = document.createElement('a');
+    a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
+  };
+
   if (orgSettingsQuery.isLoading) {
     return (
       <div className="w-full p-6">
@@ -459,21 +470,33 @@ export default function ScorecardPage() {
             <p className="text-muted-foreground text-sm mt-0.5">{organization?.name}</p>
           </div>
 
-          {/* View toggle */}
-          <div className="flex rounded-lg border border-border overflow-hidden">
-            {(['scorecard', 'mom'] as const).map(v => (
+          <div className="flex items-center gap-2">
+            {pageView === 'scorecard' && (
               <button
-                key={v}
-                className={`px-3 py-1.5 text-xs font-medium transition-colors border-l first:border-l-0 border-border cursor-pointer ${
-                  pageView === v
-                    ? 'bg-primary text-primary-foreground'
-                    : 'text-muted-foreground bg-transparent hover:bg-accent'
-                }`}
-                onClick={() => setPageView(v)}
+                onClick={handleExportCsv}
+                className="flex items-center gap-1.5 h-8 px-3 rounded-md border border-border bg-background text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer"
               >
-                {v === 'scorecard' ? 'Scorecard' : 'Period Trends'}
+                <Download className="h-3.5 w-3.5" />
+                Export CSV
               </button>
-            ))}
+            )}
+
+            {/* View toggle */}
+            <div className="flex rounded-lg border border-border overflow-hidden">
+              {(['scorecard', 'mom'] as const).map(v => (
+                <button
+                  key={v}
+                  className={`px-3 py-1.5 text-xs font-medium transition-colors border-l first:border-l-0 border-border cursor-pointer ${
+                    pageView === v
+                      ? 'bg-primary text-primary-foreground'
+                      : 'text-muted-foreground bg-transparent hover:bg-accent'
+                  }`}
+                  onClick={() => setPageView(v)}
+                >
+                  {v === 'scorecard' ? 'Scorecard' : 'Period Trends'}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </div>

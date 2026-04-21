@@ -9,6 +9,7 @@ import { RepairBreakdown } from '@/features/fleet/components/RepairBreakdown';
 import { TelematicsTrendsView } from '@/features/fleet/components/TelematicsTrendsView';
 import { TelematicsBreakdownView } from '@/features/fleet/components/TelematicsBreakdownView';
 import { useFleetData } from '@/features/fleet/hooks/useFleetData';
+import { UnitTypeFilter } from '@/components/UnitTypeFilter';
 
 function formatDateLabel(start: string, end: string): string {
   const today = new Date();
@@ -34,7 +35,7 @@ export default function FleetOverviewPage() {
   return (
     <div className="w-full">
       {/* Sticky Page Header */}
-      <div className="sticky top-0 z-20 bg-background border-b border-border px-6 py-3">
+      <div className="sticky top-0 z-20 bg-background border-b border-border px-3 py-3">
         <div className="flex items-center justify-between gap-4">
           {/* Left: title */}
           <div className="shrink-0">
@@ -49,8 +50,13 @@ export default function FleetOverviewPage() {
             <p className="text-muted-foreground text-sm mt-0.5">{organization?.name}</p>
           </div>
 
-          {/* Right: date picker */}
-          <div className="shrink-0">
+          {/* Right: unit type filter + date picker */}
+          <div className="flex items-center gap-3 shrink-0 flex-wrap justify-end">
+            <UnitTypeFilter
+              value={fleet.selectedUnitTypes}
+              onChange={fleet.setSelectedUnitTypes}
+              availableTypes={fleet.availableUnitTypes}
+            />
             <DateRangePicker
               startDate={fleet.startDate}
               endDate={fleet.endDate}
@@ -62,7 +68,7 @@ export default function FleetOverviewPage() {
         </div>
       </div>
 
-      <div className="px-6 pt-4 pb-6">
+      <div className="px-3 pt-4 pb-6">
 
       {fleet.orgSettingsError && (
         <div className="mb-4 px-4 py-3 rounded-lg bg-amber-500/15 border border-amber-500/40 text-amber-800 dark:text-amber-200 text-sm flex items-center justify-between gap-4">
@@ -84,9 +90,9 @@ export default function FleetOverviewPage() {
           <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Fleet Totals</h2>
           <p className="text-xs text-muted-foreground">{dateLabel}</p>
         </div>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-5 gap-3">
           {(fleet.telematicsLoading || fleet.repairsLoading) ? (
-            Array.from({ length: 9 }).map((_, i) => <SkeletonKpiCard key={i} />)
+            Array.from({ length: 10 }).map((_, i) => <SkeletonKpiCard key={i} />)
           ) : (
             <>
               <KpiCard label="Total Fleet Miles" value={fleet.fleetKpis.totalMiles.toLocaleString()} subtext="miles" />

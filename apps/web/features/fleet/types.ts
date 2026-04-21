@@ -8,6 +8,7 @@ export interface MonthlyMetrics {
   idleTimeMinutes: number;
   totalFuel: number;
   drivingFuel: number;
+  utilPct: number;
 }
 
 export interface UnitMetrics {
@@ -22,6 +23,7 @@ export interface UnitMetrics {
   drivingFuelGal: number;
   driveTimeHrs: number;
   engineTimeHrs: number;
+  utilPct: string;
 }
 
 export interface DriverMetrics {
@@ -36,6 +38,7 @@ export interface DriverMetrics {
   drivingFuelGal: number;
   driveTimeHrs: number;
   engineTimeHrs: number;
+  utilPct: string;
 }
 
 export interface FleetTotals {

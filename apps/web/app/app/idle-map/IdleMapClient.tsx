@@ -8,7 +8,7 @@ import { useApiClient } from '@/hooks/useApiClient';
 import booleanPointInPolygon from '@turf/boolean-point-in-polygon';
 import { point, polygon } from '@turf/helpers';
 
-import { useOrgSettingsQuery } from '@/hooks/useDataQueries';
+import { useOrgSettingsQuery, type UnitType } from '@/hooks/useDataQueries';
 
 import {
   type DateRange,
@@ -99,8 +99,10 @@ export default function IdleMapClient() {
   });
 
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
+  const [selectedUnitTypes, setSelectedUnitTypes] = useState<UnitType[]>([]);
   const [modalTarget, setModalTarget] = useState<ModalTarget | null>(null);
   const [unitPanelOpen, setUnitPanelOpen] = useState(true);
+  const [flyToCoords, setFlyToCoords] = useState<{ lat: number; lon: number } | null>(null);
 
   // Sync UI state to URL params
   const handleDateRangeChange = useCallback(
@@ -208,15 +210,24 @@ export default function IdleMapClient() {
     });
   }, [eventsData?.events, geofences, groupBy]);
 
+  const availableUnitTypes = useMemo(() => {
+    const types = new Set<UnitType>();
+    for (const e of enrichedEvents) {
+      if (e.unitType) types.add(e.unitType as UnitType);
+    }
+    return Array.from(types);
+  }, [enrichedEvents]);
+
   // --- Apply filters ---
   const filteredEvents = useMemo<EnrichedIdleEvent[]>(() => {
     return enrichedEvents.filter(e => {
       if (selectedKeys.length > 0 && !selectedKeys.includes(e.groupKey)) return false;
       if (filters.geofenceScope === 'inside' && e.geofenceId == null) return false;
       if (filters.geofenceScope === 'outside' && e.geofenceId != null) return false;
+      if (selectedUnitTypes.length > 0 && !selectedUnitTypes.includes(e.unitType as UnitType)) return false;
       return true;
     });
-  }, [enrichedEvents, filters, selectedKeys]);
+  }, [enrichedEvents, filters, selectedKeys, selectedUnitTypes]);
 
   // Treat as loading until org is resolved — prevents "No data" flash before the query starts
   const eventsLoading = eventsQueryLoading || !organization?.id;
@@ -236,6 +247,9 @@ export default function IdleMapClient() {
         onGeofenceVisibleChange={handleGeofenceVisibleChange}
         filters={filters}
         onFiltersChange={setFilters}
+        selectedUnitTypes={selectedUnitTypes}
+        onUnitTypesChange={setSelectedUnitTypes}
+        availableUnitTypes={availableUnitTypes}
         loading={eventsLoading}
       />
 
@@ -247,6 +261,7 @@ export default function IdleMapClient() {
           bubbleMode={bubbleMode}
           geofenceVisible={geofenceVisible}
           loading={eventsLoading}
+          flyToCoords={flyToCoords}
           onEventClick={(eventId) => {
             setModalTarget({ type: 'event', eventId, initialTab: 'events' });
           }}
@@ -301,6 +316,10 @@ export default function IdleMapClient() {
           dieselPrice={dieselPrice}
           scopeFilter={modalTarget}
           onClose={() => setModalTarget(null)}
+          onViewOnMap={(lat, lon) => {
+            setModalTarget(null);
+            setFlyToCoords({ lat, lon });
+          }}
         />
       )}
     </div>

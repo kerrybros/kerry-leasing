@@ -20,6 +20,7 @@ type DriverSums = {
   totalIdleTime: number;
   totalDrivingTime: number;
   totalIdleFuel: number;
+  recordCount: number;
 };
 
 export type MonthlyDriverData = {
@@ -48,13 +49,14 @@ function buildDriverSums(records: DriverUtilization[]): Map<number, DriverSums> 
       driverId: r.driverId,
       driverName: `${r.driverFirstName || ''} ${r.driverLastName || ''}`.trim() || `Driver ${r.driverId}`,
       totalMiles: 0, totalFuel: 0,
-      totalIdleTime: 0, totalDrivingTime: 0, totalIdleFuel: 0,
+      totalIdleTime: 0, totalDrivingTime: 0, totalIdleFuel: 0, recordCount: 0,
     };
     existing.totalMiles += r.totalDistance || 0;
     existing.totalFuel += (r.drivingFuel || 0) + (r.idleFuel || 0);
     existing.totalIdleTime += r.idleTime || 0;
     existing.totalDrivingTime += r.drivingTime || 0;
     existing.totalIdleFuel += r.idleFuel || 0;
+    existing.recordCount += 1;
     grouped.set(r.driverId, existing);
   });
   return grouped;
@@ -67,6 +69,7 @@ function sumsToRow(sums: DriverSums, fleetAvgMpg: number | undefined, dieselPric
   const avgMpg = sums.totalFuel > 0 && sums.totalMiles > 0 ? sums.totalMiles / sums.totalFuel : 0;
   const drivingFuelGal = Math.max(0, sums.totalFuel - sums.totalIdleFuel);
   const drivingFuelRatio = sums.totalFuel > 0 ? drivingFuelGal / sums.totalFuel : 1;
+  const utilPct = sums.recordCount > 0 ? (engineOnSec / (sums.recordCount * 86400)) * 100 : 0;
   const score = computeDriverScore({
     idlePct,
     mpg: avgMpg,
@@ -87,6 +90,7 @@ function sumsToRow(sums: DriverSums, fleetAvgMpg: number | undefined, dieselPric
     driveTimeHrs: Math.round((sums.totalDrivingTime / 3600) * 10) / 10,
     idleTimeHrs: Math.round((sums.totalIdleTime / 3600) * 10) / 10,
     engineTimeHrs: Math.round((engineOnSec / 3600) * 10) / 10,
+    utilPct,
     estimatedFuelCost: Math.round(sums.totalFuel * dieselPrice),
     safetyViolations: 0,
     hardEvents: 0,
@@ -195,13 +199,14 @@ export function useDriversData(startDate: string, endDate: string, scorecardEnab
         driverId: r.driverId,
         driverName: name,
         totalMiles: 0, totalFuel: 0,
-        totalIdleTime: 0, totalDrivingTime: 0, totalIdleFuel: 0,
+        totalIdleTime: 0, totalDrivingTime: 0, totalIdleFuel: 0, recordCount: 0,
       };
       existing.totalMiles += r.totalDistance || 0;
       existing.totalFuel += (r.drivingFuel || 0) + (r.idleFuel || 0);
       existing.totalIdleTime += r.idleTime || 0;
       existing.totalDrivingTime += r.drivingTime || 0;
       existing.totalIdleFuel += r.idleFuel || 0;
+      existing.recordCount += 1;
       weekMap.set(weekKey, existing);
     });
 
@@ -239,13 +244,14 @@ export function useDriversData(startDate: string, endDate: string, scorecardEnab
         driverId: r.driverId,
         driverName: name,
         totalMiles: 0, totalFuel: 0,
-        totalIdleTime: 0, totalDrivingTime: 0, totalIdleFuel: 0,
+        totalIdleTime: 0, totalDrivingTime: 0, totalIdleFuel: 0, recordCount: 0,
       };
       existing.totalMiles += r.totalDistance || 0;
       existing.totalFuel += (r.drivingFuel || 0) + (r.idleFuel || 0);
       existing.totalIdleTime += r.idleTime || 0;
       existing.totalDrivingTime += r.drivingTime || 0;
       existing.totalIdleFuel += r.idleFuel || 0;
+      existing.recordCount += 1;
       monthMap.set(monthKey, existing);
     });
 

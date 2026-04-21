@@ -27,6 +27,22 @@ export function useFleetData() {
   const driverUtilQuery = useDriverUtilizationQuery(canLoadDrivers ?? false);
   const repairsQuery = useRepairsQuery();
 
+  const vinToUnitType = useMemo(() => {
+    const map = new Map<string, string | null>();
+    for (const u of fleetUnitsQuery.data?.units ?? []) {
+      if (u.telematicsVin) map.set(u.telematicsVin, u.unitType ?? null);
+    }
+    return map;
+  }, [fleetUnitsQuery.data]);
+
+  const availableUnitTypes = useMemo(() => {
+    const types = new Set<string>();
+    for (const t of vinToUnitType.values()) {
+      if (t) types.add(t);
+    }
+    return Array.from(types) as import('@/hooks/useDataQueries').UnitType[];
+  }, [vinToUnitType]);
+
   // Filter vehicle data to only include fleet units with a telematicsVin.
   // If no service plan units have VINs configured (e.g. new customer), show all telematics data.
   const vehicleData = useMemo(() => {
@@ -34,9 +50,12 @@ export function useFleetData() {
     const includedVins = new Set(
       fleetUnitsQuery.data.units.filter(u => u.telematicsVin).map(u => u.telematicsVin!)
     );
-    if (includedVins.size === 0) return vehicleUtilQuery.data;
-    return vehicleUtilQuery.data.filter(v => v.vin && includedVins.has(v.vin));
-  }, [fleetUnitsQuery.data, vehicleUtilQuery.data]);
+    let data = includedVins.size === 0 ? vehicleUtilQuery.data : vehicleUtilQuery.data.filter(v => v.vin && includedVins.has(v.vin));
+    if (filters.selectedUnitTypes.length > 0) {
+      data = data.filter(v => filters.selectedUnitTypes.includes((v.vin ? vinToUnitType.get(v.vin) : null) as any));
+    }
+    return data;
+  }, [fleetUnitsQuery.data, vehicleUtilQuery.data, filters.selectedUnitTypes, vinToUnitType]);
 
   const vinToRepairUnitNumber = useMemo(() => {
     const map = new Map<string, string>();
@@ -95,6 +114,7 @@ export function useFleetData() {
     orgSettings,
     repairUnits,
     vinToRepairUnitNumber,
+    availableUnitTypes,
     telematicsLoading,
     repairsLoading,
     isRefetching,

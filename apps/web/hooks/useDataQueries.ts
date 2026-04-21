@@ -56,6 +56,7 @@ export type FleetUnit = {
   matchType: string;
   repairVin: string | null;
   telematicsVin: string | null;
+  unitType: UnitType | null;
   telematics: unknown | null;
   repair: unknown | null;
   lastSyncedAt: string | null;

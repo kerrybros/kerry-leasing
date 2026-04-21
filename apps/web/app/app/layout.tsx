@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useLayoutEffect, useRef, useMemo } from 'react';
-import { UserButton, OrganizationSwitcher } from '@clerk/nextjs';
+import { UserButton, OrganizationSwitcher, useOrganization } from '@clerk/nextjs';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { OrgBrandTheme } from '@/components/OrgBrandTheme';
 import Link from 'next/link';
@@ -20,7 +20,7 @@ import {
   SidebarMenuItem,
   SidebarProvider,
 } from '@/components/ui/sidebar';
-import { Truck, Settings, Users, MessageSquare, Building2, Activity, ClipboardCheck, Map, KeyRound, Lock } from 'lucide-react';
+import { Truck, Settings, Users, Building2, Activity, ClipboardCheck, Map, KeyRound, Lock, FileSpreadsheet } from 'lucide-react';
 
 const defaultOrgSettings = {
   tracksDrivers: true,
@@ -39,10 +39,12 @@ const INTERNAL_PIN = '5255';
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { data: orgSettings = defaultOrgSettings } = useOrgSettingsQuery();
+  const { organization } = useOrganization();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
   const showDrivers = orgSettings.tracksDrivers;
+  const showServiceLog = organization?.id === 'org_39B7lu1b8YKds8IOtzrk6LpKnLW';
 
   // Session-gated internal access — cleared on hard refresh.
   // useLayoutEffect reads sessionStorage before first paint so there's no flash.
@@ -95,6 +97,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       active: !!pathname?.includes('/fleet') || !!pathname?.includes('/units'),
     },
     {
+      href: '/app/daily-service',
+      label: 'Service Log',
+      icon: FileSpreadsheet,
+      active: !!pathname?.includes('/daily-service'),
+      hidden: !showServiceLog,
+    },
+    {
       href: '/app/drivers',
       label: 'Scorecard',
       icon: Users,
@@ -119,11 +128,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       icon: Users,
       active: !!pathname?.includes('/team'),
     },
-  ].filter((item) => !item.hidden), [pathname, isUnlocked, showDrivers]);
-
-  const comingSoonItems = [
-    { label: 'Chat', icon: MessageSquare, href: '/app/chat' },
-  ];
+  ].filter((item) => !item.hidden), [pathname, isUnlocked, showDrivers, showServiceLog]);
 
   return (
     <SidebarProvider
@@ -163,28 +168,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                     <SidebarMenuButton
                       render={<Link href={item.href} />}
                       isActive={item.active}
-                    >
-                      <item.icon />
-                      <span>{item.label}</span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-
-          {/* Coming Soon section */}
-          <SidebarGroup>
-            <div className="px-3 pb-1">
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-sidebar-foreground/40">Coming Soon</p>
-            </div>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                {comingSoonItems.map((item) => (
-                  <SidebarMenuItem key={item.label}>
-                    <SidebarMenuButton
-                      render={<Link href={item.href} />}
-                      isActive={!!pathname?.includes(item.href)}
+                      className={item.active ? 'bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground' : ''}
                     >
                       <item.icon />
                       <span>{item.label}</span>

@@ -25,6 +25,7 @@ interface Props {
   dieselPrice: number;
   scopeFilter: ModalTarget;
   onClose: () => void;
+  onViewOnMap: (lat: number, lon: number) => void;
 }
 
 type SortKey = 'date' | 'duration' | 'fuel' | 'cost' | 'unit' | 'driver';
@@ -90,11 +91,13 @@ function EventsTable({
   dieselPrice,
   onUnitClick,
   onDriverClick,
+  onViewOnMap,
 }: {
   events: EnrichedIdleEvent[];
   dieselPrice: number;
   onUnitClick?: (unit: string) => void;
   onDriverClick?: (driver: string) => void;
+  onViewOnMap?: (lat: number, lon: number) => void;
 }) {
   const [page, setPage] = useState(0);
   const [sortKey, setSortKey] = useState<SortKey>('date');
@@ -152,6 +155,7 @@ function EventsTable({
             <col className="w-16" />
             <col className="w-16" />
             <col className="w-36" />
+            <col className="w-24" />
             <col className="w-14" />
             <col className="w-16" />
             <col className="w-20" />
@@ -163,6 +167,7 @@ function EventsTable({
               <SortTh k="date">Date</SortTh>
               <SortTh k="duration">Duration</SortTh>
               <TableHead className="text-xs">Address</TableHead>
+              <TableHead className="text-xs"></TableHead>
               <SortTh k="fuel">Fuel</SortTh>
               <SortTh k="cost">Est. Cost</SortTh>
               <TableHead className="text-xs">Geofence</TableHead>
@@ -200,7 +205,19 @@ function EventsTable({
                     {formatDuration(e.durationMinutes)}
                   </span>
                 </TableCell>
-                <TableCell className="text-muted-foreground text-xs truncate">{e.location ?? '—'}</TableCell>
+                <TableCell className="text-muted-foreground text-xs truncate">
+                  {e.location ?? '—'}
+                </TableCell>
+                <TableCell>
+                  {e.lat != null && e.lon != null && onViewOnMap && (
+                    <button
+                      onClick={() => onViewOnMap(e.lat!, e.lon!)}
+                      className="text-[10px] font-medium text-primary hover:text-primary/80 border border-primary/40 hover:border-primary/60 rounded px-1.5 py-0.5 transition-colors whitespace-nowrap"
+                    >
+                      View on Map
+                    </button>
+                  )}
+                </TableCell>
                 <TableCell className="text-muted-foreground">{fuelStr(e.idleFuelGallons)}</TableCell>
                 <TableCell className="text-muted-foreground">{costStr(e.idleFuelGallons, dieselPrice)}</TableCell>
                 <TableCell>
@@ -212,7 +229,7 @@ function EventsTable({
             ))}
             {slice.length === 0 && (
               <TableRow>
-                <TableCell colSpan={8} className="text-center text-muted-foreground py-8 text-sm">
+                <TableCell colSpan={9} className="text-center text-muted-foreground py-8 text-sm">
                   No events
                 </TableCell>
               </TableRow>
@@ -487,6 +504,7 @@ export default function IdleReportModal({
   dieselPrice,
   scopeFilter,
   onClose,
+  onViewOnMap,
 }: Props) {
   const [activeTab, setActiveTab] = useState(scopeFilter.initialTab ?? 'events');
   // drilldown: set when user clicks unit/driver from All Events table to navigate + expand that row
@@ -655,6 +673,10 @@ export default function IdleReportModal({
                   onDriverClick={(d) => {
                     setDrilldown({ tab: 'drivers', key: d });
                     setActiveTab('drivers');
+                  }}
+                  onViewOnMap={(lat, lon) => {
+                    onClose();
+                    onViewOnMap(lat, lon);
                   }}
                 />
               </TabsContent>

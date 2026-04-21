@@ -23,6 +23,7 @@ export interface IdleEvent {
   driverFirstName: string | null;
   driverLastName: string | null;
   endType: string | null;
+  unitType: string | null;
 }
 
 export interface EnrichedIdleEvent extends IdleEvent {

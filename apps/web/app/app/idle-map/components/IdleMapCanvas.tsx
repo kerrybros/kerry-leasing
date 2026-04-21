@@ -15,6 +15,7 @@ interface Props {
   bubbleMode: BubbleMode;
   geofenceVisible: boolean;
   loading: boolean;
+  flyToCoords: { lat: number; lon: number } | null;
   onEventClick: (eventId: string) => void;
   onClusterClick: (groupKey: string) => void;
   onClusterEventsClick: (eventIds: string[]) => void;
@@ -120,6 +121,7 @@ export default function IdleMapCanvas({
   bubbleMode,
   geofenceVisible,
   loading,
+  flyToCoords,
   onEventClick,
   onClusterClick,
   onClusterEventsClick,
@@ -145,9 +147,26 @@ export default function IdleMapCanvas({
 
   const geofenceGeoJSON = useMemo(() => geofencesToGeoJSON(geofences), [geofences]);
 
+  const [highlightCoords, setHighlightCoords] = useState<{ lat: number; lon: number } | null>(null);
+
+  const highlightGeoJSON = useMemo((): GeoJSON.FeatureCollection => ({
+    type: 'FeatureCollection',
+    features: highlightCoords ? [{
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [highlightCoords.lon, highlightCoords.lat] },
+      properties: {},
+    }] : [],
+  }), [highlightCoords]);
+
   const handleMapLoad = useCallback(() => {
     setMapLoaded(true);
   }, []);
+
+  useEffect(() => {
+    if (!flyToCoords || !mapRef.current) return;
+    mapRef.current.getMap().flyTo({ center: [flyToCoords.lon, flyToCoords.lat], zoom: 18 });
+    setHighlightCoords(flyToCoords);
+  }, [flyToCoords]);
 
   // Fit camera to events when both map and events are ready.
   // Uses map.once('idle') to defer until basemap tiles are loaded, avoiding a race condition
@@ -193,8 +212,18 @@ export default function IdleMapCanvas({
   }, [mapLoaded, eventsWithCoords.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleMouseMove = useCallback((e: MapLayerMouseEvent) => {
-    if (!mapRef.current || !geofenceVisible) { setGeofenceTooltip(null); return; }
+    if (!mapRef.current) { setGeofenceTooltip(null); return; }
     const map = mapRef.current.getMap();
+
+    // Clear fly-to highlight when hovering over any event bubble
+    const bubbleLayers = ['cluster-circles', 'individual-circles', 'raw-circles', 'heatmap-circles'].filter(id => {
+      try { return !!map.getLayer(id); } catch { return false; }
+    });
+    if (bubbleLayers.length > 0 && map.queryRenderedFeatures(e.point, { layers: bubbleLayers }).length > 0) {
+      setHighlightCoords(null);
+    }
+
+    if (!geofenceVisible) { setGeofenceTooltip(null); return; }
     if (!map.getLayer('geofence-fill')) { setGeofenceTooltip(null); return; }
     const features = map.queryRenderedFeatures(e.point, { layers: ['geofence-fill'] });
     if (features.length > 0) {
@@ -407,6 +436,33 @@ export default function IdleMapCanvas({
             />
           </Source>
         )}
+
+        {/* ── Fly-to highlight marker ────────────────────────── */}
+        <Source id="highlight-source" type="geojson" data={highlightGeoJSON}>
+          <Layer
+            id="highlight-ring"
+            type="circle"
+            paint={{
+              'circle-radius': 20,
+              'circle-color': '#f97316',
+              'circle-opacity': 0.3,
+              'circle-stroke-width': 3,
+              'circle-stroke-color': '#f97316',
+              'circle-stroke-opacity': 0.9,
+            }}
+          />
+          <Layer
+            id="highlight-dot"
+            type="circle"
+            paint={{
+              'circle-radius': 8,
+              'circle-color': '#f97316',
+              'circle-opacity': 1,
+              'circle-stroke-width': 2.5,
+              'circle-stroke-color': '#fff',
+            }}
+          />
+        </Source>
 
         {geofenceTooltip && (
           <Popup

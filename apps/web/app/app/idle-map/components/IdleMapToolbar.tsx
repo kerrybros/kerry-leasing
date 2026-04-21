@@ -10,6 +10,8 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { cn } from '@/lib/utils';
 
 import type { DateRange, ViewMode, BubbleMode, FilterState } from '../types';
+import { UnitTypeFilter } from '@/components/UnitTypeFilter';
+import type { UnitType } from '@/hooks/useDataQueries';
 
 interface Props {
   dateRange: DateRange;
@@ -22,6 +24,9 @@ interface Props {
   onGeofenceVisibleChange: (v: boolean) => void;
   filters: FilterState;
   onFiltersChange: (f: FilterState) => void;
+  selectedUnitTypes: UnitType[];
+  onUnitTypesChange: (types: UnitType[]) => void;
+  availableUnitTypes: UnitType[];
   loading: boolean;
 }
 
@@ -62,6 +67,11 @@ const DATE_PRESETS: DatePreset[] = [
     from: () => { const d = new Date(); return ymd(new Date(d.getFullYear(), d.getMonth() - 1, 1)); },
     to: () => { const d = new Date(); return ymd(new Date(d.getFullYear(), d.getMonth(), 0)); },
   },
+  {
+    label: 'Last 12 Months',
+    from: () => { const d = new Date(); d.setMonth(d.getMonth() - 12); return ymd(d); },
+    to: () => ymd(new Date()),
+  },
 ];
 
 function formatDateRangeLabel(range: DateRange): string {
@@ -84,6 +94,9 @@ export default function IdleMapToolbar({
   onGeofenceVisibleChange,
   filters,
   onFiltersChange,
+  selectedUnitTypes,
+  onUnitTypesChange,
+  availableUnitTypes,
   loading,
 }: Props) {
   const [dateOpen, setDateOpen] = useState(false);
@@ -170,8 +183,8 @@ export default function IdleMapToolbar({
         onValueChange={(values) => handleToggleGroup(values, viewMode, onViewModeChange)}
         className="h-8 border border-input rounded-md overflow-hidden"
       >
-        <ToggleGroupItem value="heatmap" className="h-8 px-3 text-xs rounded-none">Heatmap</ToggleGroupItem>
-        <ToggleGroupItem value="bubbles" className="h-8 px-3 text-xs rounded-none">Bubbles</ToggleGroupItem>
+        <ToggleGroupItem value="heatmap" className="h-8 px-3 text-xs rounded-none aria-pressed:bg-primary aria-pressed:text-primary-foreground data-[state=on]:bg-primary data-[state=on]:text-primary-foreground">Heatmap</ToggleGroupItem>
+        <ToggleGroupItem value="bubbles" className="h-8 px-3 text-xs rounded-none aria-pressed:bg-primary aria-pressed:text-primary-foreground data-[state=on]:bg-primary data-[state=on]:text-primary-foreground">Bubbles</ToggleGroupItem>
       </ToggleGroup>
 
       {/* Bubble sub-mode */}
@@ -181,8 +194,8 @@ export default function IdleMapToolbar({
           onValueChange={(values) => handleToggleGroup(values, bubbleMode, onBubbleModeChange)}
           className="h-8 border border-input rounded-md overflow-hidden"
         >
-          <ToggleGroupItem value="clustered" className="h-8 px-3 text-xs rounded-none">Clustered</ToggleGroupItem>
-          <ToggleGroupItem value="raw" className="h-8 px-3 text-xs rounded-none">Raw</ToggleGroupItem>
+          <ToggleGroupItem value="clustered" className="h-8 px-3 text-xs rounded-none aria-pressed:bg-primary aria-pressed:text-primary-foreground data-[state=on]:bg-primary data-[state=on]:text-primary-foreground">Clustered</ToggleGroupItem>
+          <ToggleGroupItem value="raw" className="h-8 px-3 text-xs rounded-none aria-pressed:bg-primary aria-pressed:text-primary-foreground data-[state=on]:bg-primary data-[state=on]:text-primary-foreground">Raw</ToggleGroupItem>
         </ToggleGroup>
       )}
 
@@ -220,10 +233,13 @@ export default function IdleMapToolbar({
         }}
         className="h-8 border border-input rounded-md overflow-hidden"
       >
-        <ToggleGroupItem value="all" className="h-8 px-3 text-xs rounded-none">All</ToggleGroupItem>
-        <ToggleGroupItem value="inside" className="h-8 px-3 text-xs rounded-none">In geofence</ToggleGroupItem>
-        <ToggleGroupItem value="outside" className="h-8 px-3 text-xs rounded-none">Outside</ToggleGroupItem>
+        <ToggleGroupItem value="all" className="h-8 px-3 text-xs rounded-none aria-pressed:bg-primary aria-pressed:text-primary-foreground data-[state=on]:bg-primary data-[state=on]:text-primary-foreground">All</ToggleGroupItem>
+        <ToggleGroupItem value="inside" className="h-8 px-3 text-xs rounded-none aria-pressed:bg-primary aria-pressed:text-primary-foreground data-[state=on]:bg-primary data-[state=on]:text-primary-foreground">In geofence</ToggleGroupItem>
+        <ToggleGroupItem value="outside" className="h-8 px-3 text-xs rounded-none aria-pressed:bg-primary aria-pressed:text-primary-foreground data-[state=on]:bg-primary data-[state=on]:text-primary-foreground">Outside</ToggleGroupItem>
       </ToggleGroup>
+
+      {/* Unit type filter */}
+      <UnitTypeFilter value={selectedUnitTypes} onChange={onUnitTypesChange} availableTypes={availableUnitTypes} />
 
       {viewMode === 'heatmap' && !loading && (
         <span className="text-xs text-muted-foreground/60 ml-1">Switch to Bubbles to explore individual events</span>

@@ -10,6 +10,7 @@ export interface DriverRow {
   driveTimeHrs: number;
   idleTimeHrs: number;
   engineTimeHrs: number;
+  utilPct: number;
   estimatedFuelCost: number;
   safetyViolations: number;
   hardEvents: number;

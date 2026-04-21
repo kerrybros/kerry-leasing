@@ -132,19 +132,20 @@ export function useUnitData(vin: string, startDate?: string, endDate?: string) {
   const monthlyMetrics = useMemo((): MonthlyMetrics[] => {
     const monthlyMap = new Map<string, {
       totalMiles: number; totalIdleTime: number; totalFuel: number;
-      totalIdleFuel: number; totalDrivingTime: number;
+      totalIdleFuel: number; totalDrivingTime: number; recordCount: number;
     }>();
     telematicsData.forEach(record => {
       const monthKey = record.date.substring(0, 7);
       const existing = monthlyMap.get(monthKey) || {
         totalMiles: 0, totalIdleTime: 0, totalFuel: 0,
-        totalIdleFuel: 0, totalDrivingTime: 0,
+        totalIdleFuel: 0, totalDrivingTime: 0, recordCount: 0,
       };
       existing.totalMiles += record.totalDistance || 0;
       existing.totalIdleTime += record.idleTime || 0;
       existing.totalDrivingTime += record.drivingTime || 0;
       existing.totalFuel += record.totalFuel || 0;
       existing.totalIdleFuel += record.idleFuel || 0;
+      existing.recordCount += 1;
       monthlyMap.set(monthKey, existing);
     });
     return Array.from(monthlyMap.entries())
@@ -162,6 +163,7 @@ export function useUnitData(vin: string, startDate?: string, endDate?: string) {
           idleTimeMinutes: Math.round(data.totalIdleTime / 60),
           totalFuel: parseFloat(data.totalFuel.toFixed(2)),
           drivingFuel: parseFloat(Math.max(0, data.totalFuel - data.totalIdleFuel).toFixed(2)),
+          utilPct: data.recordCount > 0 ? parseFloat(((engineOn / (data.recordCount * 86400)) * 100).toFixed(1)) : 0,
         };
       });
   }, [telematicsData]);
@@ -197,6 +199,11 @@ export function useUnitData(vin: string, startDate?: string, endDate?: string) {
   const overallIdlePercentage = engineOnSec > 0
     ? ((totals.totalIdleTimeSec / engineOnSec) * 100).toFixed(2)
     : '0.00';
+
+  // Utilization % = engine-on time / (record count × 86400s)
+  const overallUtilPct = telematicsData.length > 0
+    ? ((engineOnSec / (telematicsData.length * 86400)) * 100).toFixed(1)
+    : null;
 
   const fleetAvg = useMemo(() => {
     if (!fleetUnitsQuery.data || !vehicleUtilQuery.data) return null;
@@ -246,6 +253,7 @@ export function useUnitData(vin: string, startDate?: string, endDate?: string) {
     totals,
     overallAvgMpg,
     overallIdlePercentage,
+    overallUtilPct,
     vsFleet,
     isDamageRepairLine,
     liveStats,

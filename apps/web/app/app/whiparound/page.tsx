@@ -11,9 +11,12 @@ import {
   useWhiparoundDefects,
   useWhiparoundInspections,
   useWhiparoundSyncStatus,
+  useFleetUnitsQuery,
   type WhiparoundDefect,
   type WhiparoundInspection,
+  type UnitType,
 } from '@/hooks/useDataQueries';
+import { UnitTypeFilter } from '@/components/UnitTypeFilter';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -457,7 +460,24 @@ export default function WhiparoundPage() {
   const [inspPage, setInspPage] = useState(0);
   const [pdfModal, setPdfModal] = useState<{ url: string; label: string } | null>(null);
   const [pdfLoading, setPdfLoading] = useState(false);
+  const [selectedUnitTypes, setSelectedUnitTypes] = useState<UnitType[]>([]);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const fleetUnitsQuery = useFleetUnitsQuery();
+  const unitTypeByAssetName = useMemo(() => {
+    const map = new Map<string, UnitType>();
+    for (const u of fleetUnitsQuery.data?.units ?? []) {
+      if (u.unitType && u.repairUnitNumber) {
+        map.set(u.repairUnitNumber.trim().toLowerCase(), u.unitType);
+      }
+    }
+    return map;
+  }, [fleetUnitsQuery.data]);
+
+  const availableUnitTypes = useMemo(
+    () => [...new Set(unitTypeByAssetName.values())] as UnitType[],
+    [unitTypeByAssetName]
+  );
 
   const openPdf = useCallback((url: string, label: string) => {
     setPdfModal({ url, label });
@@ -501,8 +521,24 @@ export default function WhiparoundPage() {
   const { data: syncStatus } = useWhiparoundSyncStatus();
 
   const statusCounts = defectData?.statusCounts ?? {};
-  const defects = defectData?.defects ?? [];
-  const inspections = inspData?.inspections ?? [];
+  const allDefects = defectData?.defects ?? [];
+  const allInspections = inspData?.inspections ?? [];
+
+  const defects = useMemo(() => {
+    if (selectedUnitTypes.length === 0) return allDefects;
+    return allDefects.filter(d => {
+      const t = unitTypeByAssetName.get((d.assetName ?? '').trim().toLowerCase());
+      return !!t && selectedUnitTypes.includes(t);
+    });
+  }, [allDefects, selectedUnitTypes, unitTypeByAssetName]);
+
+  const inspections = useMemo(() => {
+    if (selectedUnitTypes.length === 0) return allInspections;
+    return allInspections.filter(i => {
+      const t = unitTypeByAssetName.get(((i as any).assetName ?? '').trim().toLowerCase());
+      return !!t && selectedUnitTypes.includes(t);
+    });
+  }, [allInspections, selectedUnitTypes, unitTypeByAssetName]);
 
   const notConfigured = syncStatus && !syncStatus.configured;
 
@@ -540,8 +576,9 @@ export default function WhiparoundPage() {
         </div>
       )}
 
-      {/* View toggle */}
-      <div className="flex gap-2">
+      {/* View toggle + unit type filter */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex gap-2">
         <button
           onClick={() => setView('defects')}
           className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
@@ -562,6 +599,8 @@ export default function WhiparoundPage() {
         >
           Inspections
         </button>
+        </div>
+        <UnitTypeFilter value={selectedUnitTypes} onChange={setSelectedUnitTypes} availableTypes={availableUnitTypes} />
       </div>
 
       {view === 'defects' && (

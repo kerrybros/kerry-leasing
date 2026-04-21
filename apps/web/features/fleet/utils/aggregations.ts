@@ -28,7 +28,7 @@ export function aggregateUnitMetrics(data: VehicleUtilization[]): UnitMetrics[] 
   const grouped = new Map<string, {
     vin: string; unitNumber: string; totalMiles: number;
     totalIdleTime: number; totalDrivingTime: number;
-    totalFuel: number; totalIdleFuel: number;
+    totalFuel: number; totalIdleFuel: number; recordCount: number;
   }>();
 
   data.forEach(record => {
@@ -37,13 +37,14 @@ export function aggregateUnitMetrics(data: VehicleUtilization[]): UnitMetrics[] 
       vin: record.vin,
       unitNumber: record.vehicleNumber || record.vin.slice(-6),
       totalMiles: 0, totalIdleTime: 0, totalDrivingTime: 0,
-      totalFuel: 0, totalIdleFuel: 0,
+      totalFuel: 0, totalIdleFuel: 0, recordCount: 0,
     };
     existing.totalMiles += record.totalDistance || 0;
     existing.totalIdleTime += record.idleTime || 0;
     existing.totalDrivingTime += record.drivingTime || 0;
     existing.totalFuel += record.totalFuel || 0;
     existing.totalIdleFuel += record.idleFuel || 0;
+    existing.recordCount += 1;
     grouped.set(record.vin, existing);
   });
 
@@ -51,6 +52,9 @@ export function aggregateUnitMetrics(data: VehicleUtilization[]): UnitMetrics[] 
     const engineOn = unit.totalIdleTime + unit.totalDrivingTime;
     const idlePct = engineOn > 0 ? (unit.totalIdleTime / engineOn) * 100 : 0;
     const drivingFuelGal = Math.max(0, unit.totalFuel - unit.totalIdleFuel);
+    const utilPct = unit.recordCount > 0
+      ? (engineOn / (unit.recordCount * 86400)) * 100
+      : 0;
     return {
       vin: unit.vin,
       unitNumber: unit.unitNumber,
@@ -63,6 +67,7 @@ export function aggregateUnitMetrics(data: VehicleUtilization[]): UnitMetrics[] 
       drivingFuelGal: Math.round(drivingFuelGal),
       driveTimeHrs: Math.round((unit.totalDrivingTime / 3600) * 10) / 10,
       engineTimeHrs: Math.round((engineOn / 3600) * 10) / 10,
+      utilPct: utilPct.toFixed(1),
     };
   });
 }
@@ -75,7 +80,7 @@ export function aggregateDriverMetrics(data: DriverUtilization[]): DriverMetrics
   const grouped = new Map<number, {
     driverId: number; driverName: string; totalMiles: number;
     totalIdleTime: number; totalDrivingTime: number;
-    totalFuel: number; totalIdleFuel: number;
+    totalFuel: number; totalIdleFuel: number; recordCount: number;
   }>();
 
   data.forEach(record => {
@@ -84,13 +89,14 @@ export function aggregateDriverMetrics(data: DriverUtilization[]): DriverMetrics
       driverId: record.driverId,
       driverName: `${record.driverFirstName || ''} ${record.driverLastName || ''}`.trim() || `Driver ${record.driverId}`,
       totalMiles: 0, totalIdleTime: 0, totalDrivingTime: 0,
-      totalFuel: 0, totalIdleFuel: 0,
+      totalFuel: 0, totalIdleFuel: 0, recordCount: 0,
     };
     existing.totalMiles += record.totalDistance || 0;
     existing.totalIdleTime += record.idleTime || 0;
     existing.totalDrivingTime += record.drivingTime || 0;
     existing.totalFuel += (record.drivingFuel || 0) + (record.idleFuel || 0);
     existing.totalIdleFuel += record.idleFuel || 0;
+    existing.recordCount += 1;
     grouped.set(record.driverId, existing);
   });
 
@@ -98,6 +104,9 @@ export function aggregateDriverMetrics(data: DriverUtilization[]): DriverMetrics
     const engineOn = driver.totalIdleTime + driver.totalDrivingTime;
     const idlePct = engineOn > 0 ? (driver.totalIdleTime / engineOn) * 100 : 0;
     const drivingFuelGal = Math.max(0, driver.totalFuel - driver.totalIdleFuel);
+    const utilPct = driver.recordCount > 0
+      ? (engineOn / (driver.recordCount * 86400)) * 100
+      : 0;
     return {
       driverId: driver.driverId,
       driverName: driver.driverName,
@@ -113,6 +122,7 @@ export function aggregateDriverMetrics(data: DriverUtilization[]): DriverMetrics
       drivingFuelGal: Math.round(drivingFuelGal),
       driveTimeHrs: Math.round((driver.totalDrivingTime / 3600) * 10) / 10,
       engineTimeHrs: Math.round((engineOn / 3600) * 10) / 10,
+      utilPct: utilPct.toFixed(1),
     };
   });
 }
@@ -155,7 +165,7 @@ export function aggregateMonthlyMetrics({
   // Key is either YYYY-MM-DD (daily) or YYYY-MM (monthly)
   const bucketMap = new Map<string, {
     totalMiles: number; totalIdleTime: number; totalDrivingTime: number;
-    totalFuel: number; totalIdleFuel: number;
+    totalFuel: number; totalIdleFuel: number; recordCount: number;
   }>();
 
   // Chart source: date-filtered data
@@ -185,18 +195,19 @@ export function aggregateMonthlyMetrics({
   // Monthly map for the table — built from full data, not date-filtered
   const monthlyMap = new Map<string, {
     totalMiles: number; totalIdleTime: number; totalDrivingTime: number;
-    totalFuel: number; totalIdleFuel: number;
+    totalFuel: number; totalIdleFuel: number; recordCount: number;
   }>();
 
   const accumulate = (
-    map: Map<string, { totalMiles: number; totalIdleTime: number; totalDrivingTime: number; totalFuel: number; totalIdleFuel: number }>,
+    map: Map<string, { totalMiles: number; totalIdleTime: number; totalDrivingTime: number; totalFuel: number; totalIdleFuel: number; recordCount: number }>,
     key: string,
     record: VehicleUtilization | DriverUtilization
   ) => {
-    const existing = map.get(key) || { totalMiles: 0, totalIdleTime: 0, totalDrivingTime: 0, totalFuel: 0, totalIdleFuel: 0 };
+    const existing = map.get(key) || { totalMiles: 0, totalIdleTime: 0, totalDrivingTime: 0, totalFuel: 0, totalIdleFuel: 0, recordCount: 0 };
     existing.totalMiles += record.totalDistance || 0;
     existing.totalIdleTime += record.idleTime || 0;
     existing.totalIdleFuel += record.idleFuel || 0;
+    existing.recordCount += 1;
     if (viewMode === 'unit') {
       existing.totalDrivingTime += (record as VehicleUtilization).drivingTime || 0;
       existing.totalFuel += (record as VehicleUtilization).totalFuel || 0;
@@ -240,6 +251,7 @@ export function aggregateMonthlyMetrics({
         const shortMonth = new Date(parseInt(year), parseInt(month) - 1).toLocaleString('default', { month: 'short' });
         label = multiYear ? `${shortMonth} '${year.slice(2)}` : shortMonth;
       }
+      const engineOn = data.totalIdleTime + data.totalDrivingTime;
       return {
         month: label, monthKey: key,
         totalMiles: Math.round(data.totalMiles),
@@ -249,6 +261,7 @@ export function aggregateMonthlyMetrics({
         idleTimeMinutes: Math.round(data.totalIdleTime / 60),
         totalFuel: Math.round(data.totalFuel),
         drivingFuel: Math.round(data.totalFuel - data.totalIdleFuel),
+        utilPct: data.recordCount > 0 ? parseFloat(((engineOn / (data.recordCount * 86400)) * 100).toFixed(1)) : 0,
       };
     });
 
@@ -259,6 +272,7 @@ export function aggregateMonthlyMetrics({
     const monthKey = `${selectedTableYear}-${String(i + 1).padStart(2, '0')}`;
     const data = monthlyMap.get(monthKey);
     if (data) {
+      const engineOn = data.totalIdleTime + data.totalDrivingTime;
       return {
         month: getMonthName(i), monthKey,
         totalMiles: Math.round(data.totalMiles),
@@ -268,9 +282,10 @@ export function aggregateMonthlyMetrics({
         idleTimeMinutes: Math.round(data.totalIdleTime / 60),
         totalFuel: Math.round(data.totalFuel),
         drivingFuel: Math.round(data.totalFuel - data.totalIdleFuel),
+        utilPct: data.recordCount > 0 ? parseFloat(((engineOn / (data.recordCount * 86400)) * 100).toFixed(1)) : 0,
       };
     }
-    return { month: getMonthName(i), monthKey, totalMiles: 0, avgMpg: 0, idlePercentage: 0, idleFuel: 0, idleTimeMinutes: 0, totalFuel: 0, drivingFuel: 0 };
+    return { month: getMonthName(i), monthKey, totalMiles: 0, avgMpg: 0, idlePercentage: 0, idleFuel: 0, idleTimeMinutes: 0, totalFuel: 0, drivingFuel: 0, utilPct: 0 };
   });
 
   return { chartData, tableData };
@@ -326,6 +341,7 @@ export function aggregateFleetTotals(
 
 export function aggregateFleetKpis(data: VehicleUtilization[], fuelPricePerGallon = FUEL_PRICE_PER_GALLON) {
   let totalMiles = 0, totalFuel = 0, totalIdleTime = 0, totalDrivingTime = 0, totalIdleFuel = 0, totalDrivingFuel = 0;
+  let count = 0;
   data.forEach(r => {
     totalMiles += r.totalDistance || 0;
     totalFuel += r.totalFuel || 0;
@@ -333,9 +349,11 @@ export function aggregateFleetKpis(data: VehicleUtilization[], fuelPricePerGallo
     totalDrivingTime += r.drivingTime || 0;
     totalIdleFuel += r.idleFuel || 0;
     totalDrivingFuel += r.drivingFuel || 0;
+    count += 1;
   });
   const engineOn = totalIdleTime + totalDrivingTime;
   const idlePct = engineOn > 0 ? (totalIdleTime / engineOn) * 100 : 0;
+  const avgUtilPct = count > 0 ? ((engineOn / (count * 86400)) * 100).toFixed(1) : '0.0';
   return {
     totalMiles: Math.round(totalMiles),
     avgMpg: totalFuel > 0 ? (totalMiles / totalFuel).toFixed(2) : '—',
@@ -345,5 +363,6 @@ export function aggregateFleetKpis(data: VehicleUtilization[], fuelPricePerGallo
     drivingFuel: Math.round(totalDrivingFuel),
     estimatedFuelCost: Math.round(totalFuel * fuelPricePerGallon),
     estimatedIdleFuelCost: Math.round(totalIdleFuel * fuelPricePerGallon),
+    avgUtilPct,
   };
 }

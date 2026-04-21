@@ -19,6 +19,7 @@ type PresetId =
   | 'last_quarter'
   | 'this_year'
   | 'last_year'
+  | 'last_12_months'
   | 'custom';
 
 const formatDate = (d: Date) => d.toISOString().split('T')[0];
@@ -62,6 +63,11 @@ function computePreset(preset: PresetId): { start: string; end: string } | null 
         start: formatDate(new Date(today.getFullYear() - 1, 0, 1)),
         end: formatDate(new Date(today.getFullYear() - 1, 11, 31)),
       };
+    case 'last_12_months': {
+      const s = new Date(today);
+      s.setMonth(today.getMonth() - 12);
+      return { start: formatDate(s), end: todayStr };
+    }
     default:
       return null;
   }
@@ -74,13 +80,14 @@ const PRESETS: { id: PresetId; label: string }[] = [
   { id: 'last_month',   label: 'Last Month' },
   { id: 'last_quarter', label: 'Last Quarter' },
   { id: 'this_year',    label: 'This Year' },
-  { id: 'last_year',    label: 'Last Year' },
+  { id: 'last_year',       label: 'Last Year' },
+  { id: 'last_12_months', label: 'Last 12 Months' },
 ];
 
 function detectPreset(start: string, end: string): PresetId {
   const presetIds: PresetId[] = [
     'last_7_days', 'last_30_days', 'this_month', 'last_month',
-    'last_quarter', 'this_year', 'last_year',
+    'last_quarter', 'this_year', 'last_year', 'last_12_months',
   ];
   for (const id of presetIds) {
     const range = computePreset(id);

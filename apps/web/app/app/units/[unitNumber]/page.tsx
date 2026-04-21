@@ -518,7 +518,6 @@ export default function UnitDetailPage() {
               const drivingFuel = Math.max(0, totals.totalFuel - totals.totalIdleFuel);
               const driveTimeHrs = Math.round(totals.totalDrivingTimeSec / 3600);
               const idleTimeHrs = Math.round(totals.totalIdleTimeSec / 3600);
-              const engineTimeHrs = driveTimeHrs + idleTimeHrs;
               const idlePct = parseFloat(overallIdlePercentage);
               return (
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -559,10 +558,7 @@ export default function UnitDetailPage() {
                     value={idleTimeHrs > 0 ? `${idleTimeHrs.toLocaleString()} hrs` : '—'}
                     variant={idleTimeHrs > 0 ? 'warning' : 'default'}
                   />
-                  <KpiCard
-                    label="Engine Time"
-                    value={engineTimeHrs > 0 ? `${engineTimeHrs.toLocaleString()} hrs` : '—'}
-                  />
+
                 </div>
               );
             })()}
@@ -611,42 +607,6 @@ export default function UnitDetailPage() {
                     </CardContent>
                   </Card>
 
-                  {/* Engine Time Breakdown */}
-                  <Card className="flex-1">
-                    <CardContent className="relative pt-4">
-                      <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', textAlign: 'center', marginBottom: 4 }} className="text-muted-foreground">
-                        Run Time Breakdown (hrs)
-                      </div>
-                      {idleTimeSec > 0 || driveTimeSec > 0 ? (
-                        <ResponsiveContainer width="100%" height={200}>
-                          <PieChart>
-                            <Pie
-                              data={[
-                                { name: 'Idle Time', value: Math.round(idleTimeSec / 3600 * 10) / 10 },
-                                { name: 'Drive Time', value: Math.round(driveTimeSec / 3600 * 10) / 10 },
-                              ]}
-                              cx="50%" cy="50%"
-                              innerRadius={50} outerRadius={75}
-                              paddingAngle={3} dataKey="value" isAnimationActive={false}
-                            >
-                              <Cell fill="#ef4444" />
-                              <Cell fill={CHART_COLORS.success} />
-                            </Pie>
-                            <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(val) => [`${Number(val).toLocaleString()} hrs`]} />
-                            <Legend formatter={(name) => <span style={LEGEND_STYLE}>{name}</span>} />
-                          </PieChart>
-                        </ResponsiveContainer>
-                      ) : (
-                        <div style={{ height: 200, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
-                          <svg width={150} height={150} viewBox="0 0 150 150">
-                            <circle cx={75} cy={75} r={62} fill="none" stroke="var(--muted)" strokeWidth={25} />
-                            <circle cx={75} cy={75} r={62} fill="none" stroke="var(--border)" strokeWidth={1} />
-                          </svg>
-                          <span className="text-muted-foreground" style={{ fontSize: 12, fontWeight: 500 }}>No data for this period</span>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
                 </div>
               );
             })()}

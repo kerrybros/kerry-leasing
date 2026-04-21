@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useOrgSettingsQuery } from '@/hooks/useDataQueries';
+import { useOrgSettingsQuery, type UnitType } from '@/hooks/useDataQueries';
 
 function todayStr() {
   return new Date().toISOString().split('T')[0];
@@ -21,6 +21,7 @@ export function useFleetFilters() {
   const [endDate, setEndDate] = useState(todayStr);
   const [selectedTableYear, setSelectedTableYear] = useState(new Date().getFullYear());
   const [orgErrorDismissed, setOrgErrorDismissed] = useState(false);
+  const [selectedUnitTypes, setSelectedUnitTypes] = useState<UnitType[]>([]);
 
   // Guard: reset to unit mode if driver tracking disabled
   useEffect(() => {
@@ -52,5 +53,6 @@ export function useFleetFilters() {
     endDate, setEndDate,
     selectedTableYear, setSelectedTableYear,
     orgErrorDismissed, setOrgErrorDismissed,
+    selectedUnitTypes, setSelectedUnitTypes,
   };
 }
