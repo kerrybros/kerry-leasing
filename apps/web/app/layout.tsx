@@ -4,6 +4,7 @@ import './globals.css';
 import Providers from './providers';
 import { Inter } from "next/font/google";
 import { cn } from "@/lib/utils";
+import { CLERK_POST_AUTH_PATH } from '@/lib/clerkAuthPaths';
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-sans' });
 
@@ -17,8 +18,16 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
+  const signInFallback =
+    process.env.NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL ?? CLERK_POST_AUTH_PATH;
+  const signUpFallback =
+    process.env.NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL ?? CLERK_POST_AUTH_PATH;
+
   return (
-    <ClerkProvider>
+    <ClerkProvider
+      signInFallbackRedirectUrl={signInFallback}
+      signUpFallbackRedirectUrl={signUpFallback}
+    >
       <html lang="en" suppressHydrationWarning className={cn("font-sans", inter.variable)}>
         <head>
           <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5" />

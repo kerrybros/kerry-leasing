@@ -1,5 +1,6 @@
 import { SignIn } from '@clerk/nextjs';
 import Image from 'next/image';
+import { CLERK_POST_AUTH_PATH } from '@/lib/clerkAuthPaths';
 
 export default function SignInPage() {
   return (
@@ -90,7 +91,10 @@ export default function SignInPage() {
           />
         </div>
 
-        <SignIn />
+        <SignIn
+          fallbackRedirectUrl={CLERK_POST_AUTH_PATH}
+          signUpFallbackRedirectUrl={CLERK_POST_AUTH_PATH}
+        />
       </div>
     </div>
   );
