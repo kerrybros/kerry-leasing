@@ -27,6 +27,11 @@ export type RepairLineSummary = {
   complaint: string | null;
   /** service_description only; may be "" when this line is complaint-only */
   correction: string;
+  /**
+   * When present from API: true if any source row had "drive up" in complaint, service, or
+   * global_service_description (aggregated per line).
+   */
+  hasDriveUpMention?: boolean;
   component: string | null;
   system: string | null;
   total: number;
@@ -77,14 +82,19 @@ export function isDamageInvoice(inv: RepairInvoiceSummary): boolean {
   return inv.lines.some(isDamageLine);
 }
 
-/** True if the line's service / correction text mentions a drive-up (case-insensitive). */
+const DRIVE_UP_RE = /drive[\s,-]*up|driveup/;
+
+/** True if complaint, correction (service or fallback global), or API flag indicates a drive-up. */
 export function lineMentionsDriveUp(line: RepairLineSummary): boolean {
-  const t = (line.correction || '').toLowerCase();
-  if (!t) return false;
-  return /drive[\s,-]*up|driveup/.test(t);
+  if (line.hasDriveUpMention === true) return true;
+  for (const raw of [line.complaint, line.correction]) {
+    const t = (raw || '').toLowerCase();
+    if (t && DRIVE_UP_RE.test(t)) return true;
+  }
+  return false;
 }
 
-/** A job is a drive-up if any line's service description matches {@link lineMentionsDriveUp}. */
+/** A job is a drive-up if any line matches {@link lineMentionsDriveUp} (complaint, service, or global). */
 export function isDriveUpInvoice(inv: RepairInvoiceSummary): boolean {
   return inv.lines.some(lineMentionsDriveUp);
 }

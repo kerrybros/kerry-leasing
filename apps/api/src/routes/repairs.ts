@@ -39,7 +39,7 @@ function repairsRawRedisKey(
     to: toYmdValue,
     units: [...allowedUnitNumbers].sort(),
     /** Bump when raw row shape/fields change (invalidates Redis blobs missing e.g. date_action_completed). */
-    rawSchema: 'v2',
+    rawSchema: 'v3',
   });
   const h = createHash('sha256').update(payload).digest('hex').slice(0, 24);
   return `${env}:repairs:raw:${klOrgId}:${h}`;
@@ -68,6 +68,13 @@ function toNumber(value: unknown): number {
   if (value == null) return 0;
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
+}
+
+/** True if text mentions a drive-up (case-insensitive). Used for repair KPIs. */
+function textMentionsDriveUp(s: string | null | undefined): boolean {
+  const t = (s || '').toLowerCase();
+  if (!t) return false;
+  return /drive[\s,-]*up|driveup/.test(t);
 }
 
 /** Plain shape safe for JSON → Redis → JSON (Prisma Decimal / Date do not round-trip reliably). */
@@ -300,6 +307,8 @@ router.get('/', clerkAuthMiddleware, requireOrg, async (req: AuthRequest, res) =
       complaint: string | null;
       /** service_description only; may be "" when this line is complaint-only */
       correction: string;
+      /** OR of per-row flags: any source row had drive-up in complaint, service, or global service text */
+      hasDriveUpMention: boolean;
       component: string | null;
       system: string | null;
       total: number;
@@ -395,16 +404,23 @@ router.get('/', clerkAuthMiddleware, requireOrg, async (req: AuthRequest, res) =
       const lineTotal = toNumber(r.total);
       const lineTax = toNumber(r.sales_tax);
 
+      const rowHasDriveUp =
+        textMentionsDriveUp(r.complaint_description) ||
+        textMentionsDriveUp(r.service_description) ||
+        textMentionsDriveUp(r.global_service_description);
+
       const line =
         invoiceAgg.lines.get(lineKey) || {
           complaint,
           correction,
+          hasDriveUpMention: rowHasDriveUp,
           component: null,
           system: null,
           total: 0,
           tax: 0,
           count: 0,
         };
+      line.hasDriveUpMention = line.hasDriveUpMention || rowHasDriveUp;
 
       // Only update if current value is missing/falsy AND new value is truthy (not null/empty string)
       // Also handle "N/A" string if it exists in DB
