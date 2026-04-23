@@ -22,6 +22,7 @@ import {
   type EnrichedIdleEvent,
   type Geofence,
   driverLabel,
+  hasValidCoords,
 } from './types';
 
 import IdleMapToolbar from './components/IdleMapToolbar';
@@ -178,7 +179,7 @@ export default function IdleMapClient() {
       let geofenceName: string | null = null;
       let geofenceCategory: string | null = null;
 
-      if (event.lat != null && event.lon != null) {
+      if (hasValidCoords(event)) {
         const pt = point([event.lon, event.lat]);
         for (const gf of geofences) {
           if (!gf.locationPoints || gf.locationPoints.length < 3) continue;

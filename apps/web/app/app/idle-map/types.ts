@@ -96,6 +96,22 @@ export function dieselPriceSourceSubtext(pricePerGallon: number): string {
   return `@ $${pricePerGallon.toFixed(2)}/gal (EIA Midwest)`;
 }
 
+/**
+ * True when lat/lon are present, not a known "no GPS fix" sentinel, and within WGS84 bounds.
+ * Motive emits (-1, -1) and some ELDs emit (0, 0) when position is unknown — both plot
+ * off the coast of West Africa and must be rejected before rendering.
+ */
+export function hasValidCoords<T extends { lat: number | null; lon: number | null }>(
+  event: T
+): event is T & { lat: number; lon: number } {
+  const { lat, lon } = event;
+  if (lat == null || lon == null) return false;
+  if (lat === 0 && lon === 0) return false;
+  if (lat === -1 && lon === -1) return false;
+  if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return false;
+  return true;
+}
+
 export function driverLabel(event: Pick<IdleEvent, 'driverFirstName' | 'driverLastName'>): string {
   const first = event.driverFirstName?.trim();
   const last = event.driverLastName?.trim();

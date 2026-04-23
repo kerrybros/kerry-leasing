@@ -16,7 +16,7 @@ import {
 import { CHART_COLORS, TOOLTIP_STYLE } from '@/features/fleet/utils/chartColors';
 
 import type { EnrichedIdleEvent, Geofence, DateRange, ModalTarget } from '../types';
-import { formatDuration, driverLabel, fuelStr, costStr, dieselPriceSourceSubtext } from '../types';
+import { formatDuration, driverLabel, fuelStr, costStr, dieselPriceSourceSubtext, hasValidCoords } from '../types';
 
 interface Props {
   events: EnrichedIdleEvent[];
@@ -255,9 +255,9 @@ function EventsTable({
                   {e.location ?? '—'}
                 </TableCell>
                 <TableCell>
-                  {e.lat != null && e.lon != null && onViewOnMap && (
+                  {hasValidCoords(e) && onViewOnMap && (
                     <button
-                      onClick={() => onViewOnMap(e.lat!, e.lon!)}
+                      onClick={() => onViewOnMap(e.lat, e.lon)}
                       className="text-[10px] font-medium text-primary hover:text-primary/80 border border-primary/40 hover:border-primary/60 rounded px-1.5 py-0.5 transition-colors whitespace-nowrap"
                     >
                       View on Map

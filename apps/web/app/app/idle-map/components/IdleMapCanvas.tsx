@@ -6,7 +6,7 @@ import type { ExpressionSpecification } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { MapPin, Loader2 } from 'lucide-react';
 
-import type { EnrichedIdleEvent, Geofence, ViewMode, BubbleMode } from '../types';
+import { hasValidCoords, type EnrichedIdleEvent, type Geofence, type ViewMode, type BubbleMode } from '../types';
 
 interface Props {
   events: EnrichedIdleEvent[];
@@ -45,10 +45,10 @@ function eventsToGeoJSON(events: EnrichedIdleEvent[]): GeoJSON.FeatureCollection
   return {
     type: 'FeatureCollection',
     features: events
-      .filter(e => e.lat != null && e.lon != null)
+      .filter(hasValidCoords)
       .map(e => ({
         type: 'Feature',
-        geometry: { type: 'Point', coordinates: [e.lon!, e.lat!] },
+        geometry: { type: 'Point', coordinates: [e.lon, e.lat] },
         properties: {
           id: e.id,
           groupKey: e.groupKey,
@@ -131,7 +131,7 @@ export default function IdleMapCanvas({
   const [mapLoaded, setMapLoaded] = useState(false);
   const [geofenceTooltip, setGeofenceTooltip] = useState<{ lng: number; lat: number; name: string; category: string | null } | null>(null);
 
-  const eventsWithCoords = useMemo(() => events.filter(e => e.lat != null && e.lon != null), [events]);
+  const eventsWithCoords = useMemo(() => events.filter(hasValidCoords), [events]);
 
   const isEmpty = !loading && eventsWithCoords.length === 0;
   const noCoords = !loading && events.length > 0 && eventsWithCoords.length === 0;
@@ -176,8 +176,8 @@ export default function IdleMapCanvas({
     if (!mapLoaded || eventsWithCoords.length === 0 || !mapRef.current) return;
 
     const map = mapRef.current.getMap();
-    const lngs = eventsWithCoords.map(e => e.lon!);
-    const lats = eventsWithCoords.map(e => e.lat!);
+    const lngs = eventsWithCoords.map(e => e.lon);
+    const lats = eventsWithCoords.map(e => e.lat);
     const minLng = Math.min(...lngs);
     const maxLng = Math.max(...lngs);
     const minLat = Math.min(...lats);
