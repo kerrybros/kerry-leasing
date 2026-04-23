@@ -92,6 +92,9 @@ export default function SignInPage() {
         </div>
 
         <SignIn
+          path="/sign-in"
+          routing="path"
+          signUpUrl="/sign-in"
           fallbackRedirectUrl={CLERK_POST_AUTH_PATH}
           signUpFallbackRedirectUrl={CLERK_POST_AUTH_PATH}
         />
