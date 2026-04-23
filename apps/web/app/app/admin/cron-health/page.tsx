@@ -100,6 +100,20 @@ interface CronRunsResponse {
   runs: CronRunRow[];
 }
 
+/** One entry per org in a run (passes can repeat the same org for verify windows). */
+function uniqueOrgsFromPasses(
+  passes: Array<{ clerkOrgId: string; orgName: string }>
+): Array<{ clerkOrgId: string; orgName: string }> {
+  const seen = new Set<string>();
+  const out: Array<{ clerkOrgId: string; orgName: string }> = [];
+  for (const p of passes) {
+    if (seen.has(p.clerkOrgId)) continue;
+    seen.add(p.clerkOrgId);
+    out.push({ clerkOrgId: p.clerkOrgId, orgName: p.orgName });
+  }
+  return out;
+}
+
 export default function CronHealthPage() {
   const { getApi } = useApiClient();
   const [errorModal, setErrorModal] = useState<string | null>(null);
@@ -255,35 +269,75 @@ export default function CronHealthPage() {
               <div className="bg-card border border-border rounded-lg overflow-hidden divide-y divide-border">
                 {runsData?.runs.map((run) => {
                   const open = expandedRunId === run.id;
+                  const runOrgs = uniqueOrgsFromPasses(run.report.passes);
                   return (
                     <div key={run.id}>
                       <button
                         type="button"
-                        className="w-full flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-left hover:bg-accent/50 transition-colors"
+                        className="w-full flex flex-col gap-2 px-4 py-3 text-left hover:bg-accent/50 transition-colors"
                         onClick={() => setExpandedRunId(open ? null : run.id)}
                       >
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Badge variant="outline" className="text-xs font-mono">{run.job.replace('_', ' ')}</Badge>
-                          {run.allSucceeded ? (
-                            <Badge className="bg-green-600 hover:bg-green-600 text-xs">All OK</Badge>
-                          ) : (
-                            <Badge variant="destructive" className="text-xs">{run.failedOrgs} org(s) failed</Badge>
-                          )}
-                          <span className="text-sm text-muted-foreground">
-                            {new Date(run.startedAt).toLocaleString()}
-                          </span>
+                        <div className="flex flex-wrap items-center justify-between gap-2 w-full">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge variant="outline" className="text-xs font-mono">{run.job.replace('_', ' ')}</Badge>
+                            {run.allSucceeded ? (
+                              <Badge className="bg-green-600 hover:bg-green-600 text-xs">All OK</Badge>
+                            ) : (
+                              <Badge variant="destructive" className="text-xs">{run.failedOrgs} org(s) failed</Badge>
+                            )}
+                            <span className="text-sm text-muted-foreground">
+                              {new Date(run.startedAt).toLocaleString()}
+                            </span>
+                          </div>
+                          <div className="text-xs text-muted-foreground flex items-center gap-1 shrink-0">
+                            {Math.round(run.durationMs / 1000)}s · {run.successOrgs}/{run.totalOrgs} org passes OK
+                            <span className="ml-1" aria-hidden>{open ? '▼' : '▶'}</span>
+                          </div>
                         </div>
-                        <div className="text-xs text-muted-foreground">
-                          {Math.round(run.durationMs / 1000)}s · {run.successOrgs}/{run.totalOrgs} org passes OK
-                          <span className="ml-2" aria-hidden>{open ? '▼' : '▶'}</span>
-                        </div>
+                        {runOrgs.length > 0 && (
+                          <div className="text-xs w-full flex flex-col sm:flex-row sm:items-baseline gap-1.5 sm:gap-2">
+                            <span className="text-[11px] uppercase tracking-wide text-muted-foreground shrink-0">Orgs</span>
+                            <div className="flex flex-wrap gap-x-2 gap-y-1 items-baseline min-w-0">
+                              {runOrgs.map((o, i) => (
+                                <span key={o.clerkOrgId} className="inline-flex items-baseline gap-1 min-w-0 max-w-full">
+                                  {i > 0 ? (
+                                    <span className="text-border select-none" aria-hidden>
+                                      ·
+                                    </span>
+                                  ) : null}
+                                  {o.orgName !== o.clerkOrgId ? (
+                                    <span className="min-w-0">
+                                      <span className="text-foreground/90 font-medium">{o.orgName}</span>
+                                      <span
+                                        className="ml-1 font-mono text-[11px] text-muted-foreground break-all"
+                                        title={o.clerkOrgId}
+                                      >
+                                        {o.clerkOrgId}
+                                      </span>
+                                    </span>
+                                  ) : (
+                                    <span
+                                      className="font-mono text-[11px] text-foreground/90 break-all"
+                                      title="Clerk org id"
+                                    >
+                                      {o.clerkOrgId}
+                                    </span>
+                                  )}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </button>
                       {open && (
                         <div className="px-4 pb-4 space-y-4 bg-muted/30">
                           {run.report.passes.map((p, idx) => (
                             <div key={`${p.clerkOrgId}-${p.date}-${p.verify}-${idx}`} className="border border-border rounded-md bg-background p-3 text-sm">
-                              <div className="flex flex-wrap items-center gap-2 mb-2">
+                              <div className="flex flex-wrap items-baseline gap-2 mb-2">
                                 <span className="font-semibold">{p.orgName}</span>
+                                {p.orgName !== p.clerkOrgId && (
+                                  <span className="text-[11px] font-mono text-muted-foreground break-all">{p.clerkOrgId}</span>
+                                )}
                                 <Badge variant="secondary" className="text-xs">{p.date}</Badge>
                                 {p.verify && <Badge variant="outline" className="text-xs">verify</Badge>}
                                 {p.success ? (
