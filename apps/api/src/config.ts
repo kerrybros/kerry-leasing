@@ -13,9 +13,18 @@ export const config = {
     publishableKey: process.env.CLERK_PUBLISHABLE_KEY,
   },
   cors: {
-    allowedOrigins: process.env.ALLOWED_ORIGINS?.split(',') || [
-      'http://localhost:3000',
-    ],
+    // Comma-separated on server (e.g. Render). Values must match the browser `Origin` (scheme + host, no path).
+    allowedOrigins: (() => {
+      const fromEnv = process.env.ALLOWED_ORIGINS?.split(',')
+        .map((o) => o.trim())
+        .filter(Boolean);
+      if (fromEnv?.length) return fromEnv;
+      return [
+        'http://localhost:3000',
+        'https://www.kerryleasing.com',
+        'https://kerryleasing.com',
+      ];
+    })(),
   },
   cronSecret: process.env.CRON_SECRET,
   redisUrl: process.env.REDIS_URL ?? null,

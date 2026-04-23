@@ -126,8 +126,8 @@ export async function clerkAuthMiddleware(
       }
     }
 
-    // After role resolution (uses dev org id for Clerk membership), map to prod
-    // org id for app DB access when not in production
+    // After role resolution (Clerk API uses the JWT’s org, usually prod in
+    // production), map to the app DB org id (dev org id stored in our tables).
     const dbOrgId = await mapOrgId(orgId);
 
     // Attach auth context to request
