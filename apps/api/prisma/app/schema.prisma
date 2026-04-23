@@ -23,6 +23,18 @@ model CustomerOrgMap {
   @@map("customer_org_maps")
 }
 
+// Dev Clerk org id → prod Clerk org id (app DB is keyed to prod org ids; local dev uses dev JWT)
+model ClerkDevProdOrgMap {
+  id        String   @id @default(cuid())
+  devOrgId  String   @unique @map("dev_org_id")
+  prodOrgId String   @map("prod_org_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([prodOrgId])
+  @@map("clerk_dev_prod_org_map")
+}
+
 // Repair customer configuration for this portal org (KL org)
 // This avoids mixing Clerk org IDs with "customer_id" naming.
 // Scoping for repair reads is done via:

@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { createClerkClient, verifyToken } from '@clerk/backend';
 import { config } from '../config.js';
+import { mapOrgId } from '../lib/mapOrgId.js';
 
 // Initialize Clerk client
 const clerkClient = createClerkClient({
@@ -125,10 +126,14 @@ export async function clerkAuthMiddleware(
       }
     }
 
+    // After role resolution (uses dev org id for Clerk membership), map to prod
+    // org id for app DB access when not in production
+    const dbOrgId = await mapOrgId(orgId);
+
     // Attach auth context to request
     req.auth = {
       userId,
-      orgId,
+      orgId: dbOrgId,
       role,
     };
 
