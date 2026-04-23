@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useMemo } from 'react';
 import { UserButton, OrganizationSwitcher, useOrganization } from '@clerk/nextjs';
 import { isWolverineClerkOrg } from '@/lib/wolverineOrgs';
+import { LastActiveOrgSync } from '@/components/LastActiveOrgSync';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { OrgBrandTheme } from '@/components/OrgBrandTheme';
 import Link from 'next/link';
@@ -136,6 +137,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       defaultOpen={true}
       style={{ "--sidebar-width": "10rem" } as React.CSSProperties}
     >
+      <LastActiveOrgSync />
       <OrgBrandTheme />
       <Sidebar collapsible="none">
         {/* Logo */}
