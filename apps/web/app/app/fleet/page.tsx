@@ -71,7 +71,7 @@ export default function FleetOverviewPage() {
   return (
     <div className="w-full">
       {/* Sticky Page Header */}
-      <div className="sticky top-0 z-20 bg-background border-b border-border px-3 py-3">
+      <div className="sticky top-0 z-30 border-b border-border bg-background px-3 py-3 shadow-sm">
         <div className="flex items-center justify-between gap-4">
           {/* Left: title */}
           <div className="shrink-0">
@@ -102,6 +102,14 @@ export default function FleetOverviewPage() {
             />
           </div>
         </div>
+        {fleet.unitTypeFilterActive && fleet.unitTypeFilterDescription && (
+          <p className="mt-2.5 text-xs text-muted-foreground max-w-3xl" role="status">
+            <span className="underline decoration-2 decoration-primary underline-offset-[5px]">
+              Showing telematics and repair data for units labeled:{' '}
+              <span className="font-medium text-foreground">{fleet.unitTypeFilterDescription}</span>
+            </span>
+          </p>
+        )}
       </div>
 
       <div className="px-3 pt-4 pb-6">
@@ -128,7 +136,7 @@ export default function FleetOverviewPage() {
         </div>
         <div className="grid grid-cols-5 gap-3">
           {(fleet.telematicsLoading || fleet.repairsLoading) ? (
-            Array.from({ length: 10 }).map((_, i) => <SkeletonKpiCard key={i} />)
+            Array.from({ length: 11 }).map((_, i) => <SkeletonKpiCard key={i} />)
           ) : (
             <>
               <KpiCard label="Total Fleet Miles" value={fleet.fleetKpis.totalMiles.toLocaleString()} subtext="miles" />
@@ -143,7 +151,8 @@ export default function FleetOverviewPage() {
                 subtext={`@ $${(fleet.orgSettings.dieselPricePerGallon ?? 3.85).toFixed(2)}/gal (EIA Midwest)`}
                 variant="warning"
               />
-<KpiCard label="Total Repair Jobs" value={fleet.repairKpis.totalJobs} />
+              <KpiCard label="Total Repair Jobs" value={fleet.repairKpis.totalJobs} />
+              <KpiCard label="Drive-up jobs" value={fleet.repairKpis.driveUpJobs} />
               <KpiCard
                 label="Jobs with Damage"
                 value={fleet.repairKpis.damageJobs}
@@ -234,7 +243,6 @@ export default function FleetOverviewPage() {
           fleetTotals={fleet.fleetTotals}
           selectedId={fleet.selectedId}
           onRowClick={id => startTransition(() => fleet.setSelectedId(fleet.selectedId === id ? null : id))}
-          vinToRepairUnitNumber={fleet.vinToRepairUnitNumber}
         />
       ) : (
         <TelematicsBreakdownView
@@ -246,7 +254,6 @@ export default function FleetOverviewPage() {
           fleetTotals={fleet.fleetTotals}
           selectedId={fleet.selectedId}
           onRowClick={id => startTransition(() => fleet.setSelectedId(fleet.selectedId === id ? null : id))}
-          vinToRepairUnitNumber={fleet.vinToRepairUnitNumber}
         />
       )}
       </div>

@@ -399,7 +399,7 @@ export default function IdleMapCanvas({
               type="symbol"
               filter={['has', 'point_count']}
               layout={{
-                'text-field': ['get', 'point_count'],
+                'text-field': ['number-format', ['get', 'point_count'], { locale: 'en-US' }] as ExpressionSpecification,
                 'text-size': 11,
                 'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
               }}
@@ -504,7 +504,7 @@ export default function IdleMapCanvas({
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-background/60 backdrop-blur-sm pointer-events-none">
           <MapPin className="w-10 h-10 text-muted-foreground/30 mb-3" />
           <p className="text-sm font-medium text-muted-foreground">No GPS coordinates available</p>
-          <p className="text-xs text-muted-foreground/60 mt-1">{events.length} events found but none have location data</p>
+          <p className="text-xs text-muted-foreground/60 mt-1">{events.length.toLocaleString('en-US')} events found but none have location data</p>
         </div>
       )}
 

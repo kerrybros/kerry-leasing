@@ -1,9 +1,8 @@
 'use client';
 
 import { useState, useMemo, useRef, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
 import { OrganizationSwitcher, useUser } from '@clerk/nextjs';
-import { Loader2, Info, X, Settings2, ArrowRight, Download } from 'lucide-react';
+import { Loader2, Info, X, Settings2, Download } from 'lucide-react';
 import { Skeleton } from '@/components/Skeleton';
 import { EmptyState } from '@/components/EmptyState';
 import {
@@ -289,7 +288,6 @@ function ColumnBuilderPopover({
 }
 
 export default function ScorecardPage() {
-  const router = useRouter();
   const { user } = useUser();
   const colStorageKey = `${COL_STORAGE_PREFIX}_${user?.id ?? 'anon'}`;
 
@@ -298,14 +296,6 @@ export default function ScorecardPage() {
   const [showComparison, setShowComparison] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>('totalMiles');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
-  const [navConfirm, setNavConfirm] = useState<{ label: string; href: string } | null>(null);
-
-  useEffect(() => {
-    if (!navConfirm) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setNavConfirm(null); };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [navConfirm]);
 
   const [selectedCols, setSelectedCols] = useState<ColumnKey[]>(() => {
     if (typeof window === 'undefined') return DEFAULT_COLS;
@@ -653,8 +643,7 @@ export default function ScorecardPage() {
                   return (
                     <TableRow
                       key={row.driverId}
-                      className="cursor-pointer hover:bg-accent/50 transition-colors"
-                      onClick={() => setNavConfirm({ label: row.driverName, href: `/app/drivers/${row.driverId}` })}
+                      className="hover:bg-muted/30 transition-colors"
                     >
                       <TableCell className="text-muted-foreground text-[11px] font-mono px-3 py-2">{idx + 1}</TableCell>
                       <TableCell className="font-semibold text-[12px] px-3 py-2 whitespace-nowrap">{row.driverName}</TableCell>
@@ -685,43 +674,6 @@ export default function ScorecardPage() {
           </div>
         )}
       </div>
-
-      {/* Nav confirm popup */}
-      {navConfirm && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center"
-          onClick={() => setNavConfirm(null)}
-        >
-          <div
-            className="bg-card border border-border rounded-xl shadow-xl p-5 w-72 flex flex-col gap-4"
-            onClick={e => e.stopPropagation()}
-          >
-            <div className="flex items-start justify-between gap-2">
-              <div>
-                <p className="text-base font-bold leading-tight">Open driver details page</p>
-                <p className="text-sm text-muted-foreground mt-0.5">{navConfirm.label}</p>
-              </div>
-              <button onClick={() => setNavConfirm(null)} className="text-muted-foreground hover:text-foreground cursor-pointer mt-0.5">
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setNavConfirm(null)}
-                className="flex-1 h-8 text-xs font-medium rounded-md border border-border text-muted-foreground hover:bg-accent transition-colors cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => window.open(navConfirm.href, '_blank')}
-                className="flex-1 h-8 text-xs font-medium rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-              >
-                Open <ArrowRight className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

@@ -43,3 +43,19 @@ services:
         sync: false
       - key: CREDENTIALS_ENCRYPTION_KEY
         sync: false
+
+  - type: cron
+    name: kerry-eia-diesel-price
+    runtime: node
+    region: oregon
+    plan: starter
+    schedule: "30 11 * * *"  # Daily ~11:30 UTC — EIA Midwest retail diesel → system_config (weekly data; daily job picks up new rows)
+    buildCommand: cd apps/api && pnpm install && pnpm prisma:app:generate && pnpm prisma:repair:generate && pnpm build
+    startCommand: cd apps/api && node dist/scripts/run-refresh-fuel-price.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: APP_DATABASE_URL
+        sync: false
+      - key: EIA_API_KEY
+        sync: false

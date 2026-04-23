@@ -12,10 +12,9 @@ export function useFleetFilters() {
   const orgSettingsQuery = useOrgSettingsQuery();
 
   const [activeTab, setActiveTab] = useState<'telematics' | 'repairs'>('telematics');
+  const [telematicsView, setTelematicsView] = useState<'overview' | 'units' | 'drivers'>('overview');
   const [viewMode, setViewMode] = useState<'unit' | 'driver'>('unit');
   const [selectedId, setSelectedId] = useState<string | number | null>(null);
-  const [telematicsView, setTelematicsView] = useState<'overview' | 'units' | 'drivers'>('overview');
-
   // Single shared date range for both telematics and repairs — default to This Year
   const [startDate, setStartDate] = useState(startOfYearStr);
   const [endDate, setEndDate] = useState(todayStr);
@@ -46,9 +45,9 @@ export function useFleetFilters() {
 
   return {
     activeTab, setActiveTab,
+    telematicsView, setTelematicsView,
     viewMode, setViewMode,
     selectedId, setSelectedId,
-    telematicsView, setTelematicsView,
     startDate, setStartDate,
     endDate, setEndDate,
     selectedTableYear, setSelectedTableYear,

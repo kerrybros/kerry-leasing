@@ -4,9 +4,10 @@ import { ChevronDown, Check } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import type { UnitType } from '@/hooks/useDataQueries';
 
-const ALL_TYPES: UnitType[] = ['TRACTOR', 'TRAILER', 'SWITCHER', 'BOX_TRUCK', 'AUTO', 'MISC'];
+/** Canonical order for filter chips and for intersecting with service-plan types. */
+export const ALL_TYPES: UnitType[] = ['TRACTOR', 'TRAILER', 'SWITCHER', 'BOX_TRUCK', 'AUTO', 'MISC'];
 
-const LABELS: Record<UnitType, string> = {
+export const UNIT_TYPE_LABELS: Record<UnitType, string> = {
   TRACTOR: 'Tractor',
   TRAILER: 'Trailer',
   SWITCHER: 'Switcher',
@@ -14,6 +15,25 @@ const LABELS: Record<UnitType, string> = {
   AUTO: 'Auto',
   MISC: 'Misc',
 };
+
+/** Human-readable list for banners / tooltips (e.g. "Tractor, Switcher"). */
+export function formatUnitTypeList(types: UnitType[]): string {
+  return types.map(t => UNIT_TYPE_LABELS[t]).join(', ');
+}
+
+/**
+ * True when a subset of unit types is selected (not "all" and not empty).
+ * Must match the popover label: empty or all available types => not active.
+ */
+export function isUnitTypeFilterActive(
+  selected: UnitType[],
+  available: UnitType[]
+): boolean {
+  if (selected.length === 0 || available.length === 0) return false;
+  if (selected.length !== available.length) return true;
+  const sel = new Set(selected);
+  return !available.every(t => sel.has(t));
+}
 
 interface UnitTypeFilterProps {
   value: UnitType[];
@@ -33,7 +53,7 @@ export function UnitTypeFilter({ value, onChange, availableTypes = ALL_TYPES }: 
   const label = value.length === 0 || value.length === availableTypes.length
     ? 'All Types'
     : value.length === 1
-    ? LABELS[value[0]!]
+    ? UNIT_TYPE_LABELS[value[0]!]
     : `${value.length} types`;
 
   return (
@@ -64,7 +84,7 @@ export function UnitTypeFilter({ value, onChange, availableTypes = ALL_TYPES }: 
               onClick={() => toggle(type)}
               className="w-full flex items-center justify-between px-2 py-1.5 text-xs rounded-md hover:bg-accent transition-colors"
             >
-              <span className={selected ? 'font-medium text-foreground' : 'text-foreground/80'}>{LABELS[type]}</span>
+              <span className={selected ? 'font-medium text-foreground' : 'text-foreground/80'}>{UNIT_TYPE_LABELS[type]}</span>
               {selected && <Check className="h-3 w-3 text-primary shrink-0" />}
             </button>
           );

@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
@@ -9,14 +9,14 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
-import { Download, ChevronDown, ChevronRight, X } from 'lucide-react';
+import { Download, ChevronDown, ChevronUp, X } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend,
 } from 'recharts';
 import { CHART_COLORS, TOOLTIP_STYLE } from '@/features/fleet/utils/chartColors';
 
 import type { EnrichedIdleEvent, Geofence, DateRange, ModalTarget } from '../types';
-import { formatDuration, driverLabel, fuelStr, costStr } from '../types';
+import { formatDuration, driverLabel, fuelStr, costStr, dieselPriceSourceSubtext } from '../types';
 
 interface Props {
   events: EnrichedIdleEvent[];
@@ -30,6 +30,24 @@ interface Props {
 
 type SortKey = 'date' | 'duration' | 'fuel' | 'cost' | 'unit' | 'driver';
 type SortDir = 'asc' | 'desc';
+
+/** ScrollArea viewport from `scroll-area.tsx`; `scrollIntoView` often targets the wrong ancestor. */
+function scrollElementToTopOfScrollViewport(
+  el: HTMLElement,
+  opts?: { behavior?: ScrollBehavior; paddingTop?: number }
+) {
+  const behavior = opts?.behavior ?? 'smooth';
+  const pad = opts?.paddingTop ?? 8;
+  const viewport = el.closest('[data-slot="scroll-area-viewport"]');
+  if (!(viewport instanceof HTMLElement)) {
+    el.scrollIntoView({ behavior, block: 'start' });
+    return;
+  }
+  const elRect = el.getBoundingClientRect();
+  const vpRect = viewport.getBoundingClientRect();
+  const nextTop = elRect.top - vpRect.top + viewport.scrollTop - pad;
+  viewport.scrollTo({ top: Math.max(0, nextTop), behavior });
+}
 
 function getScopeLabel(scope: ModalTarget, scopedEvents: EnrichedIdleEvent[]): string {
   if (scope.type === 'all') return 'Idle Report';
@@ -92,12 +110,19 @@ function EventsTable({
   onUnitClick,
   onDriverClick,
   onViewOnMap,
+  showDieselPriceNote = true,
+  focusEventId = null,
+  onFocusEventApplied,
 }: {
   events: EnrichedIdleEvent[];
   dieselPrice: number;
-  onUnitClick?: (unit: string) => void;
-  onDriverClick?: (driver: string) => void;
+  onUnitClick?: (unit: string, eventId: string) => void;
+  onDriverClick?: (driver: string, eventId: string) => void;
   onViewOnMap?: (lat: number, lon: number) => void;
+  showDieselPriceNote?: boolean;
+  /** When set (e.g. drill-down from All Events), jump to the page containing this event and scroll it into view. */
+  focusEventId?: string | null;
+  onFocusEventApplied?: () => void;
 }) {
   const [page, setPage] = useState(0);
   const [sortKey, setSortKey] = useState<SortKey>('date');
@@ -128,6 +153,27 @@ function EventsTable({
 
   const pageCount = Math.ceil(sorted.length / PAGE_SIZE);
   const slice = sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+
+  useLayoutEffect(() => {
+    if (!focusEventId) return;
+    if (events.length === 0) {
+      onFocusEventApplied?.();
+      return;
+    }
+    const idx = sorted.findIndex(e => e.id === focusEventId);
+    if (idx < 0) {
+      onFocusEventApplied?.();
+      return;
+    }
+    const targetPage = Math.floor(idx / PAGE_SIZE);
+    setPage(targetPage);
+    // Page jump only: parent GroupedTab scrolls the summary row to the top of the modal
+    // so nested column headers stay in view — avoid scrolling the event row (center)
+    // which pulls the header off-screen.
+    requestAnimationFrame(() => {
+      onFocusEventApplied?.();
+    });
+  }, [focusEventId, events.length, sorted, onFocusEventApplied]);
 
   function SortTh({ k, children, className }: { k: SortKey; children: React.ReactNode; className?: string }) {
     const active = sortKey === k;
@@ -175,12 +221,12 @@ function EventsTable({
           </TableHeader>
           <TableBody>
             {slice.map(e => (
-              <TableRow key={e.id} className="text-sm">
+              <TableRow key={e.id} className="text-sm" data-idle-event-id={e.id}>
                 <TableCell>
                   {/* Use unitNumber ?? 'Unknown' to match GroupedTab getKey for vehicles */}
                   <button
                     className="font-medium hover:underline text-left truncate max-w-full block"
-                    onClick={() => onUnitClick?.(e.unitNumber ?? 'Unknown')}
+                    onClick={() => onUnitClick?.(e.unitNumber ?? 'Unknown', e.id)}
                   >
                     {e.unitNumber ?? '—'}
                   </button>
@@ -188,7 +234,7 @@ function EventsTable({
                 <TableCell>
                   <button
                     className="text-muted-foreground hover:underline text-left truncate max-w-full block"
-                    onClick={() => onDriverClick?.(driverLabel(e))}
+                    onClick={() => onDriverClick?.(driverLabel(e), e.id)}
                   >
                     {driverLabel(e)}
                   </button>
@@ -240,9 +286,12 @@ function EventsTable({
       {pageCount > 1 && (
         <div className="flex items-center gap-2 justify-end text-xs text-muted-foreground">
           <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" disabled={page === 0} onClick={() => setPage(p => p - 1)}>Prev</Button>
-          <span>{page + 1} / {pageCount}</span>
+          <span>{(page + 1).toLocaleString('en-US')} / {pageCount.toLocaleString('en-US')}</span>
           <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" disabled={page >= pageCount - 1} onClick={() => setPage(p => p + 1)}>Next</Button>
         </div>
+      )}
+      {showDieselPriceNote && sorted.length > 0 && (
+        <p className="text-[10px] text-muted-foreground leading-snug">{dieselPriceSourceSubtext(dieselPrice)}</p>
       )}
     </div>
   );
@@ -257,17 +306,21 @@ function GroupedTab({
   dieselPrice,
   getKey,
   label,
-  expandToKey,
+  expandTarget,
   onExpandApplied,
 }: {
   events: EnrichedIdleEvent[];
   dieselPrice: number;
   getKey: (e: EnrichedIdleEvent) => string;
   label: string;
-  expandToKey?: string | null;
+  /** When set (from All Events drill-down), expand this group and optionally focus a nested event row. */
+  expandTarget?: { key: string; focusEventId?: string } | null;
   onExpandApplied?: () => void;
 }) {
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [nestedFocusEventId, setNestedFocusEventId] = useState<string | null>(null);
+  const scrollRootRef = useRef<HTMLDivElement>(null);
+  const clearNestedFocus = useCallback(() => setNestedFocusEventId(null), []);
   const [sortKey, setSortKey] = useState<GroupSortKey>('minutes');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
 
@@ -294,10 +347,32 @@ function GroupedTab({
   // When a drill-down key arrives, expand that row and notify parent to clear drilldown.
   // Clearing drilldown allows the same unit to be re-clicked from All Events and re-expand.
   useEffect(() => {
-    if (!expandToKey) return;
-    setExpanded(expandToKey);
+    if (!expandTarget) return;
+    setExpanded(expandTarget.key);
+    setNestedFocusEventId(expandTarget.focusEventId ?? null);
     onExpandApplied?.();
-  }, [expandToKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [expandTarget]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Defer past nested EventsTable layout (pagination). Re-run when nested focus clears so a second layout pass still pins the group row to the top of the modal body.
+  useEffect(() => {
+    if (!expanded || !scrollRootRef.current) return;
+    const esc = typeof CSS !== 'undefined' && 'escape' in CSS ? CSS.escape(expanded) : expanded.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    let cancelled = false;
+    const run = () => {
+      if (cancelled || !scrollRootRef.current) return;
+      const row = scrollRootRef.current.querySelector(`tr[data-group-key="${esc}"]`);
+      if (row instanceof HTMLElement) {
+        scrollElementToTopOfScrollViewport(row, { behavior: 'smooth', paddingTop: 8 });
+      }
+    };
+    const t = window.setTimeout(() => {
+      requestAnimationFrame(() => requestAnimationFrame(run));
+    }, 0);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [expanded, nestedFocusEventId]);
 
   const groups = useMemo(() => {
     const map = new Map<string, { events: EnrichedIdleEvent[]; totalMinutes: number; totalFuel: number }>();
@@ -336,51 +411,59 @@ function GroupedTab({
   const totalFuel = groups.reduce((s, g) => s + g.totalFuel, 0);
 
   return (
-    <div className="flex flex-col gap-3">
+    <div ref={scrollRootRef} className="flex flex-col gap-3">
       {/* Summary row */}
       <div className="flex gap-4 text-sm">
         <span className="text-muted-foreground">{groups.length.toLocaleString('en-US')} {label}s</span>
         <span className="font-medium">{formatDuration(totalMinutes)} total idle</span>
-        {totalFuel > 0 && <span className="text-muted-foreground">{fuelStr(totalFuel)} · {costStr(totalFuel, dieselPrice)}</span>}
+        {totalFuel > 0 && <span className="text-muted-foreground">{fuelStr(totalFuel)}</span>}
       </div>
 
       <div>
         <Table>
           <TableHeader className="sticky top-0 z-10">
             <TableRow className="bg-muted hover:bg-muted">
+              <TableHead className="w-8 px-2" aria-label="Expand row" />
               <GSortTh k="key">{label}</GSortTh>
               <GSortTh k="events">Events</GSortTh>
               <GSortTh k="minutes">Total Time</GSortTh>
               <GSortTh k="fuel">Fuel</GSortTh>
               <GSortTh k="cost">Est. Cost</GSortTh>
               <GSortTh k="insidePct">% In geofence</GSortTh>
-              <TableHead className="text-xs w-6"></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {groups.map(g => (
               <Fragment key={g.key}>
                 <TableRow
+                  data-group-key={g.key}
                   className="cursor-pointer hover:bg-accent/50"
                   onClick={() => setExpanded(expanded === g.key ? null : g.key)}
+                  aria-expanded={expanded === g.key}
                 >
+                  <TableCell className="w-8 px-2 align-middle text-muted-foreground">
+                    {expanded === g.key
+                      ? <ChevronUp className="w-3.5 h-3.5" aria-hidden />
+                      : <ChevronDown className="w-3.5 h-3.5" aria-hidden />}
+                  </TableCell>
                   <TableCell className="font-medium text-sm">{g.key}</TableCell>
                   <TableCell className="text-sm text-muted-foreground">{g.events.length.toLocaleString('en-US')}</TableCell>
                   <TableCell className="text-sm font-semibold">{formatDuration(g.totalMinutes)}</TableCell>
                   <TableCell className="text-sm text-muted-foreground">{fuelStr(g.totalFuel)}</TableCell>
                   <TableCell className="text-sm text-muted-foreground">{costStr(g.totalFuel, dieselPrice)}</TableCell>
                   <TableCell className="text-sm">{g.insidePct}%</TableCell>
-                  <TableCell>
-                    {expanded === g.key
-                      ? <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
-                      : <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />}
-                  </TableCell>
                 </TableRow>
                 {expanded === g.key && (
                   <TableRow>
                     <TableCell colSpan={7} className="p-0 bg-muted/20">
                       <div className="px-4 py-2">
-                        <EventsTable events={g.events} dieselPrice={dieselPrice} />
+                        <EventsTable
+                          events={g.events}
+                          dieselPrice={dieselPrice}
+                          showDieselPriceNote={false}
+                          focusEventId={expanded === g.key ? nestedFocusEventId : null}
+                          onFocusEventApplied={clearNestedFocus}
+                        />
                       </div>
                     </TableCell>
                   </TableRow>
@@ -395,6 +478,9 @@ function GroupedTab({
           </TableBody>
         </Table>
       </div>
+      {events.length > 0 && (
+        <p className="text-[10px] text-muted-foreground leading-snug">{dieselPriceSourceSubtext(dieselPrice)}</p>
+      )}
     </div>
   );
 }
@@ -455,8 +541,14 @@ function GeofencesTab({ events, dieselPrice }: { events: EnrichedIdleEvent[]; di
             <BarChart data={chartData} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
               <CartesianGrid strokeDasharray="3 3" stroke={CHART_COLORS.grid} vertical={false} />
               <XAxis dataKey="name" fontSize={10} tick={{ fill: CHART_COLORS.tick }} tickLine={false} axisLine={false} interval={0} />
-              <YAxis fontSize={10} tick={{ fill: CHART_COLORS.tick }} tickLine={false} axisLine={false} />
-              <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v: unknown) => [`${v}m`, 'Idle']} labelFormatter={(_label, payload) => (payload?.[0]?.payload as { fullName?: string })?.fullName ?? _label} />
+              <YAxis
+                fontSize={10}
+                tick={{ fill: CHART_COLORS.tick }}
+                tickLine={false}
+                axisLine={false}
+                tickFormatter={(v: number) => v.toLocaleString('en-US')}
+              />
+              <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v: unknown) => [`${Number(v).toLocaleString('en-US')}m`, 'Idle']} labelFormatter={(_label, payload) => (payload?.[0]?.payload as { fullName?: string })?.fullName ?? _label} />
               <Bar dataKey="minutes" fill={CHART_COLORS.primary} radius={[3, 3, 0, 0]} isAnimationActive={false} />
             </BarChart>
           </ResponsiveContainer>
@@ -490,6 +582,9 @@ function GeofencesTab({ events, dieselPrice }: { events: EnrichedIdleEvent[]; di
             ))}
           </TableBody>
         </Table>
+        {events.length > 0 && (
+          <p className="text-[10px] text-muted-foreground leading-snug mt-2">{dieselPriceSourceSubtext(dieselPrice)}</p>
+        )}
       </div>
     </div>
   );
@@ -508,7 +603,11 @@ export default function IdleReportModal({
 }: Props) {
   const [activeTab, setActiveTab] = useState(scopeFilter.initialTab ?? 'events');
   // drilldown: set when user clicks unit/driver from All Events table to navigate + expand that row
-  const [drilldown, setDrilldown] = useState<{ tab: 'drivers' | 'vehicles'; key: string } | null>(null);
+  const [drilldown, setDrilldown] = useState<{
+    tab: 'drivers' | 'vehicles';
+    key: string;
+    focusEventId?: string;
+  } | null>(null);
 
   const scopedEvents = useMemo(() => scopeEvents(events, scopeFilter), [events, scopeFilter]);
 
@@ -601,9 +700,15 @@ export default function IdleReportModal({
                         <ResponsiveContainer width="100%" height="100%">
                           <BarChart data={analytics.dailyData} margin={{ top: 2, right: 0, left: 0, bottom: 2 }}>
                             <XAxis dataKey="date" hide />
-                            <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v: unknown) => [`${v}m`, '']} />
+                            <Tooltip
+                              contentStyle={TOOLTIP_STYLE}
+                              formatter={(v: unknown, name: unknown) => {
+                                const tag = String(name).includes('Outside') ? 'Outside' : 'Inside';
+                                return [`${Number(v).toLocaleString('en-US')}m`, tag];
+                              }}
+                            />
                             <Bar dataKey="inside" name="In geofence" stackId="a" fill={CHART_COLORS.primary} isAnimationActive={false} />
-                            <Bar dataKey="outside" name="Outside geofence" stackId="a" fill={CHART_COLORS.idle} isAnimationActive={false} />
+                            <Bar dataKey="outside" name="Outside geofence" stackId="a" fill={CHART_COLORS.muted} isAnimationActive={false} />
                           </BarChart>
                         </ResponsiveContainer>
                       </div>
@@ -633,7 +738,10 @@ export default function IdleReportModal({
                               <Cell fill={CHART_COLORS.muted} />
                             </Pie>
                             <Legend iconSize={8} wrapperStyle={{ fontSize: 10 }} />
-                            <Tooltip contentStyle={TOOLTIP_STYLE} />
+                            <Tooltip
+                              contentStyle={TOOLTIP_STYLE}
+                              formatter={(v: unknown) => [Number(v).toLocaleString('en-US'), 'events']}
+                            />
                           </PieChart>
                         </ResponsiveContainer>
                       </div>
@@ -647,14 +755,21 @@ export default function IdleReportModal({
                     <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Idle Cost</p>
                     <p className="text-2xl font-bold">{costStr(analytics.totalFuel, dieselPrice)}</p>
                     <p className="text-xs text-muted-foreground">{fuelStr(analytics.totalFuel)} wasted</p>
+                    <p className="text-[10px] text-muted-foreground leading-snug">{dieselPriceSourceSubtext(dieselPrice)}</p>
                     {analytics.dailyData.length > 0 && (
                       <div className="h-16">
                         <ResponsiveContainer width="100%" height="100%">
                           <BarChart data={analytics.dailyData} margin={{ top: 2, right: 0, left: 0, bottom: 2 }}>
                             <XAxis dataKey="date" hide />
-                            <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v: unknown, n: unknown) => [`${v}m`, String(n)]} />
+                            <Tooltip
+                              contentStyle={TOOLTIP_STYLE}
+                              formatter={(v: unknown, name: unknown) => {
+                                const tag = String(name).includes('Outside') ? 'Outside' : 'Inside';
+                                return [`${Number(v).toLocaleString('en-US')}m`, tag];
+                              }}
+                            />
                             <Bar dataKey="inside" name="In geofence" stackId="b" fill={CHART_COLORS.primary} isAnimationActive={false} />
-                            <Bar dataKey="outside" name="Outside geofence" stackId="b" fill={CHART_COLORS.idle} isAnimationActive={false} />
+                            <Bar dataKey="outside" name="Outside geofence" stackId="b" fill={CHART_COLORS.muted} isAnimationActive={false} />
                           </BarChart>
                         </ResponsiveContainer>
                       </div>
@@ -665,13 +780,12 @@ export default function IdleReportModal({
                 <EventsTable
                   events={scopedEvents}
                   dieselPrice={dieselPrice}
-                  onUnitClick={(u) => {
-                    // u is already normalised to ?? 'Unknown' by EventsTable's onClick
-                    setDrilldown({ tab: 'vehicles', key: u });
+                  onUnitClick={(u, eventId) => {
+                    setDrilldown({ tab: 'vehicles', key: u, focusEventId: eventId });
                     setActiveTab('vehicles');
                   }}
-                  onDriverClick={(d) => {
-                    setDrilldown({ tab: 'drivers', key: d });
+                  onDriverClick={(d, eventId) => {
+                    setDrilldown({ tab: 'drivers', key: d, focusEventId: eventId });
                     setActiveTab('drivers');
                   }}
                   onViewOnMap={(lat, lon) => {
@@ -688,7 +802,7 @@ export default function IdleReportModal({
                   dieselPrice={dieselPrice}
                   getKey={driverLabel}
                   label="Driver"
-                  expandToKey={drilldown?.tab === 'drivers' ? drilldown.key : null}
+                  expandTarget={drilldown?.tab === 'drivers' ? { key: drilldown.key, focusEventId: drilldown.focusEventId } : null}
                   onExpandApplied={() => setDrilldown(null)}
                 />
               </TabsContent>
@@ -700,7 +814,7 @@ export default function IdleReportModal({
                   dieselPrice={dieselPrice}
                   getKey={(e) => e.unitNumber ?? 'Unknown'}
                   label="Vehicle"
-                  expandToKey={drilldown?.tab === 'vehicles' ? drilldown.key : null}
+                  expandTarget={drilldown?.tab === 'vehicles' ? { key: drilldown.key, focusEventId: drilldown.focusEventId } : null}
                   onExpandApplied={() => setDrilldown(null)}
                 />
               </TabsContent>

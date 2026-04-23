@@ -73,22 +73,27 @@ export type ModalTarget =
 
 export function formatDuration(minutes: number | null): string {
   if (minutes == null) return '—';
-  if (minutes < 60) return `${minutes}m`;
+  if (minutes < 60) return `${minutes.toLocaleString('en-US')}m`;
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
-  return m > 0 ? `${h}h ${m}m` : `${h}h`;
+  return m > 0 ? `${h.toLocaleString('en-US')}h ${m}m` : `${h.toLocaleString('en-US')}h`;
 }
 
 /** Returns formatted gallons or "—" when the value is null/zero (data not available from ELD). */
 export function fuelStr(gallons: number | null | undefined): string {
   if (!gallons) return '—';
-  return `${gallons.toFixed(1)} gal`;
+  return `${gallons.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} gal`;
 }
 
 /** Returns formatted cost or "—" when fuel is null/zero. */
 export function costStr(gallons: number | null | undefined, pricePerGallon: number): string {
   if (!gallons) return '—';
-  return `$${(gallons * pricePerGallon).toFixed(0)}`;
+  return `$${Math.round(gallons * pricePerGallon).toLocaleString('en-US')}`;
+}
+
+/** Subtext for cost displays: retail diesel rate and EIA series region (matches fleet KPIs). */
+export function dieselPriceSourceSubtext(pricePerGallon: number): string {
+  return `@ $${pricePerGallon.toFixed(2)}/gal (EIA Midwest)`;
 }
 
 export function driverLabel(event: Pick<IdleEvent, 'driverFirstName' | 'driverLastName'>): string {

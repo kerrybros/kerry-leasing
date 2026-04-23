@@ -19,10 +19,14 @@ import {
   LabelList,
 } from 'recharts';
 import { CHART_COLORS, TOOLTIP_STYLE } from '@/features/fleet/utils/chartColors';
+import { daysJobOpenInclusive, formatYmdForDisplay } from '@/lib/repairJobDaysOpen';
 
 // Types used by repair breakdown and modal (exported for fleet page state)
 export type RepairLineSummary = {
-  description: string;
+  /** complaint_description from repair DB */
+  complaint: string | null;
+  /** service_description only; may be "" when this line is complaint-only */
+  correction: string;
   component: string | null;
   system: string | null;
   total: number;
@@ -32,7 +36,11 @@ export type RepairLineSummary = {
 
 export type RepairInvoiceSummary = {
   invoiceNumber: string;
+  /** From invoice_date — used for keys, range filter, and sort (not shown as a column) */
   invoiceDate: string;
+  orderCreatedDate: string | null;
+  /** Latest date_action_completed on the job — order closed (Y-M-D) */
+  orderClosedDate: string | null;
   orderNumber: string | null;
   shop: string | null;
   total: number;
@@ -52,6 +60,12 @@ export type RepairUnitSummary = {
 export type RepairInvoiceWithUnit = RepairInvoiceSummary & { unitNumber: string };
 
 // Damage detection rule per DESIGN.md
+function lineHasContent(line: RepairLineSummary): boolean {
+  const hasComplaint = !!(line.complaint && line.complaint.trim() !== '');
+  const hasCorrection = !!(line.correction && line.correction.trim() !== '');
+  return hasComplaint || hasCorrection;
+}
+
 export function isDamageLine(line: RepairLineSummary): boolean {
   return (
     (line.component ?? '').toLowerCase().includes('damage') ||
@@ -63,6 +77,17 @@ export function isDamageInvoice(inv: RepairInvoiceSummary): boolean {
   return inv.lines.some(isDamageLine);
 }
 
+/** True if the line's service / correction text mentions a drive-up (case-insensitive). */
+export function lineMentionsDriveUp(line: RepairLineSummary): boolean {
+  const t = (line.correction || '').toLowerCase();
+  if (!t) return false;
+  return /drive[\s,-]*up|driveup/.test(t);
+}
+
+/** A job is a drive-up if any line's service description matches {@link lineMentionsDriveUp}. */
+export function isDriveUpInvoice(inv: RepairInvoiceSummary): boolean {
+  return inv.lines.some(lineMentionsDriveUp);
+}
 
 function RepairDetailsModal({
   invoice,
@@ -73,57 +98,130 @@ function RepairDetailsModal({
 }) {
   if (!invoice) return null;
 
+  const daysOpen = daysJobOpenInclusive(invoice.orderCreatedDate, invoice.orderClosedDate);
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-foreground/15 backdrop-blur-sm"
+      onClick={onClose}
+    >
       <div
-        className="bg-card rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col border border-border"
+        className="bg-card rounded-xl w-full max-w-[min(70rem,96vw)] max-h-[90vh] overflow-hidden flex flex-col border border-border/80 shadow-[0_25px_50px_-12px_rgba(0,0,0,0.2)]"
         onClick={e => e.stopPropagation()}
       >
-        <div className="p-4 border-b border-border flex justify-between items-center bg-muted">
+        <div className="p-4 sm:p-5 border-b border-primary/15 flex justify-between items-start gap-3 bg-gradient-to-r from-primary/[0.09] to-muted/50">
           <div>
-            <h3 className="text-lg font-bold">Repair Details</h3>
-            <div className="text-sm text-muted-foreground mt-1">
-              Unit: <span className="font-semibold text-foreground">{invoice.unitNumber}</span>
-              {' '}• Repair Completed Date: {new Date(invoice.invoiceDate).toLocaleDateString()}
+            <h3 className="text-lg font-bold text-foreground">Repair Details</h3>
+            <div className="text-sm text-muted-foreground mt-1.5 space-y-1">
+              <div>
+                Unit: <span className="font-semibold text-foreground">{invoice.unitNumber}</span>
+              </div>
+              <div>
+                Order created date:{' '}
+                <span className="font-medium text-foreground">
+                  {formatYmdForDisplay(invoice.orderCreatedDate)}
+                </span>
+              </div>
+              <div>
+                Order closed date:{' '}
+                <span className="font-medium text-foreground">
+                  {formatYmdForDisplay(invoice.orderClosedDate)}
+                </span>
+              </div>
+              <div>
+                Days open:{' '}
+                <span className="font-medium text-foreground">{daysOpen != null ? daysOpen : '—'}</span>
+              </div>
             </div>
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="p-2 hover:bg-accent rounded-lg transition-colors text-muted-foreground hover:text-foreground"
+            className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-background/60 border border-transparent hover:border-border/80 transition-colors shrink-0"
+            aria-label="Close"
           >
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
         </div>
-        <div className="p-6 overflow-y-auto bg-card">
-          <h4 className="text-sm font-bold text-muted-foreground uppercase tracking-wider mb-3">Service Lines</h4>
-          <div className="space-y-3">
+        <div className="p-5 sm:p-6 overflow-y-auto bg-gradient-to-b from-muted/25 via-card to-card">
+          <h4 className="text-xs font-bold text-primary/85 uppercase tracking-widest mb-4 px-0.5">Service lines</h4>
+          <div className="space-y-4">
             {invoice.lines
-              .filter((line: RepairLineSummary) => line.description && line.description !== '(No description)')
+              .filter((line: RepairLineSummary) => lineHasContent(line))
               .map((line: RepairLineSummary, idx: number) => (
                 <div
                   key={idx}
-                  className={`p-4 rounded-lg border flex flex-col gap-1 ${
+                  className={`rounded-xl border overflow-hidden flex flex-col ${
                     isDamageLine(line)
-                      ? 'bg-destructive/5 border-destructive/30'
-                      : 'bg-muted/50 border-border'
+                      ? 'border-destructive/35 bg-destructive/[0.04] shadow-sm'
+                      : 'border-border/70 bg-card shadow-sm'
                   }`}
                 >
-                  <div className="flex items-center gap-2">
-                    <span className="font-semibold text-foreground">{line.description}</span>
-                    {isDamageLine(line) && (
-                      <Badge variant="destructive">Damage</Badge>
-                    )}
+                  <div
+                    className={
+                      isDamageLine(line)
+                        ? 'flex items-center justify-between gap-2 px-3 py-1.5 bg-destructive/10 border-b border-destructive/20'
+                        : 'flex items-center justify-between gap-2 px-3 py-1.5 bg-primary/12 border-b border-primary/20'
+                    }
+                  >
+                    <span
+                      className={
+                        isDamageLine(line)
+                          ? 'text-xs font-bold uppercase tracking-wide text-destructive'
+                          : 'text-xs font-bold uppercase tracking-wide text-primary'
+                      }
+                    >
+                      complaint
+                    </span>
+                    {isDamageLine(line) && <Badge variant="destructive" className="shrink-0 text-[10px]">Damage</Badge>}
                   </div>
-                  <div className="text-sm text-muted-foreground">
+                  <div
+                    className={
+                      isDamageLine(line)
+                        ? 'px-3.5 py-3 text-sm text-foreground/95 leading-relaxed break-words bg-destructive/[0.03]'
+                        : 'px-3.5 py-3 text-sm text-foreground/95 leading-relaxed break-words bg-primary/[0.04]'
+                    }
+                  >
+                    {line.complaint?.trim() ? line.complaint : '—'}
+                  </div>
+                  <div
+                    className={
+                      isDamageLine(line)
+                        ? 'flex items-center gap-2 px-3 py-1.5 bg-destructive/10 border-t border-destructive/20 border-b border-destructive/20'
+                        : 'flex items-center gap-2 px-3 py-1.5 bg-primary/12 border-t border-primary/20 border-b border-primary/20'
+                    }
+                  >
+                    <span
+                      className={
+                        isDamageLine(line)
+                          ? 'text-xs font-bold uppercase tracking-wide text-destructive'
+                          : 'text-xs font-bold uppercase tracking-wide text-primary'
+                      }
+                    >
+                      correction
+                    </span>
+                  </div>
+                  <div
+                    className={
+                      isDamageLine(line)
+                        ? 'px-3.5 py-3 text-sm font-medium text-foreground/95 leading-relaxed break-words bg-destructive/[0.03]'
+                        : 'px-3.5 py-3 text-sm font-medium text-foreground/95 leading-relaxed break-words bg-primary/[0.04]'
+                    }
+                  >
+                    {line.correction?.trim() ? line.correction : '—'}
+                  </div>
+                  <div className="px-3.5 py-2.5 text-xs text-muted-foreground bg-background/50 border-t border-border/40">
+                    <span className="font-medium text-foreground/70">Component / system</span>
+                    <span className="mx-2 text-border/80">·</span>
                     {line.component || 'N/A'} / {line.system || 'N/A'}
                   </div>
                 </div>
               ))}
           </div>
         </div>
-        <div className="p-4 border-t border-border bg-muted flex justify-end">
+        <div className="p-4 border-t border-border/70 bg-muted/40 flex justify-end">
           <Button onClick={onClose}>Close</Button>
         </div>
       </div>
@@ -149,8 +247,10 @@ export function RepairBreakdown({
   const [selectedInvoice, setSelectedInvoice] = useState<RepairInvoiceWithUnit | null>(null);
   const [selectedMatrixUnit, setSelectedMatrixUnit] = useState<string | null>(null);
   const [unitSearchQuery, setUnitSearchQuery] = useState('');
-  const [jobsSortKey, setJobsSortKey] = useState<'unit' | 'count' | 'damageCount'>('unit');
+  const [jobsSortKey, setJobsSortKey] = useState<'unit' | 'count' | 'osDays' | 'driveUpCount' | 'damageCount'>('unit');
   const [jobsSortDir, setJobsSortDir] = useState<'asc' | 'desc'>('asc');
+  const [repairsSortKey, setRepairsSortKey] = useState<'orderCreated' | 'orderClosed' | 'daysOos' | 'unit'>('orderCreated');
+  const [repairsSortDir, setRepairsSortDir] = useState<'asc' | 'desc'>('desc');
 
   const dateFilteredUnits = useMemo(() => {
     return units
@@ -178,43 +278,101 @@ export function RepairBreakdown({
     return dateFilteredUnits.filter(u => u.unitNumber.toLowerCase().includes(q));
   }, [dateFilteredUnits, unitSearchQuery]);
 
-  const invoices = useMemo(() => {
+  const repairsList = useMemo((): RepairInvoiceWithUnit[] => {
     let source = filteredUnits;
     if (selectedMatrixUnit) {
       source = filteredUnits.filter(u => u.unitNumber === selectedMatrixUnit);
     }
-    return source
-      .flatMap(u =>
-        u.invoices.map(inv => ({
-          unitNumber: u.unitNumber,
-          ...inv,
-        }))
-      )
-      .sort((a, b) => b.invoiceDate.localeCompare(a.invoiceDate));
+    return source.flatMap(u =>
+      u.invoices.map(inv => ({
+        unitNumber: u.unitNumber,
+        ...inv,
+      }))
+    );
   }, [filteredUnits, selectedMatrixUnit]);
 
+  const invoices = useMemo(() => {
+    /** Missing / invalid Y-M-D sorts after real dates in ascending order, before in descending. */
+    const ymd = (s: string | null | undefined) => (s && /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : '9999-12-31');
+    const daysOrNull = (inv: RepairInvoiceWithUnit) => daysJobOpenInclusive(inv.orderCreatedDate, inv.orderClosedDate);
+
+    const rows = [...repairsList];
+    rows.sort((a, b) => {
+      if (repairsSortKey === 'orderCreated') {
+        if (repairsSortDir === 'asc') {
+          return ymd(a.orderCreatedDate).localeCompare(ymd(b.orderCreatedDate));
+        }
+        return ymd(b.orderCreatedDate).localeCompare(ymd(a.orderCreatedDate));
+      }
+      if (repairsSortKey === 'orderClosed') {
+        if (repairsSortDir === 'asc') {
+          return ymd(a.orderClosedDate).localeCompare(ymd(b.orderClosedDate));
+        }
+        return ymd(b.orderClosedDate).localeCompare(ymd(a.orderClosedDate));
+      }
+      if (repairsSortKey === 'daysOos') {
+        const da = daysOrNull(a);
+        const db = daysOrNull(b);
+        if (da == null && db == null) return 0;
+        if (da == null) return 1; // a (no days) after b
+        if (db == null) return -1; // b (no days) after a
+        if (repairsSortDir === 'asc') {
+          return da - db;
+        }
+        return db - da;
+      }
+      const u = a.unitNumber.localeCompare(b.unitNumber, undefined, { numeric: true });
+      return repairsSortDir === 'asc' ? u : -u;
+    });
+    return rows;
+  }, [repairsList, repairsSortKey, repairsSortDir]);
+
+  const handleRepairsSort = (key: 'orderCreated' | 'orderClosed' | 'daysOos' | 'unit') => {
+    if (repairsSortKey === key) setRepairsSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
+    else {
+      setRepairsSortKey(key);
+      setRepairsSortDir(key === 'unit' ? 'asc' : 'desc');
+    }
+  };
+
   const jobsData = useMemo(() => {
-    const data: { unitNumber: string; count: number; damageCount: number }[] = [];
+    const data: {
+      unitNumber: string;
+      count: number;
+      osDays: number;
+      driveUpCount: number;
+      damageCount: number;
+    }[] = [];
     let grandTotal = 0;
+    let grandOs = 0;
+    let grandDriveUp = 0;
     let grandDamage = 0;
     dateFilteredUnits.forEach(u => {
       const orders = new Set<string>();
       const damageOrders = new Set<string>();
+      const driveUpOrders = new Set<string>();
+      let osDays = 0;
       u.invoices.forEach(inv => {
         const jobId = inv.orderNumber || inv.invoiceNumber;
         orders.add(jobId);
         if (isDamageInvoice(inv)) damageOrders.add(jobId);
+        if (isDriveUpInvoice(inv)) driveUpOrders.add(jobId);
+        const d = daysJobOpenInclusive(inv.orderCreatedDate, inv.orderClosedDate);
+        if (d != null) osDays += d;
       });
       const count = orders.size;
       const damageCount = damageOrders.size;
+      const driveUpCount = driveUpOrders.size;
       grandTotal += count;
+      grandOs += osDays;
+      grandDriveUp += driveUpCount;
       grandDamage += damageCount;
       if (count > 0) {
-        data.push({ unitNumber: u.unitNumber, count, damageCount });
+        data.push({ unitNumber: u.unitNumber, count, osDays, driveUpCount, damageCount });
       }
     });
     data.sort((a, b) => a.unitNumber.localeCompare(b.unitNumber, undefined, { numeric: true }));
-    return { rows: data, grandTotal, grandDamage };
+    return { rows: data, grandTotal, grandOs, grandDriveUp, grandDamage };
   }, [dateFilteredUnits]);
 
   const sortedJobRows = useMemo(() => {
@@ -223,13 +381,15 @@ export function RepairBreakdown({
       let cmp = 0;
       if (jobsSortKey === 'unit') cmp = a.unitNumber.localeCompare(b.unitNumber, undefined, { numeric: true });
       else if (jobsSortKey === 'count') cmp = a.count - b.count;
+      else if (jobsSortKey === 'osDays') cmp = a.osDays - b.osDays;
+      else if (jobsSortKey === 'driveUpCount') cmp = a.driveUpCount - b.driveUpCount;
       else cmp = a.damageCount - b.damageCount;
       return jobsSortDir === 'asc' ? cmp : -cmp;
     });
     return rows;
   }, [jobsData.rows, jobsSortKey, jobsSortDir]);
 
-  const handleJobsSort = (key: 'unit' | 'count' | 'damageCount') => {
+  const handleJobsSort = (key: 'unit' | 'count' | 'osDays' | 'driveUpCount' | 'damageCount') => {
     if (jobsSortKey === key) setJobsSortDir(d => d === 'asc' ? 'desc' : 'asc');
     else { setJobsSortKey(key); setJobsSortDir(key === 'unit' ? 'asc' : 'desc'); }
   };
@@ -310,153 +470,251 @@ export function RepairBreakdown({
         </div>
       )}
 
-      {/* Main two-panel layout */}
-      <div style={{ display: 'flex', gap: 16, height: 480 }}>
-        {/* LEFT: Unit job count list */}
-        <div style={{ width: 340, flexShrink: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRadius: 6 }} className="bg-card border border-border">
-          <div className="bg-muted text-foreground border-b border-border" style={{ padding: '8px 0 6px', flexShrink: 0, textAlign: 'center', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            Number of Jobs Done
+      {/* Main two-panel layout: wider jobs table, condensed repairs; footer outside scroll to avoid overlap */}
+      <div className="flex h-[min(28rem,70vh)] min-h-0 max-w-full gap-4">
+        {/* LEFT: job counts + Days OOS aggregate — same shell as chart cards (ring) */}
+        <div className="flex w-[27.5rem] min-w-[25rem] max-w-[32rem] shrink-0 flex-col overflow-hidden rounded-xl bg-card text-card-foreground ring-1 ring-primary/20">
+          <div className="shrink-0 border-b border-primary/20 bg-gradient-to-b from-primary/[0.13] to-muted/25 px-2 py-1.5 text-center">
+            <span className="text-[0.7rem] font-bold uppercase tracking-wide text-foreground">Number of jobs</span>
           </div>
-          <div style={{ flex: 1, overflowY: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr className="bg-muted text-foreground sticky top-0 z-[2]">
-                  {(['unit', 'count', 'damageCount'] as const).map((key, idx) => {
-                    const labels = ['Unit', 'Jobs', 'Damage'];
-                    const widths = [undefined, 60, 80];
-                    const isActive = jobsSortKey === key;
-                    return (
-                      <th
-                        key={key}
-                        onClick={() => handleJobsSort(key)}
-                        className={`border-b border-border ${idx < 2 ? 'border-r border-r-border' : ''} ${key === 'damageCount' ? 'text-destructive' : ''} select-none`}
-                        style={{ textAlign: 'center', fontSize: 10, fontWeight: 600, textTransform: 'uppercase', padding: '5px 8px', width: widths[idx], cursor: 'pointer', userSelect: 'none' }}
-                      >
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, justifyContent: 'center' }}>
-                          {labels[idx]}
-                          {isActive && <span style={{ fontSize: 9, lineHeight: 1 }}>{jobsSortDir === 'asc' ? '▲' : '▼'}</span>}
-                        </span>
-                      </th>
-                    );
-                  })}
-                </tr>
-              </thead>
-              <tbody>
-                {sortedJobRows.length === 0 ? (
-                  <tr><td colSpan={3} style={{ textAlign: 'center', padding: 16, fontSize: 12 }} className="text-muted-foreground">No data</td></tr>
-                ) : (
-                  sortedJobRows.map((row) => (
-                    <tr
-                      key={row.unitNumber}
-                      onClick={() => handleMatrixClick(row.unitNumber)}
-                      style={{
-                        cursor: 'pointer',
-                        fontSize: 12,
-                        background: selectedMatrixUnit === row.unitNumber ? 'var(--accent)' : undefined,
-                        borderLeft: selectedMatrixUnit === row.unitNumber ? '3px solid var(--primary)' : '3px solid transparent',
-                      }}
-                      className="hover:bg-accent/30"
-                    >
-                      <td className="border-b border-border border-r border-r-border" style={{ padding: '3px 8px', fontWeight: 700 }}>{row.unitNumber.split(' - ')[0]}</td>
-                      <td className="border-b border-border border-r border-r-border" style={{ padding: '3px 8px', fontWeight: 700, textAlign: 'center', width: 60 }}>{row.count}</td>
-                      <td className="border-b border-border" style={{ padding: '3px 8px', textAlign: 'center', width: 80 }}>
-                        {row.damageCount > 0 ? (
-                          <span className="text-destructive" style={{ fontWeight: 600 }}>{row.damageCount}</span>
-                        ) : (
-                          <span className="text-muted-foreground">—</span>
-                        )}
+          <div className="min-h-0 flex flex-1 flex-col">
+            {/*
+              Normal <table> inside one scroll area — the block+scrollable <tbody> pattern breaks
+              table-fixed and colgroup widths. Sticky header/footer keep UX without a second table.
+            */}
+            <div className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
+              <table className="w-full table-fixed border-collapse text-xs">
+                <colgroup>
+                  <col style={{ width: '13%' }} />
+                  <col style={{ width: '22%' }} />
+                  <col style={{ width: '18%' }} />
+                  <col style={{ width: '22%' }} />
+                  <col style={{ width: '18%' }} />
+                </colgroup>
+                <thead>
+                  <tr className="sticky top-0 z-20 border-b-2 border-b-primary/25 bg-muted text-foreground shadow-sm">
+                    {(
+                      [
+                        ['unit', 'Unit'],
+                        ['count', 'Number of jobs'],
+                        ['osDays', 'Days OOS'],
+                        ['driveUpCount', 'Drive up'],
+                        ['damageCount', 'Damage'],
+                      ] as const
+                    ).map(([key, label], idx) => {
+                      const isActive = jobsSortKey === key;
+                      return (
+                        <th
+                          key={key}
+                          onClick={() => handleJobsSort(key)}
+                          className={[
+                            'bg-muted px-1.5 py-1.5 text-center text-[0.55rem] font-semibold uppercase leading-tight',
+                            idx < 4 ? 'border-r border-border/60' : '',
+                            'cursor-pointer select-none',
+                          ]
+                            .filter(Boolean)
+                            .join(' ')}
+                        >
+                          <span className="inline-flex items-center justify-center gap-0.5">
+                            {label}
+                            {isActive && (
+                              <span className="text-primary text-[0.5rem] leading-none">
+                                {jobsSortDir === 'asc' ? '▲' : '▼'}
+                              </span>
+                            )}
+                          </span>
+                        </th>
+                      );
+                    })}
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedJobRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="py-4 text-center text-muted-foreground text-xs">
+                        No data
                       </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-              <tfoot>
-                <tr className="bg-muted text-foreground sticky bottom-0 z-[2]">
-                  <td className="border-t border-border border-r border-r-border" style={{ padding: '5px 8px', fontWeight: 700, fontSize: 12 }}>Total</td>
-                  <td className="border-t border-border border-r border-r-border" style={{ padding: '5px 8px', fontWeight: 700, fontSize: 12, textAlign: 'center', width: 60 }}>{jobsData.grandTotal}</td>
-                  <td className="border-t border-border" style={{ padding: '5px 8px', fontWeight: 700, fontSize: 12, textAlign: 'center', width: 80 }}>
-                    <span className={jobsData.grandDamage > 0 ? 'text-destructive' : ''}>{jobsData.grandDamage > 0 ? jobsData.grandDamage : '—'}</span>
-                  </td>
-                </tr>
-              </tfoot>
-            </table>
+                  ) : (
+                    sortedJobRows.map((row) => (
+                        <tr
+                          key={row.unitNumber}
+                          onClick={() => handleMatrixClick(row.unitNumber)}
+                          style={{
+                            cursor: 'pointer',
+                            background: selectedMatrixUnit === row.unitNumber ? 'var(--accent)' : undefined,
+                            borderLeft: selectedMatrixUnit === row.unitNumber ? '2px solid var(--primary)' : '2px solid transparent',
+                          }}
+                          className="bg-card hover:bg-accent/30"
+                        >
+                          <td className="border-b border-border/80 border-r border-r-border/80 py-1 px-1.5 text-center font-bold tabular-nums">
+                          {row.unitNumber.split(' - ')[0]}
+                        </td>
+                        <td className="border-b border-border/80 border-r border-r-border/80 py-1 px-1 text-center font-bold tabular-nums [font-size:0.65rem] leading-tight">
+                          {row.count}
+                        </td>
+                        <td className="border-b border-border/80 border-r border-r-border/80 py-1 px-0.5 text-center font-semibold tabular-nums text-foreground">
+                          {row.osDays > 0 ? row.osDays.toLocaleString() : '—'}
+                        </td>
+                        <td className="border-b border-border/80 border-r border-r-border/80 py-1 px-0.5 text-center font-semibold tabular-nums text-foreground">
+                          {row.driveUpCount > 0 ? row.driveUpCount.toLocaleString() : '—'}
+                        </td>
+                        <td className="border-b border-border/80 py-1 px-0.5 text-center">
+                          {row.damageCount > 0 ? (
+                            <span className="text-destructive font-semibold tabular-nums">{row.damageCount}</span>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+                <tfoot className="text-foreground">
+                  <tr className="sticky bottom-0 z-10 border-t-2 border-primary/25 bg-muted shadow-[0_-2px_6px_rgba(0,0,0,0.05)]">
+                    <td className="border-r border-border/80 bg-muted py-1.5 px-1.5 text-center text-[0.7rem] font-bold">Total</td>
+                    <td className="border-r border-border/80 bg-muted py-1.5 px-1 text-center text-[0.7rem] font-bold tabular-nums">
+                      {jobsData.grandTotal}
+                    </td>
+                    <td className="border-r border-border/80 bg-muted py-1.5 px-0.5 text-center text-[0.7rem] font-bold tabular-nums">
+                      {jobsData.grandOs > 0 ? jobsData.grandOs.toLocaleString() : '—'}
+                    </td>
+                    <td className="border-r border-border/80 bg-muted py-1.5 px-0.5 text-center text-[0.7rem] font-bold tabular-nums">
+                      {jobsData.grandDriveUp > 0 ? jobsData.grandDriveUp.toLocaleString() : '—'}
+                    </td>
+                    <td className="bg-muted py-1.5 px-0.5 text-center text-[0.7rem]">
+                      <span className={jobsData.grandDamage > 0 ? 'font-bold text-destructive' : 'text-muted-foreground'}>
+                        {jobsData.grandDamage > 0 ? jobsData.grandDamage : '—'}
+                      </span>
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
           </div>
         </div>
 
-        {/* RIGHT: Invoice list */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRadius: 6 }} className="bg-card border border-border">
-          <div className="bg-muted border-b border-border" style={{ padding: '8px 12px 6px', flexShrink: 0 }}>
-            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', marginBottom: 6, position: 'relative' }}>
-              <span className="text-foreground" style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                {selectedMatrixUnit ? `Repairs: Unit ${selectedMatrixUnit.split(' - ')[0]}` : 'All Repairs'}
+        {/* RIGHT: repair lines — full width, no side inset; ring matches chart cards */}
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl bg-card text-card-foreground ring-1 ring-primary/20">
+          <div className="shrink-0 border-b border-primary/20 bg-gradient-to-b from-primary/[0.13] to-muted/25 px-2 py-1.5">
+            <div className="flex items-center justify-center relative pr-14 min-h-[1.1rem]">
+              <span className="text-center text-[0.7rem] font-bold uppercase tracking-wide text-foreground">
+                {selectedMatrixUnit
+                  ? `Repairs · Unit ${selectedMatrixUnit.split(' - ')[0]}`
+                  : 'Repairs'}
               </span>
-              <span className="text-muted-foreground" style={{ fontSize: 11, position: 'absolute', right: 0 }}>{invoices.length} repairs</span>
+              <span className="text-muted-foreground absolute right-0 top-1/2 -translate-y-1/2 tabular-nums text-[0.65rem]">
+                {invoices.length}
+              </span>
             </div>
-            <div style={{ display: 'flex', gap: 8 }}>
+          </div>
+          <div className="shrink-0 border-b border-border/80 bg-muted/25 px-2 py-1.5">
+            <div className="flex w-full min-w-0 gap-2">
               <input
                 type="text"
-                placeholder="Search Unit..."
+                placeholder="Search unit…"
                 value={unitSearchQuery}
                 onChange={(e) => setUnitSearchQuery(e.target.value)}
                 onClick={(e) => e.stopPropagation()}
-                className="bg-background text-foreground border border-border placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                style={{ flex: 1, padding: '4px 8px', borderRadius: 4, fontSize: 12 }}
+                className="min-w-0 flex-1 rounded border border-border bg-background px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/30"
               />
               {selectedMatrixUnit && (
                 <button
+                  type="button"
                   onClick={() => setSelectedMatrixUnit(null)}
-                  className="bg-accent text-accent-foreground hover:bg-accent/80"
-                  style={{ fontSize: 10, padding: '4px 8px', borderRadius: 4, border: 'none', cursor: 'pointer' }}
+                  className="shrink-0 rounded border border-border bg-background px-2 py-1 text-[0.65rem] font-medium text-foreground hover:bg-accent"
                 >
                   Clear
                 </button>
               )}
             </div>
           </div>
-          <div style={{ flex: 1, overflowY: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr className="bg-muted text-foreground sticky top-0 z-[2]">
-                  <th className="border-b border-border border-r border-r-border" style={{ textAlign: 'center', fontSize: 10, fontWeight: 600, textTransform: 'uppercase', padding: '5px 8px' }}>Date</th>
-                  <th className="border-b border-border border-r border-r-border" style={{ textAlign: 'center', fontSize: 10, fontWeight: 600, textTransform: 'uppercase', padding: '5px 8px' }}>Unit</th>
-                  <th className="border-b border-border" style={{ textAlign: 'center', fontSize: 10, fontWeight: 600, textTransform: 'uppercase', padding: '5px 8px', width: 80 }}>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {invoices.length === 0 ? (
-                  <tr><td colSpan={3} style={{ textAlign: 'center', padding: 16, fontSize: 12 }} className="text-muted-foreground">
-                    {units.length === 0 ? 'No repair data available' : 'No invoices found for selected filters'}
-                  </td></tr>
-                ) : (
-                  invoices.map((inv) => {
-                    const unitNum = inv.unitNumber.split(' - ')[0];
-                    const isDmg = isDamageInvoice(inv);
-                    return (
-                      <tr
-                        key={`${inv.unitNumber}-${inv.invoiceNumber}-${inv.invoiceDate}`}
-                        style={{ fontSize: 12, background: isDmg ? 'color-mix(in oklch, var(--destructive) 5%, transparent)' : undefined }}
-                        className={isDmg ? 'hover:bg-destructive/10' : 'hover:bg-accent/30'}
-                      >
-                        <td className="border-b border-border border-r border-r-border" style={{ padding: '3px 8px', whiteSpace: 'nowrap' }}>{new Date(inv.invoiceDate).toLocaleDateString()}</td>
-                        <td className="border-b border-border border-r border-r-border" style={{ padding: '3px 8px', fontWeight: 700, whiteSpace: 'nowrap' }}>
-                          {unitNum}
-                          {isDmg && <Badge variant="destructive" className="ml-1 text-[10px] px-1 py-0 leading-tight">Damage</Badge>}
-                        </td>
-                        <td className="border-b border-border" style={{ padding: '3px 8px', width: 80, textAlign: 'center', whiteSpace: 'nowrap' }}>
-                          <button
-                            onClick={() => setSelectedInvoice(inv)}
-                            className="border border-border hover:bg-accent text-foreground"
-                            style={{ fontSize: 11, padding: '1px 6px', borderRadius: 3, background: 'transparent', cursor: 'pointer' }}
-                          >
-                            Details
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
+          <div className="min-h-0 flex-1 overflow-auto">
+            <table
+                className="w-full min-w-0 table-fixed border-collapse text-xs [&_th]:px-0.5 [&_th]:py-1.5 [&_th:first-child]:pl-1.5 [&_th:last-child]:pr-1.5 [&_td]:px-0.5 [&_td]:py-1 [&_td:first-child]:pl-1.5 [&_td:last-child]:pr-1.5"
+              >
+                <colgroup>
+                  <col style={{ width: '19%' }} />
+                  <col style={{ width: '19%' }} />
+                  <col style={{ width: '10%' }} />
+                  <col style={{ width: '30%' }} />
+                  <col style={{ width: '22%' }} />
+                </colgroup>
+                <thead>
+                  <tr className="sticky top-0 z-20 border-b-2 border-b-primary/25 bg-muted text-foreground shadow-sm">
+                    {(
+                      [
+                        ['orderCreated', 'Order created'],
+                        ['orderClosed', 'Order closed'],
+                        ['daysOos', 'Days OOS'],
+                        ['unit', 'Unit'],
+                      ] as const
+                    ).map(([key, label]) => {
+                      const isActive = repairsSortKey === key;
+                      return (
+                        <th
+                          key={key}
+                          onClick={() => handleRepairsSort(key)}
+                          className="cursor-pointer select-none border-r border-border/60 bg-muted text-center text-[0.55rem] font-semibold uppercase leading-tight"
+                        >
+                          <span className="inline-flex items-center justify-center gap-0.5">
+                            {label}
+                            {isActive && (
+                              <span className="text-primary text-[0.5rem] leading-none">
+                                {repairsSortDir === 'asc' ? '▲' : '▼'}
+                              </span>
+                            )}
+                          </span>
+                        </th>
+                      );
+                    })}
+                    <th className="bg-muted text-center text-[0.55rem] font-semibold uppercase leading-tight">Details</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {invoices.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="p-4 text-center text-xs text-muted-foreground">
+                        {units.length === 0 ? 'No repair data available' : 'No invoices found for selected filters'}
+                      </td>
+                    </tr>
+                  ) : (
+                    invoices.map((inv) => {
+                      const unitNum = inv.unitNumber.split(' - ')[0];
+                      const openDays = daysJobOpenInclusive(inv.orderCreatedDate, inv.orderClosedDate);
+                      return (
+                        <tr
+                          key={`${inv.unitNumber}-${inv.invoiceNumber}-${inv.invoiceDate}`}
+                          style={{ fontSize: 12 }}
+                          className="bg-card hover:bg-accent/30"
+                        >
+                          <td className="border-b border-border/80 border-r border-r-border/80 text-center tabular-nums whitespace-nowrap">
+                            {formatYmdForDisplay(inv.orderCreatedDate)}
+                          </td>
+                          <td className="border-b border-border/80 border-r border-r-border/80 text-center tabular-nums whitespace-nowrap">
+                            {formatYmdForDisplay(inv.orderClosedDate)}
+                          </td>
+                          <td className="border-b border-border/80 border-r border-r-border/80 text-center tabular-nums text-[0.7rem] whitespace-nowrap">
+                            {openDays != null ? openDays : '—'}
+                          </td>
+                          <td className="border-b border-border/80 border-r border-r-border/80 text-center font-bold tabular-nums whitespace-nowrap">
+                            {unitNum}
+                          </td>
+                          <td className="border-b border-border/80 text-center whitespace-nowrap">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedInvoice(inv)}
+                              className="inline-flex max-w-full justify-center text-balance rounded border border-primary/25 bg-primary/5 px-1.5 py-1 text-center text-[0.58rem] font-medium leading-snug text-primary hover:bg-primary/10"
+                            >
+                              See Repair Details
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
           </div>
         </div>
       </div>

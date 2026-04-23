@@ -70,7 +70,7 @@ export default function UnitListPanel({ events, groupBy, onGroupByChange, select
           <div className="px-3 pt-3 pb-2 border-b border-border flex flex-col gap-1.5">
             <div className="flex items-center justify-between">
               <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</p>
-              <p className="text-[10px] text-muted-foreground/60">{rows.length} · by idle time</p>
+              <p className="text-[10px] text-muted-foreground/60">{rows.length.toLocaleString('en-US')} · by idle time</p>
             </div>
             {/* Group by toggle in panel header */}
             <div className="flex w-full h-6 border border-input rounded overflow-hidden text-[10px]">
@@ -105,7 +105,7 @@ export default function UnitListPanel({ events, groupBy, onGroupByChange, select
                   onClick={() => onSelectionChange([])}
                   className="w-full text-[10px] text-primary hover:text-primary/80 py-1 border-b border-border/40 transition-colors"
                 >
-                  Clear selection ({selectedKeys.length})
+                  Clear selection ({selectedKeys.length.toLocaleString('en-US')})
                 </button>
               )}
               <div className="flex flex-col">
@@ -130,7 +130,7 @@ export default function UnitListPanel({ events, groupBy, onGroupByChange, select
                         >
                           {row.key}
                         </span>
-                        <span className="text-[10px] text-muted-foreground shrink-0">{row.eventCount} events</span>
+                        <span className="text-[10px] text-muted-foreground shrink-0">{row.eventCount.toLocaleString('en-US')} events</span>
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-[11px] font-semibold text-foreground">

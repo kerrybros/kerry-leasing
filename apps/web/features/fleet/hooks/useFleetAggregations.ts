@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import type { VehicleUtilization, DriverUtilization } from '@/hooks/useDataQueries';
 import type { RepairUnitSummary } from '@/features/fleet/components/RepairBreakdown';
-import { isDamageInvoice } from '@/features/fleet/components/RepairBreakdown';
+import { isDamageInvoice, isDriveUpInvoice } from '@/features/fleet/components/RepairBreakdown';
 import {
   filterByDateRange,
   aggregateUnitMetrics,
@@ -92,6 +92,7 @@ export function useFleetAggregations({
   const repairKpis = useMemo(() => {
     let totalJobs = 0;
     let damageJobs = 0;
+    let driveUpJobs = 0;
     let totalRepairSpend = 0;
     repairUnits.forEach(u => {
       const filteredInvoices = u.invoices.filter(
@@ -99,16 +100,19 @@ export function useFleetAggregations({
       );
       const jobs = new Set<string>();
       const damageJobIds = new Set<string>();
+      const driveUpJobIds = new Set<string>();
       filteredInvoices.forEach(inv => {
         const jobId = inv.orderNumber || inv.invoiceNumber;
         jobs.add(jobId);
         if (isDamageInvoice(inv)) damageJobIds.add(jobId);
+        if (isDriveUpInvoice(inv)) driveUpJobIds.add(jobId);
         totalRepairSpend += (inv.total ?? 0);
       });
       totalJobs += jobs.size;
       damageJobs += damageJobIds.size;
+      driveUpJobs += driveUpJobIds.size;
     });
-    return { totalJobs, damageJobs, totalRepairSpend };
+    return { totalJobs, damageJobs, driveUpJobs, totalRepairSpend };
   }, [repairUnits, repairStartDate, repairEndDate]);
 
   const availableYears = useMemo(() => {

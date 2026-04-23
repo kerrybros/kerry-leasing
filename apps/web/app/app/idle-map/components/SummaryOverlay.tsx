@@ -8,7 +8,7 @@ import { TOOLTIP_STYLE } from '@/features/fleet/utils/chartColors';
 import { ArrowRight } from 'lucide-react';
 
 import type { EnrichedIdleEvent, DateRange } from '../types';
-import { formatDuration, fuelStr, costStr } from '../types';
+import { formatDuration, fuelStr, costStr, dieselPriceSourceSubtext } from '../types';
 
 interface Props {
   events: EnrichedIdleEvent[];
@@ -76,10 +76,14 @@ export default function SummaryOverlay({ events, loading, dieselPrice, dateRange
           <>
             {/* 5 inline metrics */}
             <div className="grid grid-cols-2 gap-1.5">
-              <MetricChip label="Events" value={stats.totalEvents.toLocaleString()} />
+              <MetricChip label="Events" value={stats.totalEvents.toLocaleString('en-US')} />
               <MetricChip label="Idle Time" value={formatDuration(stats.totalMinutes)} />
               <MetricChip label="Fuel" value={fuelStr(stats.totalFuel)} />
-              <MetricChip label="Est. Cost" value={costStr(stats.totalFuel, dieselPrice)} />
+              <MetricChip
+                label="Est. Cost"
+                value={costStr(stats.totalFuel, dieselPrice)}
+                caption={dieselPriceSourceSubtext(dieselPrice)}
+              />
               <MetricChip label="Inside Geofence" value={`${stats.pctInside}%`} className="col-span-2" />
             </div>
 
@@ -91,7 +95,7 @@ export default function SummaryOverlay({ events, loading, dieselPrice, dateRange
                     <XAxis dataKey="date" hide />
                     <Tooltip
                       contentStyle={TOOLTIP_STYLE}
-                      formatter={(v: unknown) => [`${v}m`, 'Idle']}
+                      formatter={(v: unknown) => [`${Number(v).toLocaleString('en-US')}m`, 'Idle']}
                       labelStyle={{ fontSize: 10 }}
                     />
                     <Bar dataKey="minutes" fill="#d9a528" radius={[2, 2, 0, 0]} isAnimationActive={false} />
@@ -116,11 +120,14 @@ export default function SummaryOverlay({ events, loading, dieselPrice, dateRange
   );
 }
 
-function MetricChip({ label, value, className }: { label: string; value: string; className?: string }) {
+function MetricChip({ label, value, className, caption }: { label: string; value: string; className?: string; caption?: string }) {
   return (
     <div className={`bg-muted/60 rounded-md px-2 py-1.5 ${className ?? ''}`}>
       <p className="text-[9px] uppercase tracking-wide text-muted-foreground leading-none mb-0.5">{label}</p>
       <p className="text-xs font-semibold text-foreground leading-none">{value}</p>
+      {caption && (
+        <p className="text-[8px] text-muted-foreground/85 leading-tight mt-1">{caption}</p>
+      )}
     </div>
   );
 }

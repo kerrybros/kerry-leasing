@@ -15,10 +15,26 @@ const nextConfig = {
     // Service Log (Excel/SharePoint embed) + Microsoft 365 iframes need explicit frame-src
     const msFrame =
       'https://*.sharepoint.com https://*.sharepoint-df.com https://embed.office.com https://*.officeapps.live.com https://view.officeapps.live.com';
+    // connect-src has https: (any https origin) but not http — local API is a different port than the web
+    // app, so it is not 'self' and fetches to http://localhost:4000 were blocked. Allow explicit http API hosts.
+    let connectHttpApi = '';
+    const apiBase = process.env.NEXT_PUBLIC_API_URL;
+    if (apiBase) {
+      try {
+        const u = new URL(apiBase);
+        if (u.protocol === 'http:') {
+          connectHttpApi += ` ${u.origin}`;
+        }
+      } catch {
+        // ignore bad URL
+      }
+    } else if (process.env.NODE_ENV !== 'production') {
+      connectHttpApi = ' http://localhost:4000 http://127.0.0.1:4000';
+    }
     const csp = [
       "default-src 'self'",
       `script-src 'self' 'unsafe-inline'${devEval} https: http: https://challenges.cloudflare.com ${fapi} https://*.clerk.accounts.dev`,
-      `connect-src 'self' https: wss: ${fapi} https://*.clerk.accounts.dev https://clerk-telemetry.com https://*.clerk-telemetry.com`,
+      `connect-src 'self' https: wss: ${fapi} https://*.clerk.accounts.dev https://clerk-telemetry.com https://*.clerk-telemetry.com${connectHttpApi}`,
       "img-src 'self' data: https: https://img.clerk.com",
       "style-src 'self' 'unsafe-inline'",
       `frame-src 'self' https://challenges.cloudflare.com https://*.js.stripe.com https://js.stripe.com ${fapi} https://*.clerk.accounts.dev ${msFrame}`,

@@ -19,6 +19,7 @@ import { REPAIR_SHOP_ORG_ID } from '../config/repairShop.js';
 import { cacheGetOrSetMeta } from '../lib/redis.js';
 import { config } from '../config.js';
 import { RepairsQuerySchema, PaginationSchema, parseQuery } from '../lib/validate.js';
+import { parseDateActionCompletedToYmd, ymdMax } from '../lib/repairDateActionCompleted.js';
 
 const router = Router();
 /** Same window as before: 10h TTL for the raw revenue_details rows (shared across API instances). */
@@ -37,6 +38,8 @@ function repairsRawRedisKey(
     from: effectiveFromYmd,
     to: toYmdValue,
     units: [...allowedUnitNumbers].sort(),
+    /** Bump when raw row shape/fields change (invalidates Redis blobs missing e.g. date_action_completed). */
+    rawSchema: 'v2',
   });
   const h = createHash('sha256').update(payload).digest('hex').slice(0, 24);
   return `${env}:repairs:raw:${klOrgId}:${h}`;
@@ -73,6 +76,7 @@ type RepairsRawRow = {
   unit: string | null;
   number: string | null;
   invoice_date: string | null;
+  order_created_date: string | null;
   order: string | null;
   shop: string | null;
   service_description: string | null;
@@ -84,6 +88,7 @@ type RepairsRawRow = {
   sales_tax: number;
   component: string | null;
   system: string | null;
+  date_action_completed: string | null;
 };
 
 type RevenueDetailSelected = {
@@ -91,6 +96,7 @@ type RevenueDetailSelected = {
   unit: string | null;
   number: string | null;
   invoice_date: Date | null;
+  order_created_date: Date | null;
   order: string | null;
   shop: string | null;
   service_description: string | null;
@@ -102,6 +108,7 @@ type RevenueDetailSelected = {
   sales_tax: unknown;
   component: string | null;
   system: string | null;
+  date_action_completed: string | null;
 };
 
 function toRepairsRawRows(rows: RevenueDetailSelected[]): RepairsRawRow[] {
@@ -110,6 +117,9 @@ function toRepairsRawRows(rows: RevenueDetailSelected[]): RepairsRawRow[] {
     unit: r.unit,
     number: r.number,
     invoice_date: r.invoice_date ? r.invoice_date.toISOString().split('T')[0]! : null,
+    order_created_date: r.order_created_date
+      ? r.order_created_date.toISOString().split('T')[0]!
+      : null,
     order: r.order,
     shop: r.shop,
     service_description: r.service_description,
@@ -121,6 +131,7 @@ function toRepairsRawRows(rows: RevenueDetailSelected[]): RepairsRawRow[] {
     sales_tax: toNumber(r.sales_tax),
     component: r.component,
     system: r.system,
+    date_action_completed: r.date_action_completed ?? null,
   }));
 }
 
@@ -264,6 +275,7 @@ router.get('/', clerkAuthMiddleware, requireOrg, async (req: AuthRequest, res) =
             unit: true,
             number: true, // invoice number
             invoice_date: true,
+            order_created_date: true,
             order: true,
             shop: true,
             service_description: true,
@@ -275,6 +287,7 @@ router.get('/', clerkAuthMiddleware, requireOrg, async (req: AuthRequest, res) =
             sales_tax: true,
             component: true,
             system: true,
+            date_action_completed: true,
           },
           orderBy: [{ unit: 'asc' }, { invoice_date: 'desc' }, { number: 'asc' }],
         });
@@ -283,7 +296,10 @@ router.get('/', clerkAuthMiddleware, requireOrg, async (req: AuthRequest, res) =
     );
 
     type LineAgg = {
-      description: string;
+      /** complaint_description */
+      complaint: string | null;
+      /** service_description only; may be "" when this line is complaint-only */
+      correction: string;
       component: string | null;
       system: string | null;
       total: number;
@@ -293,12 +309,16 @@ router.get('/', clerkAuthMiddleware, requireOrg, async (req: AuthRequest, res) =
 
     type InvoiceAgg = {
       invoiceNumber: string;
+      /** invoice / closed — Y-M-D */
       invoiceDate: string;
+      orderCreatedDate: string | null;
       orderNumber: string | null;
       shop: string | null;
       total: number;
       tax: number;
       lineCount: number;
+      /** Y-M-D: latest revenue_details.date_action_completed on the job (order closed) */
+      orderClosedDate: string | null;
       lines: Map<string, LineAgg>;
     };
 
@@ -341,27 +361,44 @@ router.get('/', clerkAuthMiddleware, requireOrg, async (req: AuthRequest, res) =
         ({
           invoiceNumber,
           invoiceDate: invoiceDateYmd,
+          orderCreatedDate: toYmd(r.order_created_date),
           orderNumber: r.order || null,
           shop: r.shop || null,
           total: 0,
           tax: 0,
           lineCount: 0,
+          orderClosedDate: null,
           lines: new Map(),
         } satisfies InvoiceAgg);
 
-      const description =
-        (r.service_description ||
-          r.global_service_description ||
-          r.part_description ||
-          r.complaint_description ||
-          '').trim() || '(No description)';
+      if (!invoiceAgg.orderCreatedDate) {
+        const ocd = toYmd(r.order_created_date);
+        if (ocd) invoiceAgg.orderCreatedDate = ocd;
+      }
+
+      const lineCompletedYmd = parseDateActionCompletedToYmd(r.date_action_completed);
+      if (lineCompletedYmd) {
+        invoiceAgg.orderClosedDate = ymdMax(invoiceAgg.orderClosedDate, lineCompletedYmd);
+      }
+
+      const complaintRaw = (r.complaint_description || '').trim();
+      // Many revenue_rows only populate global_service_description; service_description alone would drop all lines.
+      const serviceRaw = (r.service_description || r.global_service_description || '').trim();
+      if (!complaintRaw && !serviceRaw) continue;
+
+      const complaint: string | null = complaintRaw || null;
+      // Correction is labor/service text: prefer line-level service, else shop-global description (never part_description).
+      const correction = (r.service_description || '').trim() || (r.global_service_description || '').trim();
+
+      const lineKey = `${complaintRaw}\u0000${serviceRaw}`;
 
       const lineTotal = toNumber(r.total);
       const lineTax = toNumber(r.sales_tax);
 
       const line =
-        invoiceAgg.lines.get(description) || {
-          description,
+        invoiceAgg.lines.get(lineKey) || {
+          complaint,
+          correction,
           component: null,
           system: null,
           total: 0,
@@ -379,7 +416,7 @@ router.get('/', clerkAuthMiddleware, requireOrg, async (req: AuthRequest, res) =
       line.total += lineTotal;
       line.tax += lineTax;
       line.count += 1;
-      invoiceAgg.lines.set(description, line);
+      invoiceAgg.lines.set(lineKey, line);
 
       invoiceAgg.total += lineTotal;
       invoiceAgg.tax += lineTax;
@@ -400,6 +437,8 @@ router.get('/', clerkAuthMiddleware, requireOrg, async (req: AuthRequest, res) =
         .map((inv) => ({
           invoiceNumber: inv.invoiceNumber,
           invoiceDate: inv.invoiceDate,
+          orderCreatedDate: inv.orderCreatedDate,
+          orderClosedDate: inv.orderClosedDate,
           orderNumber: inv.orderNumber,
           shop: inv.shop,
           total: Number(inv.total.toFixed(2)),

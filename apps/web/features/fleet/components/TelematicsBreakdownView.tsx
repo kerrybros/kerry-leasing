@@ -1,8 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import { ArrowRight, X } from 'lucide-react';
+import { useState } from 'react';
 import { Skeleton } from '@/components/Skeleton';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, LabelList, ResponsiveContainer,
@@ -21,7 +19,6 @@ interface TelematicsBreakdownViewProps {
   fleetTotals: FleetTotals;
   selectedId: string | number | null;
   onRowClick: (id: string | number) => void;
-  vinToRepairUnitNumber?: Map<string, string>;
 }
 
 type SortKey = 'label' | 'totalMiles' | 'avgMpg' | 'idlePercentage' | 'idleFuel' | 'idleTimeMinutes' | 'totalFuelGal' | 'drivingFuelGal' | 'driveTimeHrs';
@@ -95,9 +92,7 @@ export function TelematicsBreakdownView({
   fleetTotals,
   selectedId,
   onRowClick,
-  vinToRepairUnitNumber,
 }: TelematicsBreakdownViewProps) {
-  const router = useRouter();
   const [sortKey, setSortKey] = useState<SortKey>('totalMiles');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
@@ -174,22 +169,9 @@ export function TelematicsBreakdownView({
   // Format decimal hours → "Xh Ym"
   const fmtHrs = (hrs: number) => fmtMins(hrs * 60);
 
-  type NavConfirm = { label: string; href: string } | null;
-  const [navConfirm, setNavConfirm] = useState<NavConfirm>(null);
-
-  useEffect(() => {
-    if (!navConfirm) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setNavConfirm(null); };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [navConfirm]);
-
-  const handleItemClick = (m: UnitMetrics | DriverMetrics) => {
-    const label = isUnit ? (m as UnitMetrics).unitNumber : (m as DriverMetrics).driverName;
-    const href = isUnit
-      ? `/app/units/${encodeURIComponent(vinToRepairUnitNumber?.get((m as UnitMetrics).vin) || (m as UnitMetrics).unitNumber || (m as UnitMetrics).vin || '')}`
-      : `/app/drivers/${(m as DriverMetrics).driverId}`;
-    setNavConfirm({ label, href });
+  const selectFromChart = (m: UnitMetrics | DriverMetrics) => {
+    const id = isUnit ? (m as UnitMetrics).vin : (m as DriverMetrics).driverId;
+    onRowClick(id);
   };
 
   if (metrics.length === 0) {
@@ -210,7 +192,7 @@ export function TelematicsBreakdownView({
           dataKey="idlePercentage"
           color="#ef4444"
           formatter={(v) => `${v}%`}
-          onBarClick={handleItemClick}
+          onBarClick={selectFromChart}
         />
         <CompactBar
           title="Best MPG"
@@ -218,7 +200,7 @@ export function TelematicsBreakdownView({
           dataKey="avgMpg"
           color={CHART_COLORS.success}
           formatter={(v) => `${v}`}
-          onBarClick={handleItemClick}
+          onBarClick={selectFromChart}
         />
         <CompactBar
           title="Highest Miles Driven"
@@ -226,7 +208,7 @@ export function TelematicsBreakdownView({
           dataKey="totalMiles"
           color={CHART_COLORS.primary}
           formatter={(v) => Math.round(Number(v)).toLocaleString()}
-          onBarClick={handleItemClick}
+          onBarClick={selectFromChart}
         />
         <CompactBar
           title="Most Idle Fuel"
@@ -234,7 +216,7 @@ export function TelematicsBreakdownView({
           dataKey="idleFuel"
           color="#f59e0b"
           formatter={(v) => `${Number(v).toLocaleString()} gal`}
-          onBarClick={handleItemClick}
+          onBarClick={selectFromChart}
         />
       </div>
 
@@ -277,7 +259,7 @@ export function TelematicsBreakdownView({
                     background: isSelected ? 'var(--accent)' : undefined,
                     borderLeft: isSelected ? '3px solid var(--primary)' : '3px solid transparent',
                   }}
-                  onClick={() => { onRowClick(id); handleItemClick(m); }}
+                  onClick={() => onRowClick(id)}
                 >
                   <TableCell className="font-semibold text-[12px] px-3 py-2">{getLabel(m)}</TableCell>
                   <TableCell className="text-[12px] px-3 py-2 tabular-nums">{Math.round(m.totalMiles).toLocaleString()}</TableCell>
@@ -307,45 +289,6 @@ export function TelematicsBreakdownView({
           </TableBody>
         </Table>
       </div>
-
-      {/* Nav confirm popup */}
-      {navConfirm && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center"
-          onClick={() => setNavConfirm(null)}
-        >
-          <div
-            className="bg-card border border-border rounded-xl shadow-xl p-5 w-72 flex flex-col gap-4"
-            onClick={e => e.stopPropagation()}
-          >
-            <div className="flex items-start justify-between gap-2">
-              <div>
-                <p className="text-base font-bold leading-tight">
-                  Open {isUnit ? 'unit' : 'driver'} details page
-                </p>
-                <p className="text-sm text-muted-foreground mt-0.5">{navConfirm.label}</p>
-              </div>
-              <button onClick={() => setNavConfirm(null)} className="text-muted-foreground hover:text-foreground cursor-pointer mt-0.5">
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setNavConfirm(null)}
-                className="flex-1 h-8 text-xs font-medium rounded-md border border-border text-muted-foreground hover:bg-accent transition-colors cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => window.open(navConfirm.href, '_blank')}
-                className="flex-1 h-8 text-xs font-medium rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-              >
-                Open <ArrowRight className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

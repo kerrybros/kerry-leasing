@@ -9,8 +9,8 @@ export default clerkMiddleware(
     }
   },
   {
-    // This is critical: tell Clerk to include organization data in the token
-    debug: process.env.NODE_ENV === 'development',
+    // Verbose request/cookie logging; enable only when debugging auth (very noisy in dev)
+    debug: process.env.CLERK_MIDDLEWARE_DEBUG === 'true',
   }
 );
 

@@ -132,7 +132,8 @@ router.post('/sync-whiparound', async (req: Request, res: Response) => {
 /**
  * POST /cron/refresh-fuel-price
  * Fetches the latest diesel retail price from EIA and stores in system_config.
- * Should be called once per week (e.g. Monday morning).
+ * Schedule daily (e.g. Render cron → run-refresh-fuel-price); EIA data updates weekly
+ * but daily runs keep the cache fresh after each release and retry after failures.
  */
 router.post('/refresh-fuel-price', async (req: Request, res: Response) => {
   if (!verifyCronSecret(req, res)) return;

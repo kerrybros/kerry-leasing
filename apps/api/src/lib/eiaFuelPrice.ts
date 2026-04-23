@@ -7,7 +7,8 @@
  * Requires: EIA_API_KEY env var (free key from https://www.eia.gov/opendata/)
  *
  * EIA series used: EMD_EPD2D_PTE_R20_DPG (Midwest/PADD 2 Retail Diesel Prices)
- * Released weekly, typically Mondays. Call this from the cron sync to auto-update weekly.
+ * EIA publishes this series weekly (often Monday). We still run a daily job so new
+ * weeks are picked up quickly and transient API failures self-heal on the next run.
  */
 
 import { getAppPrisma } from './prisma.js';
