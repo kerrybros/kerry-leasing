@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { useOrganization } from '@clerk/nextjs';
 import {
   useOrgSettingsQuery,
   useDriverUtilizationQuery,
@@ -99,6 +100,10 @@ function sumsToRow(sums: DriverSums, fleetAvgMpg: number | undefined, dieselPric
 }
 
 export function useDriversData(startDate: string, endDate: string, scorecardEnabled = true) {
+  const { isLoaded: orgLoaded, organization } = useOrganization();
+  const hasActiveOrg = orgLoaded && !!organization;
+  const noActiveOrg = orgLoaded && !organization;
+
   const orgSettingsQuery = useOrgSettingsQuery();
   const orgSettings = orgSettingsQuery.data;
   const dieselPrice = orgSettings?.dieselPricePerGallon ?? 5.0;
@@ -267,7 +272,16 @@ export function useDriversData(startDate: string, endDate: string, scorecardEnab
     return result;
   }, [driverUtilQuery.data, months, fleetAvgMpg]);
 
+  // Match fleet: do not show infinite loading when org is not yet selected (queries disabled).
+  // Driver utilization is the main table; scorecard (hard events) can finish slightly later.
+  const isLoading =
+    hasActiveOrg && (orgSettingsQuery.isPending || (canShow && driverUtilQuery.isPending));
+
   return {
+    organization,
+    orgLoaded,
+    hasActiveOrg,
+    noActiveOrg,
     orgSettingsQuery,
     canShow,
     driverRows,
@@ -275,7 +289,8 @@ export function useDriversData(startDate: string, endDate: string, scorecardEnab
     monthlyByDriver,
     weeks,
     weeklyByDriver,
-    isLoading: orgSettingsQuery.isPending || driverUtilQuery.isPending,
-    isRefetching: (driverUtilQuery.isFetching || scorecardQuery.isFetching) && !driverUtilQuery.isPending,
+    isLoading,
+    isRefetching:
+      (driverUtilQuery.isFetching || scorecardQuery.isFetching) && !isLoading,
   };
 }

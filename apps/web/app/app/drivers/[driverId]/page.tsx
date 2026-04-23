@@ -233,8 +233,8 @@ export default function DriverDetailPage() {
 
   const dieselPrice = orgSettingsQuery.data?.dieselPricePerGallon ?? 5.0;
 
-  const isLoading = orgSettingsQuery.isLoading || driverUtilQuery.isLoading;
-  const isRefetching = driverUtilQuery.isFetching && !driverUtilQuery.isLoading;
+  const isLoading = orgSettingsQuery.isPending || driverUtilQuery.isPending;
+  const isRefetching = driverUtilQuery.isFetching && !driverUtilQuery.isPending;
 
   if (isLoading) {
     return (

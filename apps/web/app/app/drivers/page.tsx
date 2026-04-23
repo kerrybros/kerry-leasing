@@ -2,8 +2,7 @@
 
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { useOrganization } from '@clerk/nextjs';
-import { useUser } from '@clerk/nextjs';
+import { OrganizationSwitcher, useUser } from '@clerk/nextjs';
 import { Loader2, Info, X, Settings2, ArrowRight, Download } from 'lucide-react';
 import { Skeleton } from '@/components/Skeleton';
 import { EmptyState } from '@/components/EmptyState';
@@ -291,7 +290,6 @@ function ColumnBuilderPopover({
 
 export default function ScorecardPage() {
   const router = useRouter();
-  const { organization } = useOrganization();
   const { user } = useUser();
   const colStorageKey = `${COL_STORAGE_PREFIX}_${user?.id ?? 'anon'}`;
 
@@ -367,6 +365,9 @@ export default function ScorecardPage() {
   const prevDates = useMemo(() => prevPeriodDates(currentPeriod, granularity), [currentPeriod, granularity]);
 
   const {
+    organization,
+    orgLoaded,
+    noActiveOrg,
     canShow,
     orgSettingsQuery,
     driverRows,
@@ -430,7 +431,42 @@ export default function ScorecardPage() {
     URL.revokeObjectURL(url);
   };
 
-  if (orgSettingsQuery.isLoading) {
+  if (!orgLoaded) {
+    return (
+      <div className="flex min-h-[40vh] w-full items-center justify-center px-4 text-muted-foreground">
+        <span className="flex items-center gap-2 text-sm">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading organization…
+        </span>
+      </div>
+    );
+  }
+
+  if (noActiveOrg) {
+    return (
+      <div className="mx-auto max-w-md px-4 py-16 text-center">
+        <h1 className="text-xl font-semibold text-foreground">Select an organization</h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Choose your organization to load the driver scorecard, or use the switcher in the sidebar.
+        </p>
+        <div className="mt-8 flex justify-center">
+          <OrganizationSwitcher
+            hidePersonal
+            afterSelectOrganizationUrl="/app/drivers"
+            appearance={{
+              elements: {
+                rootBox: 'inline-flex',
+                organizationSwitcherTrigger:
+                  'justify-center rounded-md border border-border bg-background px-4 py-2 text-sm',
+              },
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  if (isLoading) {
     return (
       <div className="w-full p-6">
         <Skeleton style={{ height: 300, borderRadius: 8, marginTop: 24 }} />
@@ -438,7 +474,7 @@ export default function ScorecardPage() {
     );
   }
 
-  if (!canShow) {
+  if (!orgSettingsQuery.isPending && !canShow) {
     return (
       <div className="w-full p-6 pt-8">
         <EmptyState
@@ -575,14 +611,8 @@ export default function ScorecardPage() {
           </div>
         )}
 
-        {/* Content */}
-        {isLoading ? (
-          <div className="flex flex-col gap-2">
-            {Array.from({ length: 8 }).map((_, i) => (
-              <Skeleton key={i} style={{ height: 40, borderRadius: 6 }} />
-            ))}
-          </div>
-        ) : pageView === 'mom' ? (
+        {/* Content — loading is handled above; keeps MoM / empty / table split */}
+        {pageView === 'mom' ? (
           <MonthOverMonthView
             months={momMonths}
             monthlyByDriver={monthlyByDriver}
