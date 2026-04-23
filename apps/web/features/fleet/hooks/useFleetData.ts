@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { useOrganization } from '@clerk/nextjs';
 import {
   useOrgSettingsQuery,
   useFleetUnitsQuery,
@@ -17,6 +18,10 @@ const defaultOrgSettings = {
 };
 
 export function useFleetData() {
+  const { organization, isLoaded: orgLoaded } = useOrganization();
+  const hasActiveOrg = orgLoaded && !!organization;
+  const noActiveOrg = orgLoaded && !organization;
+
   const filters = useFleetFilters();
   const orgSettingsQuery = useOrgSettingsQuery();
   const fleetUnitsQuery = useFleetUnitsQuery();
@@ -88,16 +93,17 @@ export function useFleetData() {
     fuelPricePerGallon: orgSettings.dieselPricePerGallon ?? undefined,
   });
 
+  // When no org is selected, all org-scoped queries are disabled; in RQ5 isPending
+  // can stay true and looks like an infinite/blank page — do not show loading in that case.
   const telematicsLoading =
-    orgSettingsQuery.isPending ||
-    fleetUnitsQuery.isPending ||
-    vehicleUtilQuery.isPending ||
-    // Keep skeleton when re-fetching but stale cached data yields nothing to show.
-    // Prevents "No data available" flash when cache is stale or cross-org.
-    (vehicleUtilQuery.isFetching && vehicleData.length === 0);
+    hasActiveOrg &&
+    (orgSettingsQuery.isPending ||
+      fleetUnitsQuery.isPending ||
+      vehicleUtilQuery.isPending ||
+      // Keep skeleton when re-fetching but stale cached data yields nothing to show.
+      (vehicleUtilQuery.isFetching && vehicleData.length === 0));
 
-  // isPending covers both "org not loaded yet" (enabled=false) and "fetching first time"
-  const repairsLoading = repairsQuery.isPending;
+  const repairsLoading = hasActiveOrg && repairsQuery.isPending;
   const repairsError = (repairsQuery.error as Error | null)?.message || null;
   const orgSettingsError = filters.orgErrorDismissed
     ? null
@@ -115,6 +121,9 @@ export function useFleetData() {
     repairUnits,
     vinToRepairUnitNumber,
     availableUnitTypes,
+    orgLoaded,
+    hasActiveOrg,
+    noActiveOrg,
     telematicsLoading,
     repairsLoading,
     isRefetching,

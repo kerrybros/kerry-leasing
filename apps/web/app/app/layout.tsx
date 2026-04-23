@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useLayoutEffect, useRef, useMemo } from 'react';
 import { UserButton, OrganizationSwitcher, useOrganization } from '@clerk/nextjs';
+import { isWolverineClerkOrg } from '@/lib/wolverineOrgs';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { OrgBrandTheme } from '@/components/OrgBrandTheme';
 import Link from 'next/link';
@@ -44,7 +45,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   useEffect(() => setMounted(true), []);
 
   const showDrivers = orgSettings.tracksDrivers;
-  const showServiceLog = organization?.id === 'org_39B7lu1b8YKds8IOtzrk6LpKnLW';
+  const showServiceLog = isWolverineClerkOrg(organization?.id);
 
   // Session-gated internal access — cleared on hard refresh.
   // useLayoutEffect reads sessionStorage before first paint so there's no flash.

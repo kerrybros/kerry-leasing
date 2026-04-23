@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useTransition } from 'react';
-import { useOrganization } from '@clerk/nextjs';
+import { OrganizationSwitcher, useOrganization } from '@clerk/nextjs';
 import { DateRangePicker } from '@/components/DateRangePicker';
 import { KpiCard, SkeletonKpiCard } from '@/components/KpiCard';
 import { Loader2 } from 'lucide-react';
@@ -31,6 +31,42 @@ export default function FleetOverviewPage() {
   const [, startTransition] = useTransition();
 
   const dateLabel = formatDateLabel(fleet.startDate, fleet.endDate);
+
+  if (!fleet.orgLoaded) {
+    return (
+      <div className="flex min-h-[40vh] w-full items-center justify-center px-4 text-muted-foreground">
+        <span className="flex items-center gap-2 text-sm">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading organization…
+        </span>
+      </div>
+    );
+  }
+
+  if (fleet.noActiveOrg) {
+    return (
+      <div className="mx-auto max-w-md px-4 py-16 text-center">
+        <h1 className="text-xl font-semibold text-foreground">Select an organization</h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Choose your fleet organization below, or use the switcher in the sidebar. The dashboard
+          loads after an organization is active.
+        </p>
+        <div className="mt-8 flex justify-center">
+          <OrganizationSwitcher
+            hidePersonal
+            afterSelectOrganizationUrl="/app/fleet"
+            appearance={{
+              elements: {
+                rootBox: 'inline-flex',
+                organizationSwitcherTrigger:
+                  'justify-center rounded-md border border-border bg-background px-4 py-2 text-sm',
+              },
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full">
