@@ -325,15 +325,20 @@ async function triggerServicePlanSync(
   const { getRepairPrisma } = await import('../lib/prisma.js');
   const repairPrisma = getRepairPrisma();
 
-  // Pull active units from repair DB
-  const allRevenue = await repairPrisma.revenue_details.findMany({
+  // Pull the distinct set of unit numbers with invoice activity since contract start.
+  // Postgres does the DISTINCT at query time — we never materialize the full row set in Node.
+  const activeUnitRows = await repairPrisma.revenue_details.findMany({
     where: {
       organization_id: REPAIR_SHOP_ORG_ID,
       invoice_date: { gte: contractStartDate },
       customer: { equals: repairCustomerName, mode: 'insensitive' },
     },
+    distinct: ['unit'],
+    select: { unit: true },
   });
-  const activeUnitNumbers = new Set(allRevenue.map((r: any) => r.unit).filter(Boolean));
+  const activeUnitNumbers = new Set(
+    activeUnitRows.map(r => r.unit).filter((u): u is string => !!u)
+  );
 
   const allUnits = await repairPrisma.customer_units.findMany({
     where: {
