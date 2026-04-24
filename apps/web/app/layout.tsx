@@ -27,6 +27,11 @@ export default function RootLayout({
     <ClerkProvider
       signInFallbackRedirectUrl={signInFallback}
       signUpFallbackRedirectUrl={signUpFallback}
+      appearance={{
+        elements: {
+          footer: 'hidden',
+        },
+      }}
     >
       <html lang="en" suppressHydrationWarning className={cn("font-sans", inter.variable)}>
         <head>
