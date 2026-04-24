@@ -633,7 +633,7 @@ router.get('/geofences', clerkAuthMiddleware, requireOrg, async (req: AuthReques
 /**
  * GET /fleet/idle-events
  * Returns idle events for the org from Samsara or Motive, enriched with unit numbers.
- * Query params: startDate (YYYY-MM-DD), endDate (YYYY-MM-DD), limit (default 500, max 2000)
+ * Query params: startDate (YYYY-MM-DD), endDate (YYYY-MM-DD)
  */
 router.get('/idle-events', clerkAuthMiddleware, requireOrg, async (req: AuthRequest, res) => {
   try {
@@ -669,7 +669,7 @@ router.get('/idle-events', clerkAuthMiddleware, requireOrg, async (req: AuthRequ
     const unitTypeByVin = new Map(servicePlanUnits.filter(u => u.telematicsVin).map(u => [u.telematicsVin!, u.unitType ?? null]));
     const unitTypeByUnitNumber = new Map(servicePlanUnits.filter(u => u.repairUnitNumber).map(u => [u.repairUnitNumber!, u.unitType ?? null]));
 
-    let events: any[] = [];
+    const events: any[] = [];
 
     if (providerAccount?.provider === 'MOTIVE') {
       const rows = await appPrisma.motiveIdleEvent.findMany({
@@ -688,53 +688,47 @@ router.get('/idle-events', clerkAuthMiddleware, requireOrg, async (req: AuthRequ
           location: true,
           city: true,
           state: true,
-          driverId: true,
           driverFirstName: true,
           driverLastName: true,
           endType: true,
         },
       });
-      events = rows
-        .filter(r => !r.vin || includedVins.has(r.vin))
-        .map(r => {
-          const durationMs = r.startTime && r.endTime
-            ? new Date(r.endTime).getTime() - new Date(r.startTime).getTime()
-            : null;
-          const unitNumber = r.vin ? (unitNumberByVin.get(r.vin) ?? r.vehicleNumber) : r.vehicleNumber;
-          const unitType = (() => {
-            if (r.vin) {
-              const t = unitTypeByVin.get(r.vin);
-              if (t !== undefined) return t;
-            }
-            if (unitNumber) return unitTypeByUnitNumber.get(unitNumber) ?? null;
-            return null;
-          })();
-          return {
-            id: String(r.motiveEventId),
-            unitNumber: unitNumber ?? null,
-            vin: r.vin ?? null,
-            startTime: r.startTime,
-            endTime: r.endTime ?? null,
-            date: r.date,
-            durationMinutes: durationMs != null ? Math.round(durationMs / 60000) : null,
-            idleFuelGallons: r.idleFuel ?? null,
-            lat: r.lat ?? null,
-            lon: r.lon ?? null,
-            location: (() => {
-              const loc = r.location?.trim() ?? '';
-              const city = r.city?.trim() ?? '';
-              const state = r.state?.trim() ?? '';
-              if (!loc) return [city, state].filter(Boolean).join(', ') || null;
-              if (state && !loc.includes(state)) return `${loc}, ${state}`;
-              return loc;
-            })(),
-            driverId: r.driverId ?? null,
-            driverFirstName: r.driverFirstName ?? null,
-            driverLastName: r.driverLastName ?? null,
-            endType: r.endType ?? null,
-            unitType,
-          };
+      for (const r of rows) {
+        if (r.vin && !includedVins.has(r.vin)) continue;
+        const durationMs = r.startTime && r.endTime
+          ? new Date(r.endTime).getTime() - new Date(r.startTime).getTime()
+          : null;
+        const unitNumber = r.vin ? (unitNumberByVin.get(r.vin) ?? r.vehicleNumber) : r.vehicleNumber;
+        let unitType: string | null = null;
+        if (r.vin) {
+          const t = unitTypeByVin.get(r.vin);
+          if (t !== undefined) unitType = t;
+        }
+        if (unitType === null && unitNumber) unitType = unitTypeByUnitNumber.get(unitNumber) ?? null;
+        const loc = r.location?.trim() ?? '';
+        const city = r.city?.trim() ?? '';
+        const state = r.state?.trim() ?? '';
+        let location: string | null;
+        if (!loc) location = [city, state].filter(Boolean).join(', ') || null;
+        else if (state && !loc.includes(state)) location = `${loc}, ${state}`;
+        else location = loc;
+        events.push({
+          id: String(r.motiveEventId),
+          unitNumber: unitNumber ?? null,
+          startTime: r.startTime,
+          endTime: r.endTime ?? null,
+          date: r.date,
+          durationMinutes: durationMs != null ? Math.round(durationMs / 60000) : null,
+          idleFuelGallons: r.idleFuel ?? null,
+          lat: r.lat ?? null,
+          lon: r.lon ?? null,
+          location,
+          driverFirstName: r.driverFirstName ?? null,
+          driverLastName: r.driverLastName ?? null,
+          endType: r.endType ?? null,
+          unitType,
         });
+      }
     } else if (providerAccount?.provider === 'SAMSARA') {
       const rows = await appPrisma.samsaraIdlingEvent.findMany({
         where: { clerkOrgId, ...(Object.keys(dateFilter).length ? { eventDate: dateFilter } : {}) },
@@ -755,12 +749,11 @@ router.get('/idle-events', clerkAuthMiddleware, requireOrg, async (req: AuthRequ
       const unitTypeByAssetId = new Map(
         vehicleMaps.filter(v => v.vin).map(v => [v.providerVehicleId, unitTypeByVin.get(v.vin!) ?? null])
       );
-      events = rows
-        .filter(r => includedAssetIds.size === 0 || includedAssetIds.has(r.assetId))
-        .map(r => ({
+      for (const r of rows) {
+        if (includedAssetIds.size > 0 && !includedAssetIds.has(r.assetId)) continue;
+        events.push({
           id: r.id,
           unitNumber: vehicleNameById.get(r.assetId) ?? r.assetId,
-          vin: null,
           startTime: r.startTime,
           date: r.eventDate,
           durationMinutes: r.durationMilliseconds != null ? Math.round(r.durationMilliseconds / 60000) : null,
@@ -769,40 +762,12 @@ router.get('/idle-events', clerkAuthMiddleware, requireOrg, async (req: AuthRequ
           lon: null,
           location: null,
           unitType: unitTypeByAssetId.get(r.assetId) ?? null,
-        }));
+        });
+      }
     }
-
-    // Compute summary stats
-    const totalIdleMinutes = events.reduce((s, e) => s + (e.durationMinutes ?? 0), 0);
-    const totalIdleFuel = events.reduce((s, e) => s + (e.idleFuelGallons ?? 0), 0);
-
-    // Repeat offenders: units with the most idle events
-    const byUnit = new Map<string, { count: number; totalMinutes: number; totalFuel: number }>();
-    events.forEach(e => {
-      const key = e.unitNumber ?? 'Unknown';
-      const cur = byUnit.get(key) ?? { count: 0, totalMinutes: 0, totalFuel: 0 };
-      cur.count++;
-      cur.totalMinutes += e.durationMinutes ?? 0;
-      cur.totalFuel += e.idleFuelGallons ?? 0;
-      byUnit.set(key, cur);
-    });
-    const repeatOffenders = Array.from(byUnit.entries())
-      .map(([unitNumber, stats]) => ({ unitNumber, ...stats }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 10);
-
-    // Longest idle events
-    const longestEvents = [...events]
-      .sort((a, b) => (b.durationMinutes ?? 0) - (a.durationMinutes ?? 0))
-      .slice(0, 10);
 
     res.json({
       provider: providerAccount?.provider ?? null,
-      totalEvents: events.length,
-      totalIdleMinutes: Math.round(totalIdleMinutes),
-      totalIdleFuel: parseFloat(totalIdleFuel.toFixed(2)),
-      repeatOffenders,
-      longestEvents,
       events,
     });
   } catch (error: any) {

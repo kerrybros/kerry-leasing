@@ -10,7 +10,6 @@ export interface DateRange {
 export interface IdleEvent {
   id: string;
   unitNumber: string | null;
-  vin: string | null;
   startTime: string;
   endTime: string | null;
   date: string;
@@ -19,7 +18,6 @@ export interface IdleEvent {
   lat: number | null;
   lon: number | null;
   location: string | null;
-  driverId: number | null;
   driverFirstName: string | null;
   driverLastName: string | null;
   endType: string | null;
@@ -35,11 +33,6 @@ export interface EnrichedIdleEvent extends IdleEvent {
 
 export interface IdleEventsResponse {
   provider: 'MOTIVE' | 'SAMSARA' | null;
-  totalEvents: number;
-  totalIdleMinutes: number;
-  totalIdleFuel: number;
-  repeatOffenders: { unitNumber: string; count: number; totalMinutes: number; totalFuel: number }[];
-  longestEvents: IdleEvent[];
   events: IdleEvent[];
 }
 
