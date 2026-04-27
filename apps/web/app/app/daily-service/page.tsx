@@ -336,7 +336,7 @@ export default function DailyServicePage() {
       <div className="flex flex-col flex-1 min-h-0 items-center justify-center gap-4 p-8">
         <AlertCircle className="h-12 w-12 text-destructive" />
         <div className="text-center max-w-md">
-          <h2 className="text-lg font-semibold mb-1">Couldn't load service log</h2>
+          <h2 className="text-lg font-semibold mb-1">Couldn&apos;t load service log</h2>
           <p className="text-sm text-muted-foreground mb-4">{error}</p>
           <button
             onClick={refresh}
