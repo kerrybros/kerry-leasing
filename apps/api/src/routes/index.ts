@@ -18,6 +18,7 @@ import fleetRoutes from './fleet.js';
 import repairsRoutes from './repairs.js';
 import adminOrgsRoutes from './adminOrgs.js';
 import sharepointRoutes from './sharepoint.js';
+import dailyServiceRoutes from './daily-service.js';
 import whiparoundRoutes from './whiparound.js';
 import { LinkOrgSchema, RepairCustomerSchema, parseBody } from '../lib/validate.js';
 import { getRedis } from '../lib/redis.js';
@@ -454,6 +455,9 @@ router.use('/admin/orgs', adminOrgsRoutes);
 
 // Mount SharePoint document listing routes (Graph app-only, internal-only)
 router.use('/admin/sharepoint', sharepointRoutes);
+
+// Mount daily service log routes (Graph-backed Excel reader)
+router.use('/daily-service', dailyServiceRoutes);
 
 // Mount Whip Around read routes
 router.use('/whiparound', whiparoundRoutes);

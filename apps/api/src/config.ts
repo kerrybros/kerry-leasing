@@ -37,6 +37,7 @@ export const config = {
         sitePath: process.env.MICROSOFT_GRAPH_SITE_PATH!,
       }
     : null,
+  dailyServiceWorkbookItemId: process.env.MICROSOFT_GRAPH_DAILY_SERVICE_ITEM_ID ?? null,
 };
 
 // Validate required env vars

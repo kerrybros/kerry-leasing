@@ -6,6 +6,7 @@
  */
 
 const GRAPH_BASE = 'https://graph.microsoft.com/v1.0';
+const GRAPH_BETA = 'https://graph.microsoft.com/beta';
 const TOKEN_REFRESH_BUFFER_MS = 60_000; // Refresh 60 s before expiry
 
 // ---------------------------------------------------------------------------
@@ -222,6 +223,165 @@ export async function getItemPreviewUrl(
   }
 
   return { embedUrl: data.getUrl };
+}
+
+// ---------------------------------------------------------------------------
+// Workbook reads (Excel files via Graph)
+// ---------------------------------------------------------------------------
+
+export interface Worksheet {
+  id: string;
+  name: string;
+  position: number;
+  visibility: string;
+}
+
+export interface UsedRange {
+  address: string;
+  rowCount: number;
+  columnCount: number;
+  values: unknown[][];
+  text: string[][];
+}
+
+export async function listWorksheets(
+  cfg: GraphClientConfig,
+  itemId: string
+): Promise<Worksheet[]> {
+  const token = await getAccessToken(cfg.tenantId, cfg.clientId, cfg.clientSecret);
+  const siteId = await resolveSiteId(token, cfg.siteHostname, cfg.sitePath);
+  const drive = await resolveDriveId(token, siteId);
+
+  const url = `${GRAPH_BASE}/drives/${drive.id}/items/${itemId}/workbook/worksheets`;
+  const resp = await graphFetch<GraphListResponse<Worksheet>>(url, token);
+  return resp.value;
+}
+
+export interface CellFormat {
+  fill: string | null;       // hex (e.g. "#FFFF00") or null when no/default fill
+  fontColor: string | null;  // hex or null when default (black)
+  fontBold: boolean;
+}
+
+interface GraphCellProperty {
+  format?: {
+    fill?: { color?: string } | null;
+    font?: { color?: string; bold?: boolean } | null;
+  } | null;
+}
+
+interface GraphCellPropertiesResponse {
+  value: GraphCellProperty[][];
+}
+
+function normalizeFillColor(color: string | undefined | null): string | null {
+  if (!color) return null;
+  const stripped = color.replace('#', '').toUpperCase();
+  if (!stripped || stripped === 'FFFFFF') return null;
+  return color.startsWith('#') ? color : `#${color}`;
+}
+
+function normalizeFontColor(color: string | undefined | null): string | null {
+  if (!color) return null;
+  const stripped = color.replace('#', '').toUpperCase();
+  if (!stripped || stripped === '000000') return null;
+  return color.startsWith('#') ? color : `#${color}`;
+}
+
+/**
+ * Returns per-cell formatting (fill color, font color, bold) for a range.
+ * Pass the cell-range portion of an address (e.g. "A1:E84"), not the full
+ * "Sheet!A1:E84" form — the worksheet is already in the URL path.
+ */
+export async function getCellProperties(
+  cfg: GraphClientConfig,
+  itemId: string,
+  worksheetName: string,
+  cellRange: string
+): Promise<CellFormat[][]> {
+  const token = await getAccessToken(cfg.tenantId, cfg.clientId, cfg.clientSecret);
+  const siteId = await resolveSiteId(token, cfg.siteHostname, cfg.sitePath);
+  const drive = await resolveDriveId(token, siteId);
+
+  const encodedName = encodeURIComponent(worksheetName);
+  const encodedRange = encodeURIComponent(cellRange);
+  // /beta — getCellProperties isn't reliably wired up in v1.0 yet (returns
+  // "Resource not found for the segment" on many tenants).
+  const url = `${GRAPH_BETA}/drives/${drive.id}/items/${itemId}/workbook/worksheets('${encodedName}')/range(address='${encodedRange}')/getCellProperties`;
+
+  const body = {
+    cellPropertiesLoadOptions: {
+      format: {
+        fill: { color: true },
+        font: { color: true, bold: true },
+      },
+    },
+  };
+
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!resp.ok) {
+    const errBody = await resp.json().catch(() => ({})) as { error?: { message?: string } };
+    const msg = errBody?.error?.message ?? resp.statusText;
+    throw new Error(`Graph getCellProperties failed (${resp.status}): ${msg}`);
+  }
+
+  const data = (await resp.json()) as GraphCellPropertiesResponse;
+  return (data.value ?? []).map((row) =>
+    row.map((cell) => ({
+      fill: normalizeFillColor(cell.format?.fill?.color),
+      fontColor: normalizeFontColor(cell.format?.font?.color),
+      fontBold: Boolean(cell.format?.font?.bold),
+    }))
+  );
+}
+
+export async function getUsedRange(
+  cfg: GraphClientConfig,
+  itemId: string,
+  worksheetName: string
+): Promise<UsedRange> {
+  const token = await getAccessToken(cfg.tenantId, cfg.clientId, cfg.clientSecret);
+  const siteId = await resolveSiteId(token, cfg.siteHostname, cfg.sitePath);
+  const drive = await resolveDriveId(token, siteId);
+
+  const encoded = encodeURIComponent(worksheetName);
+  const url = `${GRAPH_BASE}/drives/${drive.id}/items/${itemId}/workbook/worksheets('${encoded}')/usedRange?$select=address,rowCount,columnCount,values,text`;
+  return graphFetch<UsedRange>(url, token);
+}
+
+/**
+ * Downloads the raw bytes of a drive item (e.g. an .xlsx/.xlsm file) so they
+ * can be parsed locally with a library like exceljs. One Graph call.
+ */
+export async function getDriveItemContent(
+  cfg: GraphClientConfig,
+  itemId: string
+): Promise<Buffer> {
+  const token = await getAccessToken(cfg.tenantId, cfg.clientId, cfg.clientSecret);
+  const siteId = await resolveSiteId(token, cfg.siteHostname, cfg.sitePath);
+  const drive = await resolveDriveId(token, siteId);
+
+  const url = `${GRAPH_BASE}/drives/${drive.id}/items/${itemId}/content`;
+  const resp = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => 'unknown');
+    throw new Error(`Graph content download failed (${resp.status}): ${text}`);
+  }
+
+  const arrayBuffer = await resp.arrayBuffer();
+  return Buffer.from(arrayBuffer);
 }
 
 export async function listDriveItems(
