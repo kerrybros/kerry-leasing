@@ -41,10 +41,11 @@ const INTERNAL_PIN = '5255';
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { data: orgSettings = defaultOrgSettings } = useOrgSettingsQuery();
-  const { organization } = useOrganization();
+  const { organization, membership } = useOrganization();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
+  const isAdmin = membership?.role === 'org:admin';
   const showDrivers = orgSettings.tracksDrivers;
   const showServiceLog = isWolverineClerkOrg(organization?.id);
 
@@ -248,6 +249,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                     rootBox: 'w-full',
                     organizationSwitcherTrigger:
                       'w-full justify-start rounded-md px-2 py-1.5 text-sm text-sidebar-foreground hover:bg-sidebar-accent transition-colors',
+                    organizationSwitcherPopoverFooter: 'hidden',
+                    organizationSwitcherPopoverActionButton__manageOrganization: isAdmin ? '' : 'hidden',
                   },
                 }}
               />
@@ -265,14 +268,16 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             ) : (
               <div className="shrink-0 w-7 h-7 rounded-full bg-sidebar-accent/40" />
             )}
-            <button
-              type="button"
-              onClick={isUnlocked ? lock : openPin}
-              title={isUnlocked ? 'Lock internal access' : 'Internal access'}
-              className={`ml-auto shrink-0 rounded p-1 transition-colors hover:bg-sidebar-accent ${isUnlocked ? 'text-primary hover:text-destructive' : 'text-sidebar-foreground/20 hover:text-sidebar-foreground/50'}`}
-            >
-              {isUnlocked ? <Lock size={13} /> : <KeyRound size={13} />}
-            </button>
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={isUnlocked ? lock : openPin}
+                title={isUnlocked ? 'Lock internal access' : 'Internal access'}
+                className={`ml-auto shrink-0 rounded p-1 transition-colors hover:bg-sidebar-accent ${isUnlocked ? 'text-primary hover:text-destructive' : 'text-sidebar-foreground/20 hover:text-sidebar-foreground/50'}`}
+              >
+                {isUnlocked ? <Lock size={13} /> : <KeyRound size={13} />}
+              </button>
+            )}
           </div>
         </SidebarFooter>
       </Sidebar>
