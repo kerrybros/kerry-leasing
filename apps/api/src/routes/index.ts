@@ -499,7 +499,13 @@ router.get(
           provider: true,
         },
       });
-      
+
+      // Whiparound configured? — presence of an account row means an API key has been added
+      const whiparoundAccount = await appPrisma.whiparoundAccount.findUnique({
+        where: { clerkOrgId },
+        select: { id: true },
+      });
+
       // Fetch diesel price in parallel — non-blocking, falls back to cached/hardcoded
       const dieselPricePerGallon = await getDieselPricePerGallon();
 
@@ -516,6 +522,7 @@ router.get(
         telematicsDashboardPassword: settings?.telematicsDashboardPassword ?? null,
         brandColorPreset: settings?.brandColorPreset ?? null,
         dieselPricePerGallon,
+        hasWhiparound: !!whiparoundAccount,
       });
     } catch (error) {
       console.error('Error fetching org settings:', error);
