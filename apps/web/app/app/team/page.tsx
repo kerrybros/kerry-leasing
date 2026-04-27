@@ -37,6 +37,16 @@ export default function TeamPage() {
     m => m.publicUserData?.userId === user?.id
   )?.role === 'org:admin';
 
+  const isInternalEmail = (e?: string | null) =>
+    !!e && e.toLowerCase().endsWith('@kerrybros.com');
+
+  const visibleMembers = isAdmin
+    ? memberships?.data
+    : memberships?.data?.filter(m => !isInternalEmail(m.publicUserData?.identifier));
+  const visibleInvitations = isAdmin
+    ? invitations?.data
+    : invitations?.data?.filter(inv => !isInternalEmail(inv.emailAddress));
+
   async function handleInvite(e: React.FormEvent) {
     e.preventDefault();
     if (!organization || !email.trim()) return;
@@ -68,7 +78,7 @@ export default function TeamPage() {
       <div>
         <h1 className="text-2xl font-bold leading-none">Team</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          {organization?.name} · {memberships?.count ?? 0} member{memberships?.count !== 1 ? 's' : ''}
+          {organization?.name} · {visibleMembers?.length ?? 0} member{visibleMembers?.length !== 1 ? 's' : ''}
         </p>
       </div>
 
@@ -95,7 +105,7 @@ export default function TeamPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {memberships?.data?.map(m => {
+                {visibleMembers?.map(m => {
                   const name = [m.publicUserData?.firstName, m.publicUserData?.lastName]
                     .filter(Boolean).join(' ') || '—';
                   const email = m.publicUserData?.identifier ?? '—';
@@ -129,7 +139,7 @@ export default function TeamPage() {
       </Card>
 
       {/* Pending invitations */}
-      {invitations?.data && invitations.data.length > 0 && (
+      {visibleInvitations && visibleInvitations.length > 0 && (
         <Card>
           <CardHeader className="pb-2 pt-4 px-4">
             <CardTitle className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
@@ -146,7 +156,7 @@ export default function TeamPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {invitations.data.map(inv => (
+                {visibleInvitations.map(inv => (
                   <TableRow key={inv.id}>
                     <TableCell className="pl-4 flex items-center gap-2">
                       <Mail className="h-3.5 w-3.5 text-muted-foreground" />
