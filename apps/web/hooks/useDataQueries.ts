@@ -22,6 +22,7 @@ export type OrgSettings = {
   telematicsDashboardPassword: string | null;
   brandColorPreset: BrandColorPreset | null;
   dieselPricePerGallon: number | null;
+  hasWhiparound: boolean;
 };
 
 export type VehicleUtilization = {

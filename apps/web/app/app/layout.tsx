@@ -33,6 +33,7 @@ const defaultOrgSettings = {
   telematicsDashboardUrl: null as string | null,
   telematicsDashboardUsername: null as string | null,
   telematicsDashboardPassword: null as string | null,
+  hasWhiparound: false,
 };
 
 const INTERNAL_SESSION_KEY = 'kl_internal_unlocked';
@@ -48,6 +49,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const isAdmin = membership?.role === 'org:admin';
   const showDrivers = orgSettings.tracksDrivers;
   const showServiceLog = isWolverineClerkOrg(organization?.id);
+  const showWhiparound = orgSettings.hasWhiparound;
+  const showIdleMap = orgSettings.telematicsProvider !== 'SAMSARA';
 
   // Session-gated internal access — cleared on hard refresh.
   // useLayoutEffect reads sessionStorage before first paint so there's no flash.
@@ -118,12 +121,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       label: 'Whiparound',
       icon: ClipboardCheck,
       active: !!pathname?.includes('/whiparound'),
+      hidden: !showWhiparound,
     },
     {
       href: '/app/idle-map',
       label: 'Idle Map',
       icon: Map,
       active: !!pathname?.includes('/idle-map'),
+      hidden: !showIdleMap,
     },
     {
       href: '/app/team',
@@ -131,7 +136,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       icon: Users,
       active: !!pathname?.includes('/team'),
     },
-  ].filter((item) => !item.hidden), [pathname, isUnlocked, showDrivers, showServiceLog]);
+  ].filter((item) => !item.hidden), [pathname, isUnlocked, showDrivers, showServiceLog, showWhiparound, showIdleMap]);
 
   return (
     <SidebarProvider
