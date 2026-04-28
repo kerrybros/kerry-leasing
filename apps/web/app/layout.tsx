@@ -27,6 +27,14 @@ export default function RootLayout({
     <ClerkProvider
       signInFallbackRedirectUrl={signInFallback}
       signUpFallbackRedirectUrl={signUpFallback}
+      localization={{
+        signUp: {
+          continue: {
+            title: 'Create your password',
+            subtitle: 'Choose a password to finish setting up your account.',
+          },
+        },
+      }}
       appearance={{
         elements: {
           footer: 'hidden',

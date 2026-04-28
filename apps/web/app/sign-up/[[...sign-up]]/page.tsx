@@ -1,6 +1,7 @@
 import { SignUp } from '@clerk/nextjs';
 import Image from 'next/image';
 import { CLERK_POST_AUTH_PATH } from '@/lib/clerkAuthPaths';
+import { InvitationEmailDisplay } from './InvitationEmailDisplay';
 
 /**
  * /sign-up is only reachable when an invitation ticket is present
@@ -90,6 +91,7 @@ export default function SignUpPage() {
           />
         </div>
 
+        <InvitationEmailDisplay />
         <SignUp
           path="/sign-up"
           routing="path"
