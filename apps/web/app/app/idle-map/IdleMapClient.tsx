@@ -51,6 +51,14 @@ function parseYmd(s: string | null): string | null {
   return s;
 }
 
+const MAX_RANGE_DAYS = 92; // keep in sync with backend cap (/fleet/idle-events)
+
+function rangeSpanDays(from: string, to: string): number {
+  return Math.round(
+    (Date.parse(to + 'T00:00:00Z') - Date.parse(from + 'T00:00:00Z')) / 86400000
+  ) + 1;
+}
+
 export default function IdleMapClient() {
   const { organization } = useOrganization();
   const { getApi } = useApiClient();
@@ -75,7 +83,9 @@ export default function IdleMapClient() {
   const [dateRange, setDateRange] = useState<DateRange>(() => {
     const from = parseYmd(searchParams.get('from'));
     const to = parseYmd(searchParams.get('to'));
-    if (from && to) return { from, to };
+    if (from && to && from <= to && rangeSpanDays(from, to) <= MAX_RANGE_DAYS) {
+      return { from, to };
+    }
     return defaultDateRange();
   });
 

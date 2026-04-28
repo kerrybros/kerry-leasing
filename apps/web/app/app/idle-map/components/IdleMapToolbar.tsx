@@ -37,6 +37,14 @@ function ymd(d: Date): string {
   return d.toISOString().split('T')[0]!;
 }
 
+const MAX_RANGE_DAYS = 92; // one calendar quarter, inclusive
+
+function rangeSpanDays(from: string, to: string): number {
+  return Math.round(
+    (Date.parse(to + 'T00:00:00Z') - Date.parse(from + 'T00:00:00Z')) / 86400000
+  ) + 1;
+}
+
 /** First day of the calendar quarter containing `d` (local). */
 function startOfCalendarQuarter(d: Date): Date {
   const startMonth = Math.floor(d.getMonth() / 3) * 3;
@@ -130,12 +138,14 @@ export default function IdleMapToolbar({
   const [dateOpen, setDateOpen] = useState(false);
   const [customFrom, setCustomFrom] = useState(dateRange.from);
   const [customTo, setCustomTo] = useState(dateRange.to);
+  const [customError, setCustomError] = useState<string | null>(null);
 
   const activePresetLabel = useMemo(() => matchingPresetLabel(dateRange), [dateRange]);
 
   useEffect(() => {
     setCustomFrom(dateRange.from);
     setCustomTo(dateRange.to);
+    setCustomError(null);
   }, [dateRange.from, dateRange.to]);
 
   function applyPreset(preset: DatePreset) {
@@ -146,10 +156,14 @@ export default function IdleMapToolbar({
   }
 
   function applyCustom() {
-    if (customFrom && customTo && customFrom <= customTo) {
-      onDateRangeChange({ from: customFrom, to: customTo });
-      setDateOpen(false);
+    if (!customFrom || !customTo || customFrom > customTo) return;
+    if (rangeSpanDays(customFrom, customTo) > MAX_RANGE_DAYS) {
+      setCustomError(`Range cannot exceed ${MAX_RANGE_DAYS} days (one quarter).`);
+      return;
     }
+    setCustomError(null);
+    onDateRangeChange({ from: customFrom, to: customTo });
+    setDateOpen(false);
   }
 
   // Base UI ToggleGroup uses string[] for value
@@ -237,6 +251,9 @@ export default function IdleMapToolbar({
               className="flex-1 min-w-0 text-xs border border-input rounded px-2 py-1.5 bg-background"
             />
           </div>
+          {customError && (
+            <p className="text-xs text-destructive mt-2">{customError}</p>
+          )}
           <Button size="sm" className="h-7 text-xs w-full mt-3" onClick={applyCustom}>
             Apply
           </Button>
