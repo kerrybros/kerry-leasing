@@ -641,6 +641,26 @@ router.get('/idle-events', clerkAuthMiddleware, requireOrg, async (req: AuthRequ
     const { startDate, endDate } = req.query as {
       startDate?: string; endDate?: string;
     };
+
+    // Cap range at one calendar quarter (92 days inclusive) — wider windows blow memory.
+    const ymdRe = /^\d{4}-\d{2}-\d{2}$/;
+    if (!startDate || !endDate || !ymdRe.test(startDate) || !ymdRe.test(endDate)) {
+      return res.status(400).json({
+        error: 'Bad Request',
+        message: 'startDate and endDate are required (YYYY-MM-DD).',
+      });
+    }
+    const spanDays =
+      Math.round(
+        (Date.parse(endDate + 'T00:00:00Z') - Date.parse(startDate + 'T00:00:00Z')) / 86400000
+      ) + 1;
+    if (spanDays < 1 || spanDays > 92) {
+      return res.status(400).json({
+        error: 'Bad Request',
+        message: 'Date range must be between 1 and 92 days (one quarter).',
+      });
+    }
+
     const appPrisma = getAppPrisma();
 
     const providerAccount = await appPrisma.telematicsProviderAccount.findUnique({
