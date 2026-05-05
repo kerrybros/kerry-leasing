@@ -222,4 +222,4 @@ export interface SyncResult {
 // =====================================================
 // DATE HELPERS (shared - re-export from telematics/dates)
 // =====================================================
-export { getYesterday, getTwoDaysAgo, getDateRange } from '../dates.js';
+export { getYesterday, getTwoDaysAgo, getDateRange, getFourDaysAgo } from '../dates.js';

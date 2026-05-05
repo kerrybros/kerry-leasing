@@ -50,18 +50,27 @@ export async function reconcileMotiveVehicleFromDrivingPeriods(
   // Fetch all driving periods for this org+date, aggregated by vehicleId
   const periods = await appPrisma.motiveDrivingPeriod.findMany({
     where: { clerkOrgId, date },
-    select: { vehicleId: true, vehicleNumber: true, distance: true, duration: true },
+    select: { vehicleId: true, vehicleNumber: true, distance: true, duration: true, endTime: true },
   });
 
   if (periods.length === 0) return result;
 
-  // Build per-vehicle sums from driving_periods
+  // Build per-vehicle sums from driving_periods.
+  // Exclude open trips (end_time IS NULL) — Motive occasionally leaves trips open
+  // indefinitely, producing durations in the millions of seconds. The v2 vehicle_utilization
+  // rollup (and Motive's own portal) ignores these; including them inflates drivingTime
+  // by orders of magnitude and causes the reconciler to overwrite correct values with garbage.
   const byVehicle = new Map<
     number,
     { vehicleNumber: string | null; distMi: number; durationSec: number }
   >();
 
+  let openTripCount = 0;
   for (const p of periods) {
+    if (!p.endTime) {
+      openTripCount++;
+      continue;
+    }
     const prev = byVehicle.get(p.vehicleId) ?? {
       vehicleNumber: p.vehicleNumber,
       distMi: 0,
@@ -75,6 +84,10 @@ export async function reconcileMotiveVehicleFromDrivingPeriods(
       distMi: prev.distMi + distMi,
       durationSec: prev.durationSec + durationSec,
     });
+  }
+
+  if (openTripCount > 0) {
+    console.warn(`  ⚠️  reconcileMotiveVehicle: skipped ${openTripCount} open trip(s) with no end_time for ${clerkOrgId} on ${byVehicle.size > 0 ? 'this date' : '(no closed trips found)'}`);
   }
 
   for (const [vehicleId, { vehicleNumber, distMi, durationSec }] of byVehicle) {

@@ -128,6 +128,15 @@ export function getThreeDaysAgo(): string {
   return `${yy}-${mm}-${dd}`;
 }
 
+export function getFourDaysAgo(): string {
+  const [y, m, d] = getEasternDate().split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d - 4));
+  const yy = dt.getUTCFullYear();
+  const mm = String(dt.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(dt.getUTCDate()).padStart(2, '0');
+  return `${yy}-${mm}-${dd}`;
+}
+
 /**
  * Return the RFC 3339 date string with EST/EDT offset for a given YYYY-MM-DD.
  * e.g. "2026-02-03T00:00:00-05:00" (EST) or "2026-06-15T00:00:00-04:00" (EDT)

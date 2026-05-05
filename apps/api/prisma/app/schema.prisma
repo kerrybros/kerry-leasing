@@ -623,6 +623,82 @@ model MotiveScorecardSummary {
   @@map("motive_scorecard_summaries")
 }
 
+// MOTIVE Driver Performance Events (per-event safety incidents)
+// Source: GET /v2/driver_performance_events
+// Stores individual safety events: hard_accel, hard_brake, hard_corner, speeding,
+// cell_phone, distraction, seat_belt_violation, tailgating, crash, etc.
+// Camera media availability is stored for downstream retrieval.
+model MotiveDriverPerformanceEvent {
+  id                   String    @id @default(cuid())
+  clerkOrgId           String    @map("clerk_org_id")
+  motiveEventId        BigInt    @map("motive_event_id") // Motive's event ID
+
+  // Driver info (optional — unassigned trips have no driver)
+  driverId             BigInt?   @map("driver_id")
+  driverFirstName      String?   @map("driver_first_name")
+  driverLastName       String?   @map("driver_last_name")
+  driverUsername       String?   @map("driver_username")
+  driverEmail          String?   @map("driver_email")
+
+  // Vehicle info
+  vehicleId            BigInt?   @map("vehicle_id")
+  vehicleNumber        String?   @map("vehicle_number")
+  vehicleVin           String?   @map("vehicle_vin")
+
+  // Event classification
+  eventType            String    @map("event_type") // hard_accel, hard_brake, hard_corner, speeding, cell_phone, etc.
+  primaryBehaviors     Json?     @map("primary_behaviors")   // string[] from primary_behavior field
+  secondaryBehaviors   Json?     @map("secondary_behaviors") // string[]
+  severity             String?
+  intensity            String?   // g-force or contextual value from API
+  duration             Int?      // seconds
+
+  // Event timing
+  startTime            String    @map("start_time") // ISO 8601
+  endTime              String?   @map("end_time")   // ISO 8601
+  date                 String    // YYYY-MM-DD (derived from start_time, company-configured TZ)
+
+  // Speed (mph — synced with X-Metric-Units: false)
+  startSpeed           Float?    @map("start_speed")
+  endSpeed             Float?    @map("end_speed")
+  maxSpeed             Float?    @map("max_speed")
+
+  // Location
+  lat                  Float?
+  lon                  Float?
+  location             String?
+
+  // Coaching
+  coachingStatus       String?   @map("coaching_status") // pending_review, reviewed, dismissed, etc.
+  coachedAt            String?   @map("coached_at")      // ISO 8601
+
+  // Camera media
+  cameraMediaAvailable Boolean?  @map("camera_media_available")
+  cameraMediaId        BigInt?   @map("camera_media_id")
+  cameraCamType        String?   @map("camera_cam_type")
+  cameraCamPositions   Json?     @map("camera_cam_positions") // string[] e.g. ["front_facing", "driver_facing"]
+  cameraUploadedAt     String?   @map("camera_uploaded_at")  // ISO 8601
+
+  // Data verification tracking
+  lastVerifiedAt       DateTime? @map("last_verified_at")
+  dataVersion          Int       @default(1) @map("data_version")
+
+  rawResponse          Json      @map("raw_response")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+
+  @@unique([clerkOrgId, motiveEventId])
+  @@index([clerkOrgId])
+  @@index([driverId])
+  @@index([vehicleId])
+  @@index([eventType])
+  @@index([date])
+  @@index([clerkOrgId, date])
+  @@index([clerkOrgId, driverId, date])
+  @@index([lastVerifiedAt])
+  @@map("motive_driver_performance_events")
+}
+
 // System Config (key-value store for app-wide settings)
 // Used for: diesel_price_per_gallon (EIA weekly fetch), feature flags, etc.
 model SystemConfig {

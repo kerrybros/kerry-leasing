@@ -13,8 +13,9 @@ import { syncIdleEvents } from './sync/syncIdleEvents.js';
 import { syncDrivingPeriods } from './sync/syncDrivingPeriods.js';
 import { syncGeofences } from './sync/syncGeofences.js';
 import { syncMotiveScorecard } from './sync/syncMotiveScorecard.js';
+import { syncDriverPerformanceEvents } from './sync/syncDriverPerformanceEvents.js';
 import { reconcileMotiveVehicleFromDrivingPeriods } from './sync/reconcileMotiveVehicleFromDrivingPeriods.js';
-import { getYesterday, getTwoDaysAgo, SyncResult } from './types.js';
+import { getYesterday, getFourDaysAgo, SyncResult } from './types.js';
 import { readCredentials } from '../../lib/credentials.js';
 import { TelematicsAuthError } from '../errors.js';
 
@@ -164,7 +165,18 @@ export async function syncMotiveOrgForDate(
       : `  ✓ Scorecard: ${scorecardResult.newCount} new, ${scorecardResult.unchangedCount} unchanged, ${scorecardResult.updatedCount} updated`
   );
 
-  // 7. Geofences (at most once per 24h)
+  // 7. Driver performance events
+  const driverPerfResult = await safeStep('driver_performance_events', date, () =>
+    syncDriverPerformanceEvents(clerkOrgId, apiKey, date, verify)
+  );
+  orgResult.results.push(driverPerfResult);
+  console.log(
+    driverPerfResult.skipped
+      ? `  ⏭  Driver perf events: skipped (${driverPerfResult.skipReason})`
+      : `  ✓ Driver perf events: ${driverPerfResult.newCount} new, ${driverPerfResult.unchangedCount} unchanged, ${driverPerfResult.updatedCount} updated`
+  );
+
+  // 8. Geofences (at most once per 24h)
   const lastGeofenceSync = geofenceLastSyncAt.get(clerkOrgId) ?? 0;
   const geofenceStale = Date.now() - lastGeofenceSync > GEOFENCE_SYNC_INTERVAL_MS;
   if (geofenceStale) {
@@ -219,11 +231,11 @@ export async function syncMotiveDaily(): Promise<{
 }> {
   const startTime = Date.now();
   const yesterday = getYesterday();
-  const twoDaysAgo = getTwoDaysAgo();
+  const fourDaysAgo = getFourDaysAgo();
 
   console.log(`\n🚀 MOTIVE DAILY SYNC STARTED`);
   console.log(`  Primary sync date: ${yesterday}`);
-  console.log(`  Verification date: ${twoDaysAgo}`);
+  console.log(`  Verification date: ${fourDaysAgo}`);
   console.log(`  Timestamp: ${new Date().toISOString()}\n`);
 
   // Get all orgs with Motive configured
@@ -260,11 +272,11 @@ export async function syncMotiveDaily(): Promise<{
         errorCount++;
       }
 
-      // 2. Verify 2 days ago (lookback)
+      // 2. Verify 4 days ago (lookback — catches ELD finalization lag)
       const verificationResult = await syncMotiveOrgForDate(
         account.clerkOrgId,
         apiKey,
-        twoDaysAgo,
+        fourDaysAgo,
         true
       );
       results.push(verificationResult);
