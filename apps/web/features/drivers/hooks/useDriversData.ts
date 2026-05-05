@@ -34,12 +34,20 @@ export type WeeklyDriverData = {
   weeks: Map<string, DriverRow>;
 };
 
+/** Returns a YYYY-MM-DD string using the local calendar date of d (not UTC). */
+function localDateStr(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 /** Returns the ISO date string (YYYY-MM-DD) of the Monday that starts the week containing the given date. */
 function getMondayKey(dateStr: string): string {
   const d = new Date(dateStr.substring(0, 10) + 'T00:00:00');
   const daysSinceMonday = (d.getDay() + 6) % 7;
   d.setDate(d.getDate() - daysSinceMonday);
-  return d.toISOString().split('T')[0];
+  return localDateStr(d);
 }
 
 function buildDriverSums(records: DriverUtilization[]): Map<number, DriverSums> {
@@ -176,9 +184,7 @@ export function useDriversData(startDate: string, endDate: string, scorecardEnab
     return Array.from({ length: 16 }, (_, i) => {
       const weekStart = new Date(currentMonday);
       weekStart.setDate(currentMonday.getDate() - (15 - i) * 7);
-      const weekEnd = new Date(weekStart);
-      weekEnd.setDate(weekStart.getDate() + 6);
-      return weekStart.toISOString().split('T')[0];
+      return localDateStr(weekStart);
     });
   }, []);
 

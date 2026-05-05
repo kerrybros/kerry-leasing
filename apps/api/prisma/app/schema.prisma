@@ -279,7 +279,7 @@ model MotiveIdleEvent {
   // Fuel data (Motive imperial: gallons with X-Metric-Units: false)
   vehFuelStart      Float?    @map("veh_fuel_start") // gallons at event start
   vehFuelEnd        Float?    @map("veh_fuel_end")   // gallons at event end
-  idleFuel          Float?    @map("idle_fuel")      // computed: veh_fuel_start - veh_fuel_end (gallons)
+  idleFuel          Float?    @map("idle_fuel")      // computed: veh_fuel_end - veh_fuel_start (gallons; cumulative counters so end > start)
   
   // Location data
   lat               Float?

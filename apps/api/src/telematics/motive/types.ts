@@ -100,8 +100,8 @@ export interface MotiveIdleEventsResponse {
       };
       start_time: string; // ISO 8601
       end_time: string; // ISO 8601
-      veh_fuel_start?: number; // milliliters
-      veh_fuel_end?: number; // milliliters
+      veh_fuel_start?: number; // gallons (cumulative counter; X-Metric-Units: false)
+      veh_fuel_end?: number; // gallons (cumulative counter; X-Metric-Units: false)
       lat?: number;
       lon?: number;
       city?: string;
