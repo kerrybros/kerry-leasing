@@ -15,9 +15,10 @@ import {
 } from '@/components/ui/table';
 import { useDriversData } from '@/features/drivers/hooks/useDriversData';
 import { MonthOverMonthView } from '@/features/drivers/components/MonthOverMonthView';
+import { SmsPreviewView } from '@/features/drivers/components/SmsPreviewView';
 import type { DriverRow } from '@/features/drivers/types';
 
-type PageView = 'scorecard' | 'mom';
+type PageView = 'scorecard' | 'mom' | 'sms-preview';
 type Granularity = 'monthly' | 'weekly';
 type ColumnKey = keyof Omit<DriverRow, 'driverId' | 'driverName' | 'score' | 'safetyViolations'>;
 type SortKey = 'driverName' | ColumnKey;
@@ -144,39 +145,88 @@ function generateWeeks(): PeriodOption[] {
   });
 }
 
-function prevPeriodDates(current: PeriodOption, granularity: Granularity): { start: string; end: string } {
+/**
+ * Matched-window comparison ranges. The current period only has data through
+ * today, so the previous period must cover the SAME elapsed span — otherwise a
+ * partial month (e.g. May 1–15) gets compared against a full month (all of
+ * April), which is apples-to-oranges. We cap the current window at today and
+ * mirror that span onto the prior period.
+ */
+function comparisonRanges(
+  current: PeriodOption,
+  granularity: Granularity
+): { curStart: string; curEnd: string; prevStart: string; prevEnd: string } {
+  // Telematics data lags ~1 day, so the freshest complete day is yesterday.
+  // Cap the current window there (never past the period, never before its
+  // start) so it lines up exactly with the matched previous window.
+  const yesterday = new Date();
+  yesterday.setHours(0, 0, 0, 0);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const periodStart = new Date(current.start + 'T00:00:00');
+  const periodEnd = new Date(current.end + 'T00:00:00');
+  let curEndDate = yesterday < periodEnd ? yesterday : periodEnd;
+  if (curEndDate < periodStart) curEndDate = periodStart;
+
   if (granularity === 'monthly') {
-    const [year, month] = current.start.split('-').map(Number);
-    const d = new Date(year, month - 2, 1);
+    const [year, month] = current.start.split('-').map(Number); // month is 1-based
+    const prevStart = new Date(year, month - 2, 1);
+    const daysInPrev = new Date(year, month - 1, 0).getDate();
+    const prevEndDay = Math.min(curEndDate.getDate(), daysInPrev);
+    const prevEnd = new Date(prevStart.getFullYear(), prevStart.getMonth(), prevEndDay);
     return {
-      start: fmtDate(new Date(d.getFullYear(), d.getMonth(), 1)),
-      end: fmtDate(new Date(d.getFullYear(), d.getMonth() + 1, 0)),
+      curStart: current.start,
+      curEnd: fmtDate(curEndDate),
+      prevStart: fmtDate(prevStart),
+      prevEnd: fmtDate(prevEnd),
     };
-  } else {
-    const s = new Date(current.start);
-    const e = new Date(current.end);
-    s.setDate(s.getDate() - 7);
-    e.setDate(e.getDate() - 7);
-    return { start: fmtDate(s), end: fmtDate(e) };
   }
+  // weekly: shift the (possibly partial) window back exactly 7 days
+  const msPerDay = 86_400_000;
+  const elapsedDays = Math.max(
+    0,
+    Math.floor((curEndDate.getTime() - periodStart.getTime()) / msPerDay)
+  );
+  const prevStart = new Date(periodStart);
+  prevStart.setDate(prevStart.getDate() - 7);
+  const prevEnd = new Date(prevStart);
+  prevEnd.setDate(prevStart.getDate() + elapsedDays);
+  return {
+    curStart: current.start,
+    curEnd: fmtDate(curEndDate),
+    prevStart: fmtDate(prevStart),
+    prevEnd: fmtDate(prevEnd),
+  };
 }
 
-/** Inline percentage-change badge */
-function Delta({ current, prev, higherIsBetter = true }: {
-  current: number;
-  prev: number | undefined;
-  higherIsBetter?: boolean;
-}) {
-  if (prev === undefined || prev === 0) return null;
-  const pct = ((current - prev) / Math.abs(prev)) * 100;
-  if (Math.abs(pct) < 0.05) return <span className="text-[10px] text-muted-foreground ml-1">—</span>;
-  const isGood = higherIsBetter ? pct > 0 : pct < 0;
-  const sign = pct > 0 ? '+' : '';
-  return (
-    <span className={`text-[10px] font-semibold ml-1.5 ${isGood ? 'text-green-600 dark:text-green-400' : 'text-destructive'}`}>
-      {sign}{pct.toFixed(1)}%
-    </span>
-  );
+/** Short month/period label for comparison column headers. */
+function periodShortLabel(isoDate: string, granularity: Granularity): string {
+  const d = new Date(isoDate + 'T00:00:00');
+  if (granularity === 'monthly') {
+    return d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+  }
+  return `wk ${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
+}
+
+/**
+ * Class for the current-period value when comparison is on: green if it
+ * improved vs the previous period, red if it regressed, neutral if unchanged
+ * or no prior value. Direction respects each KPI's higherIsBetter.
+ */
+function improvementClass(
+  cur: number,
+  prev: number | undefined,
+  higherIsBetter: boolean,
+  format: (v: number) => string
+): string {
+  if (prev === undefined || prev === null) return '';
+  // If the values render identically at this column's own precision, treat
+  // it as no change (covers float noise and the "basically the same" case —
+  // a fixed 0.05 threshold would be meaningless across miles vs MPG vs %).
+  if (format(cur) === format(prev)) return '';
+  const improved = higherIsBetter ? cur > prev : cur < prev;
+  return improved
+    ? 'text-green-600 dark:text-green-400 font-semibold'
+    : 'text-destructive font-semibold';
 }
 
 function usePopover() {
@@ -355,7 +405,18 @@ export default function ScorecardPage() {
   const setSelectedKey = granularity === 'monthly' ? setSelectedMonthKey : setSelectedWeekKey;
   const currentPeriod = periods.find(p => p.key === selectedKey) ?? periods[periods.length - 1];
 
-  const prevDates = useMemo(() => prevPeriodDates(currentPeriod, granularity), [currentPeriod, granularity]);
+  const cmpRanges = useMemo(
+    () => comparisonRanges(currentPeriod, granularity),
+    [currentPeriod, granularity]
+  );
+  const curColLabel = useMemo(
+    () => periodShortLabel(cmpRanges.curStart, granularity),
+    [cmpRanges.curStart, granularity]
+  );
+  const prevColLabel = useMemo(
+    () => periodShortLabel(cmpRanges.prevStart, granularity),
+    [cmpRanges.prevStart, granularity]
+  );
 
   const {
     organization,
@@ -372,7 +433,7 @@ export default function ScorecardPage() {
     isRefetching,
   } = useDriversData(currentPeriod.start, currentPeriod.end);
 
-  const { driverRows: prevDriverRows } = useDriversData(prevDates.start, prevDates.end, showComparison);
+  const { driverRows: prevDriverRows } = useDriversData(cmpRanges.prevStart, cmpRanges.prevEnd, showComparison);
 
   const prevMap = useMemo(() => {
     const map = new Map<number, DriverRow>();
@@ -406,16 +467,27 @@ export default function ScorecardPage() {
   const prevLabel = granularity === 'monthly' ? 'previous month' : 'previous week';
 
   const handleExportCsv = () => {
-    const headers = ['Driver', ...activeCols.map(c => c.label), 'Score'];
-    const rows = sorted.map(row => [
-      row.driverName,
-      ...activeCols.map(c => {
-        const raw = c.format(row[c.key] as number);
-        // Replace display-only em-dashes with 0 so Excel reads it as a number
-        return raw === '—' ? '0' : raw;
-      }),
-      row.score.toFixed(0),
-    ]);
+    const clean = (raw: string) => (raw === '—' ? '0' : raw);
+    const headers = showComparison
+      ? [
+          'Driver',
+          ...activeCols.flatMap(c => [`${c.label} (${prevColLabel})`, `${c.label} (${curColLabel})`]),
+          'Score',
+        ]
+      : ['Driver', ...activeCols.map(c => c.label), 'Score'];
+    const rows = sorted.map(row => {
+      const prev = showComparison ? prevMap.get(row.driverId) : undefined;
+      const cells = showComparison
+        ? activeCols.flatMap(c => {
+            const pv = prev ? (prev[c.key] as number) : undefined;
+            return [
+              pv === undefined ? '0' : clean(c.format(pv)),
+              clean(c.format(row[c.key] as number)),
+            ];
+          })
+        : activeCols.map(c => clean(c.format(row[c.key] as number)));
+      return [row.driverName, ...cells, row.score.toFixed(0)];
+    });
     const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
     const filename = `scorecard-${currentPeriod.label.replace(/\s/g, '-').toLowerCase()}.csv`;
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
@@ -512,7 +584,7 @@ export default function ScorecardPage() {
 
             {/* View toggle */}
             <div className="flex rounded-lg border border-border overflow-hidden">
-              {(['scorecard', 'mom'] as const).map(v => (
+              {(['scorecard', 'mom', 'sms-preview'] as const).map(v => (
                 <button
                   key={v}
                   className={`px-3 py-1.5 text-xs font-medium transition-colors border-l first:border-l-0 border-border cursor-pointer ${
@@ -522,7 +594,7 @@ export default function ScorecardPage() {
                   }`}
                   onClick={() => setPageView(v)}
                 >
-                  {v === 'scorecard' ? 'Scorecard' : 'Period Trends'}
+                  {v === 'scorecard' ? 'Scorecard' : v === 'mom' ? 'Period Trends' : 'Weekly SMS Preview'}
                 </button>
               ))}
             </div>
@@ -604,8 +676,10 @@ export default function ScorecardPage() {
           </div>
         )}
 
-        {/* Content — loading is handled above; keeps MoM / empty / table split */}
-        {pageView === 'mom' ? (
+        {/* Content — loading is handled above; keeps MoM / SMS / empty / table split */}
+        {pageView === 'sms-preview' ? (
+          <SmsPreviewView />
+        ) : pageView === 'mom' ? (
           <MonthOverMonthView
             months={momMonths}
             monthlyByDriver={monthlyByDriver}
@@ -629,15 +703,35 @@ export default function ScorecardPage() {
                   >
                     Driver<SortIcon k="driverName" />
                   </TableHead>
-                  {activeCols.map(col => (
-                    <TableHead
-                      key={col.key}
-                      className="text-muted-foreground font-semibold uppercase tracking-wide text-[10px] px-3 py-2 h-auto cursor-pointer select-none whitespace-nowrap"
-                      onClick={() => handleSort(col.key)}
-                    >
-                      {col.shortLabel}<SortIcon k={col.key} />
-                    </TableHead>
-                  ))}
+                  {activeCols.map(col =>
+                    showComparison ? (
+                      [
+                        <TableHead
+                          key={`${col.key}:prev`}
+                          className="text-muted-foreground/70 font-semibold uppercase tracking-wide text-[10px] px-3 py-2 h-auto select-none whitespace-nowrap text-right"
+                        >
+                          {col.shortLabel}
+                          <span className="block text-[9px] font-normal normal-case opacity-70">{prevColLabel}</span>
+                        </TableHead>,
+                        <TableHead
+                          key={`${col.key}:cur`}
+                          className="text-muted-foreground font-semibold uppercase tracking-wide text-[10px] px-3 py-2 h-auto cursor-pointer select-none whitespace-nowrap text-right"
+                          onClick={() => handleSort(col.key)}
+                        >
+                          {col.shortLabel}<SortIcon k={col.key} />
+                          <span className="block text-[9px] font-normal normal-case opacity-70">{curColLabel}</span>
+                        </TableHead>,
+                      ]
+                    ) : (
+                      <TableHead
+                        key={col.key}
+                        className="text-muted-foreground font-semibold uppercase tracking-wide text-[10px] px-3 py-2 h-auto cursor-pointer select-none whitespace-nowrap"
+                        onClick={() => handleSort(col.key)}
+                      >
+                        {col.shortLabel}<SortIcon k={col.key} />
+                      </TableHead>
+                    )
+                  )}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -653,19 +747,28 @@ export default function ScorecardPage() {
                       {activeCols.map(col => {
                         const val = row[col.key] as number;
                         const prevVal = prev ? (prev[col.key] as number) : undefined;
+                        if (showComparison) {
+                          return [
+                            <TableCell
+                              key={`${col.key}:prev`}
+                              className="text-[12px] px-3 py-2 tabular-nums text-right text-muted-foreground"
+                            >
+                              {prevVal === undefined ? '—' : col.format(prevVal)}
+                            </TableCell>,
+                            <TableCell
+                              key={`${col.key}:cur`}
+                              className={`text-[12px] px-3 py-2 tabular-nums text-right ${improvementClass(val, prevVal, col.higherIsBetter, col.format)}`}
+                            >
+                              {col.format(val)}
+                            </TableCell>,
+                          ];
+                        }
                         return (
                           <TableCell
                             key={col.key}
                             className={`text-[12px] px-3 py-2 tabular-nums ${col.colorFn ? col.colorFn(val) : ''}`}
                           >
                             {col.format(val)}
-                            {prev !== undefined && (
-                              <Delta
-                                current={val}
-                                prev={prevVal}
-                                higherIsBetter={col.higherIsBetter}
-                              />
-                            )}
                           </TableCell>
                         );
                       })}

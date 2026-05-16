@@ -124,6 +124,7 @@ model TelematicsCronRun {
 enum CronJobType {
   SAMSARA_DAILY
   MOTIVE_DAILY
+  SMS_WEEKLY_DRIVER_REPORT
 }
 
 // SAMSARA Idling Events (source table: one row per event, no aggregation)
@@ -623,6 +624,41 @@ model MotiveScorecardSummary {
   @@map("motive_scorecard_summaries")
 }
 
+// MOTIVE Driver Master (full driver roster from /v1/users, regardless of activity)
+// Source: GET /v1/users (filtered to role=driver)
+// Captures every driver Motive knows about, even ones who haven't driven.
+// Used as the authoritative driver index for cross-system matching.
+model MotiveDriverMaster {
+  id              String   @id @default(cuid())
+  clerkOrgId      String   @map("clerk_org_id")
+  motiveDriverId  Int      @map("motive_driver_id")
+
+  firstName       String?  @map("first_name")
+  lastName        String?  @map("last_name")
+  username        String?
+  email           String?
+  phone           String?
+  role            String?  // typically "driver"
+  status          String?  // "active", "inactive", etc.
+
+  // Admin-controlled inclusion flag. When false, the driver is hidden from the
+  // portal everywhere (scoreboard, SMS reports, KPIs). Default true so newly
+  // synced drivers appear automatically until an admin excludes them.
+  isIncluded      Boolean  @default(true) @map("is_included")
+
+  rawResponse     Json     @map("raw_response")
+  lastSyncedAt    DateTime @map("last_synced_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@unique([clerkOrgId, motiveDriverId])
+  @@index([clerkOrgId])
+  @@index([clerkOrgId, email])
+  @@index([clerkOrgId, status])
+  @@index([clerkOrgId, isIncluded])
+  @@map("motive_driver_master")
+}
+
 // MOTIVE Driver Performance Events (per-event safety incidents)
 // Source: GET /v2/driver_performance_events
 // Stores individual safety events: hard_accel, hard_brake, hard_corner, speeding,
@@ -835,6 +871,121 @@ model WhiparoundInspection {
   @@index([clerkOrgId])
   @@index([clerkOrgId, inspectedAt(sort: Desc)])
   @@map("whiparound_inspections")
+}
+
+// ---------------------------------------------------------------------------
+// SMS WEEKLY DRIVER REPORTS
+// ---------------------------------------------------------------------------
+
+enum DriverContactSource {
+  WHIPAROUND_SYNC
+  MANUAL
+  MOTIVE_AUTO        // Lazy-created from MotiveDriverUtilization name reconciliation
+}
+
+enum DriverSmsStatus {
+  QUEUED
+  SENT
+  DELIVERED
+  FAILED
+  OPTED_OUT
+  NO_PHONE
+  SKIPPED
+}
+
+enum TwilioInboundEventType {
+  INBOUND_STOP
+  INBOUND_START
+  STATUS_CALLBACK
+}
+
+// Per-org SMS weekly-report feature config. Off by default; set enabled=true per pilot.
+model CustomerSmsReportConfig {
+  id          String   @id @default(cuid())
+  clerkOrgId  String   @unique @map("clerk_org_id")
+  enabled     Boolean  @default(false)
+  kpis        Json     // string[] of SAFETY | IDLE_PCT | MPG | MILES | HARD_EVENTS
+  sendHourEt  Int      @default(5) @map("send_hour_et") // 5..8 ET
+  lastSentAt  DateTime? @map("last_sent_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([clerkOrgId])
+  @@index([enabled])
+  @@map("customer_sms_report_configs")
+}
+
+// Driver contact/phone record. One row per (org, driver). Links to Motive/Whiparound by id when known.
+model DriverContact {
+  id                  String              @id @default(cuid())
+  clerkOrgId          String              @map("clerk_org_id")
+  displayName         String              @map("display_name")
+  normalizedName      String              @map("normalized_name") // lowercased + trimmed for name-matching
+  email               String?             // normalized lowercase; primary cross-system match key
+  phoneE164           String?             @map("phone_e164")
+  motiveDriverId      Int?                @map("motive_driver_id")
+  whiparoundDriverId  Int?                @map("whiparound_driver_id")
+  source              DriverContactSource
+  enrolled            Boolean             @default(true)
+  optedOut            Boolean             @default(false) @map("opted_out")
+  optedOutAt          DateTime?           @map("opted_out_at")
+  lastTwilioError     String?             @map("last_twilio_error")
+  createdAt           DateTime            @default(now()) @map("created_at")
+  updatedAt           DateTime            @updatedAt @map("updated_at")
+
+  @@unique([clerkOrgId, normalizedName])
+  @@unique([clerkOrgId, phoneE164])
+  @@index([clerkOrgId])
+  @@index([motiveDriverId])
+  @@index([whiparoundDriverId])
+  @@index([clerkOrgId, email])
+  @@map("driver_contacts")
+}
+
+// One row per attempted weekly send. Holds the public token + snapshot used to render /r/:token.
+model DriverWeeklyReportSent {
+  id               String          @id @default(cuid())
+  clerkOrgId       String          @map("clerk_org_id")
+  driverContactId  String          @map("driver_contact_id")
+  weekStartDate    String          @map("week_start_date") // YYYY-MM-DD, Monday in ET
+  sentAt           DateTime        @map("sent_at")
+  status           DriverSmsStatus
+  twilioSid        String?         @map("twilio_sid")
+  twilioErrorCode  String?         @map("twilio_error_code")
+  token            String          @unique
+  tokenExpiresAt   DateTime        @map("token_expires_at")
+  kpiSnapshot      Json            @map("kpi_snapshot") // frozen render data: weekly + 4wk trend + rank + tier + tips
+  bodyPreview      String?         @map("body_preview")
+  isTest           Boolean         @default(false) @map("is_test")
+  createdAt        DateTime        @default(now()) @map("created_at")
+
+  @@unique([clerkOrgId, driverContactId, weekStartDate])
+  @@index([clerkOrgId, weekStartDate(sort: Desc)])
+  @@index([driverContactId])
+  @@index([token])
+  @@index([twilioSid])
+  @@map("driver_weekly_reports_sent")
+}
+
+// Twilio inbound + status webhook audit log. Used for STOP/START opt-out flow and delivery debugging.
+model TwilioInboundLog {
+  id                       String                 @id @default(cuid())
+  eventType                TwilioInboundEventType @map("event_type")
+  fromPhone                String?                @map("from_phone")
+  toPhone                  String?                @map("to_phone")
+  messageSid               String?                @map("message_sid")
+  messageStatus            String?                @map("message_status")
+  errorCode                String?                @map("error_code")
+  body                     String?
+  raw                      Json
+  matchedDriverContactId   String?                @map("matched_driver_contact_id")
+  processedAt              DateTime?              @map("processed_at")
+  createdAt                DateTime               @default(now()) @map("created_at")
+
+  @@index([messageSid])
+  @@index([fromPhone])
+  @@index([createdAt(sort: Desc)])
+  @@map("twilio_inbound_log")
 }
 
 // Defects — classic-paginated from GET /defects; all fields from the full column set

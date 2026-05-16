@@ -13,6 +13,7 @@
 import { getAppPrisma } from '../../lib/prisma.js';
 import { readCredentials } from '../../lib/credentials.js';
 import { WhiparoundClient, WhiparoundAuthError } from './client.js';
+import { syncWhiparoundDrivers, type DriverSyncStepResult } from './syncDrivers.js';
 
 // ---------------------------------------------------------------------------
 // Raw API shapes (subset of fields we care about)
@@ -300,6 +301,9 @@ export interface OrgSyncResult {
   success: boolean;
   inspectionsSynced: number;
   defectsSynced: number;
+  driverContactsSynced?: number;       // total WP drivers reconciled into DriverContact
+  driverContactsNew?: number;
+  driverContactsUpdated?: number;
   errors: number;
   durationMs: number;
   error?: string;
@@ -354,12 +358,13 @@ export async function syncWhiparoundOrg(
     options?.forceFullInspectionBackfill ? null : (account?.lastSyncAt ?? null);
 
   try {
-    const [inspResult, defResult] = await Promise.all([
+    const [inspResult, defResult, driverResult] = await Promise.all([
       syncInspections(clerkOrgId, client, inspectionSyncFrom),
       syncDefects(clerkOrgId, client),
+      syncWhiparoundDrivers(clerkOrgId, client),
     ]);
 
-    const totalErrors = inspResult.errors + defResult.errors;
+    const totalErrors = inspResult.errors + defResult.errors + driverResult.errorCount;
 
     const upsertHints = [inspResult.firstUpsertError, defResult.firstUpsertError].filter(
       Boolean
@@ -385,6 +390,9 @@ export async function syncWhiparoundOrg(
       success: true,
       inspectionsSynced: inspResult.synced,
       defectsSynced: defResult.synced,
+      driverContactsSynced: driverResult.recordCount,
+      driverContactsNew: driverResult.newCount,
+      driverContactsUpdated: driverResult.updatedCount,
       errors: totalErrors,
       durationMs: Date.now() - t0,
       upsertErrorDetail:

@@ -14,12 +14,17 @@ import telematicsRoutes from './telematics.js';
 import normalizedTelematicsRoutes from './telematicsNormalized.js';
 import cronRoutes from './cron.js';
 import servicePlanRoutes from './servicePlan.js';
+import driversSetupRoutes from './driversSetup.js';
 import fleetRoutes from './fleet.js';
 import repairsRoutes from './repairs.js';
 import adminOrgsRoutes from './adminOrgs.js';
 import sharepointRoutes from './sharepoint.js';
 import dailyServiceRoutes from './daily-service.js';
 import whiparoundRoutes from './whiparound.js';
+import publicReportsRoutes from './publicReports.js';
+import twilioWebhookRoutes from './twilioWebhooks.js';
+import adminSmsReportsRoutes from './adminSmsReports.js';
+import smsReportsRoutes from './smsReports.js';
 import { LinkOrgSchema, RepairCustomerSchema, parseBody } from '../lib/validate.js';
 import { getRedis } from '../lib/redis.js';
 import { BrandColorPreset } from '../generated/app-client/index.js';
@@ -447,6 +452,15 @@ router.use(
   servicePlanRoutes
 );
 
+// Mount drivers setup admin routes (include/exclude Motive drivers from portal)
+router.use(
+  '/admin/drivers-setup',
+  clerkAuthMiddleware,
+  requireOrg,
+  requireRole(['internal']),
+  driversSetupRoutes
+);
+
 // Mount repairs aggregation routes
 router.use('/repairs', repairsRoutes);
 
@@ -461,6 +475,31 @@ router.use('/daily-service', dailyServiceRoutes);
 
 // Mount Whip Around read routes
 router.use('/whiparound', whiparoundRoutes);
+
+// Mount public tokenized weekly-report endpoint (no Clerk auth — drivers use SMS link)
+router.use('/r', publicReportsRoutes);
+
+// Mount Twilio webhook handlers (signature-verified, no Clerk auth)
+router.use('/webhooks/twilio', twilioWebhookRoutes);
+
+// Mount admin SMS-reports endpoints (internal role required)
+router.use(
+  '/admin/sms-reports',
+  clerkAuthMiddleware,
+  requireOrg,
+  requireRole(['internal']),
+  adminSmsReportsRoutes
+);
+
+// Mount fleet-user SMS-reports endpoints (internal role = org-admin in the user's own org)
+// Used by the customer-facing weekly preview tab on the driver scorecard page.
+router.use(
+  '/sms-reports',
+  clerkAuthMiddleware,
+  requireOrg,
+  requireRole(['internal']),
+  smsReportsRoutes
+);
 
 // Get organization settings (feature flags)
 router.get(

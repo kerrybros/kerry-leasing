@@ -12,6 +12,8 @@
 import { Router } from 'express';
 import { clerkAuthMiddleware, requireOrg, AuthRequest } from '../middleware/auth.js';
 import { TelematicsService } from '../services/telematicsService.js';
+import { getAppPrisma } from '../lib/prisma.js';
+import { loadExcludedMotiveDriverIds } from '../features/drivers/excludedDrivers.js';
 
 const router = Router();
 const telematicsService = new TelematicsService();
@@ -85,10 +87,15 @@ router.get(
 
       const orgId = req.auth!.orgId!;
       const result = await telematicsService.getDriverUtilization(orgId, startDate, endDate);
+      const excluded = await loadExcludedMotiveDriverIds(getAppPrisma(), orgId);
+      // Build a new response — never mutate the (possibly cached) object.
+      const payload = excluded.size > 0
+        ? { ...result, data: result.data.filter(d => !excluded.has(d.driverId)) }
+        : result;
 
       res.setHeader('Cache-Control', 'private, max-age=3600');
       res.setHeader('Vary', 'Authorization');
-      res.json(result);
+      res.json(payload);
     } catch (error) {
       console.error('[Normalized] Error fetching driver utilization:', error);
       res.status(500).json({
@@ -124,10 +131,21 @@ router.get(
 
       const orgId = req.auth!.orgId!;
       const result = await telematicsService.getDriverScorecard(orgId, startDate, endDate);
+      const excluded = await loadExcludedMotiveDriverIds(getAppPrisma(), orgId);
+      // Build a new response — never mutate the (possibly cached) object.
+      // Re-rank so the filtered leaderboard stays dense (1, 2, 3, …).
+      const payload = excluded.size > 0
+        ? {
+            ...result,
+            data: result.data
+              .filter(d => !excluded.has(d.driverId))
+              .map((d, idx) => ({ ...d, rank: idx + 1 })),
+          }
+        : result;
 
       res.setHeader('Cache-Control', 'private, max-age=300');
       res.setHeader('Vary', 'Authorization');
-      res.json(result);
+      res.json(payload);
     } catch (error) {
       console.error('[Normalized] Error fetching driver scorecard:', error);
       res.status(500).json({ error: 'Internal Server Error', message: 'Failed to compute driver scorecard' });

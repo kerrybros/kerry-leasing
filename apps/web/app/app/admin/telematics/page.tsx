@@ -1,8 +1,10 @@
 'use client';
 
+import Link from 'next/link';
 import { useOrganization } from '@clerk/nextjs';
 import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { Users } from 'lucide-react';
 import { useApiClient } from '@/hooks/useApiClient';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -269,6 +271,31 @@ export default function AdminTelematicsPage() {
           </form>
         </CardContent>
       </Card>
+
+      {/* Driver Setup — Motive only (driver roster comes from Motive) */}
+      {configuredProvider === 'MOTIVE' && (
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center justify-between gap-4 flex-wrap">
+              <div className="flex items-start gap-3">
+                <div className="mt-0.5 w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                  <Users className="w-5 h-5 text-primary" />
+                </div>
+                <div>
+                  <h2 className="text-base font-semibold">Driver Setup</h2>
+                  <p className="text-sm text-muted-foreground">
+                    Choose which Motive drivers appear in the portal. Excluded drivers are hidden from
+                    the scoreboard, SMS reports, and KPIs.
+                  </p>
+                </div>
+              </div>
+              <Link href="/app/admin/telematics/drivers" className="no-underline shrink-0">
+                <Button>Manage Drivers</Button>
+              </Link>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Sync Controls */}
       {configuredProvider && (

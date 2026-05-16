@@ -27,6 +27,17 @@ services:
         sync: false
       - key: CRON_SECRET
         sync: false
+      # Twilio: required by the webhook handlers (/webhooks/twilio/*) for
+      # inbound-signature verification. Without these, validateInboundSignature
+      # accepts unsigned/forged requests in prod. Values set in Render dashboard.
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_MESSAGING_SERVICE_SID
+        sync: false
+      - key: TWILIO_STATUS_CALLBACK_URL
+        sync: false
 
   - type: cron
     name: kerry-whiparound-sync
@@ -42,6 +53,37 @@ services:
       - key: APP_DATABASE_URL
         sync: false
       - key: CREDENTIALS_ENCRYPTION_KEY
+        sync: false
+
+  - type: cron
+    name: kerry-weekly-driver-sms
+    runtime: node
+    region: oregon
+    plan: starter
+    schedule: "0 10 * * 1"  # Mondays 5am ET (EST) / 6am ET (EDT) — fixed UTC so DST drifts ±1h
+    # Single weekly cron entry → no per-hour filtering. All enabled customers
+    # fire when this runs. To support multiple send hours later, add additional
+    # cron entries with --target-hour=N matching the desired sendHourEt.
+    buildCommand: cd apps/api && pnpm install && pnpm prisma:app:generate && pnpm prisma:repair:generate && pnpm build
+    startCommand: cd apps/api && node dist/scripts/run-weekly-driver-sms.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: APP_DATABASE_URL
+        sync: false
+      - key: CREDENTIALS_ENCRYPTION_KEY
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_MESSAGING_SERVICE_SID
+        sync: false
+      - key: TWILIO_STATUS_CALLBACK_URL
+        sync: false
+      - key: REPORT_PUBLIC_BASE_URL
+        sync: false
+      - key: EIA_API_KEY
         sync: false
 
   - type: cron

@@ -38,6 +38,19 @@ export const config = {
       }
     : null,
   dailyServiceWorkbookItemId: process.env.MICROSOFT_GRAPH_DAILY_SERVICE_ITEM_ID ?? null,
+  twilio: process.env.TWILIO_ACCOUNT_SID
+    ? {
+        accountSid: process.env.TWILIO_ACCOUNT_SID,
+        authToken: process.env.TWILIO_AUTH_TOKEN!,
+        messagingServiceSid: process.env.TWILIO_MESSAGING_SERVICE_SID!,
+        statusCallbackUrl: process.env.TWILIO_STATUS_CALLBACK_URL ?? null,
+      }
+    : null,
+  // When true, the SMS pipeline writes DriverWeeklyReportSent rows but never calls Twilio.
+  // Auto-true when twilio config is missing OR TWILIO_DRY_RUN=true is set explicitly.
+  smsDryRun: process.env.TWILIO_DRY_RUN === 'true' || !process.env.TWILIO_ACCOUNT_SID,
+  reportPublicBaseUrl:
+    process.env.REPORT_PUBLIC_BASE_URL ?? 'https://www.kerryleasing.com',
 };
 
 // Validate required env vars

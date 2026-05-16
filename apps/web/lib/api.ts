@@ -63,6 +63,13 @@ export const createApiClient = (token: string | null, customHeaders: Record<stri
       headers: customHeaders,
     }),
 
+  patch: <T>(endpoint: string, data?: unknown) =>
+    apiRequest<T>(endpoint, token, {
+      method: 'PATCH',
+      body: data ? JSON.stringify(data) : undefined,
+      headers: customHeaders,
+    }),
+
   delete: <T>(endpoint: string) =>
     apiRequest<T>(endpoint, token, { 
       method: 'DELETE',

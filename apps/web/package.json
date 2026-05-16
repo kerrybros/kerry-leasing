@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "next dev -p 3004",
+    "dev": "next dev -p 3100",
     "build": "next build",
-    "start": "next start -p 3004",
+    "start": "next start -p 3100",
     "lint": "next lint",
     "clean": "rm -rf .next",
     "test": "vitest run",

@@ -14,6 +14,7 @@ import { syncDrivingPeriods } from './sync/syncDrivingPeriods.js';
 import { syncGeofences } from './sync/syncGeofences.js';
 import { syncMotiveScorecard } from './sync/syncMotiveScorecard.js';
 import { syncDriverPerformanceEvents } from './sync/syncDriverPerformanceEvents.js';
+import { syncMotiveUsers } from './sync/syncMotiveUsers.js';
 import { reconcileMotiveVehicleFromDrivingPeriods } from './sync/reconcileMotiveVehicleFromDrivingPeriods.js';
 import { getYesterday, getFourDaysAgo, SyncResult } from './types.js';
 import { readCredentials } from '../../lib/credentials.js';
@@ -23,6 +24,11 @@ import { TelematicsAuthError } from '../errors.js';
 // Geofences are static config data — syncing once per 24h is sufficient.
 const geofenceLastSyncAt = new Map<string, number>();
 const GEOFENCE_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+// Same idea for the Motive driver roster (/v1/users) — it's the master
+// driver list, not daily activity, so once per 24h is plenty.
+const driverMasterLastSyncAt = new Map<string, number>();
+const DRIVER_MASTER_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 interface OrgSyncResult {
   clerkOrgId: string;
@@ -192,6 +198,25 @@ export async function syncMotiveOrgForDate(
     );
   } else {
     console.log(`  ⏭  Geofences: skipped (synced within 24h)`);
+  }
+
+  // 9. Driver master (/v1/users) — full roster including dormant drivers.
+  // Used as the authoritative driver index for cross-system matching.
+  const lastDriverMasterSync = driverMasterLastSyncAt.get(clerkOrgId) ?? 0;
+  const driverMasterStale = Date.now() - lastDriverMasterSync > DRIVER_MASTER_SYNC_INTERVAL_MS;
+  if (driverMasterStale) {
+    const driverMasterResult = await safeStep('users', date, () =>
+      syncMotiveUsers(clerkOrgId, apiKey, date)
+    );
+    orgResult.results.push(driverMasterResult);
+    driverMasterLastSyncAt.set(clerkOrgId, Date.now());
+    console.log(
+      driverMasterResult.skipped
+        ? `  ⏭  Driver master: skipped (${driverMasterResult.skipReason})`
+        : `  ✓ Driver master: ${driverMasterResult.newCount} new, ${driverMasterResult.unchangedCount} unchanged, ${driverMasterResult.updatedCount} updated`
+    );
+  } else {
+    console.log(`  ⏭  Driver master: skipped (synced within 24h)`);
   }
 
   // Determine success: only count non-skipped errors

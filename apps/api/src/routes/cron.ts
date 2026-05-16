@@ -14,6 +14,7 @@ import { getAppPrisma } from '../lib/prisma.js';
 import { cacheDelPattern } from '../lib/redis.js';
 import { recordTelematicsCronRun } from '../lib/telematicsCronRun.js';
 import { CronJobType } from '../generated/app-client/index.js';
+import { runWeeklyDriverSms } from '../features/smsWeeklyReports/runWeeklyDriverSms.js';
 
 const router = Router();
 
@@ -125,6 +126,45 @@ router.post('/sync-whiparound', async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     console.error('Whip Around cron error:', error);
+    res.status(500).json({ error: 'Internal server error', message: error.message });
+  }
+});
+
+/**
+ * POST /cron/send-weekly-driver-sms
+ * Sends Monday-morning driver report SMS for each enabled customer whose
+ * sendHourEt matches the current ET hour (or all enabled customers when
+ * called via the admin "trigger now" path with ignoreSendHour=true).
+ *
+ * Query params:
+ *   - dryRun=1 → build reports + persist DriverWeeklyReportSent rows in
+ *                SKIPPED status, but never call Twilio.
+ */
+router.post('/send-weekly-driver-sms', async (req: Request, res: Response) => {
+  if (!verifyCronSecret(req, res)) return;
+  try {
+    console.log(`\n✅ Authorized weekly-driver-sms cron from ${req.ip}`);
+    const dryRun = req.query.dryRun === '1' || req.query.dryRun === 'true';
+    const summary = await runWeeklyDriverSms({ dryRun });
+    await recordTelematicsCronRun(CronJobType.SMS_WEEKLY_DRIVER_REPORT, {
+      totalOrgs: summary.totalOrgs,
+      successCount: summary.successCount,
+      errorCount: summary.errorCount,
+      duration: summary.duration,
+      results: summary.results,
+    });
+    const allSucceeded = summary.errorCount === 0;
+    res.status(allSucceeded ? 200 : 207).json({
+      success: allSucceeded,
+      dryRun,
+      totalOrgs: summary.totalOrgs,
+      successCount: summary.successCount,
+      errorCount: summary.errorCount,
+      durationMs: summary.duration,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error: any) {
+    console.error('Weekly driver SMS cron error:', error);
     res.status(500).json({ error: 'Internal server error', message: error.message });
   }
 });
