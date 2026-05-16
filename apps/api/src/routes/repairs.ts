@@ -9,7 +9,9 @@
  * Scoping:
  * - REPAIR_SHOP_ORG_ID (fixed repair shop)
  * - customer name from APP DB config (per KL org)
- * - invoice_date >= contractStartDate (and optional query range)
+ * - invoice_date within the requested range only (full history by default;
+ *   NOT clamped to contractStartDate — that bounds onboarding/backdate, not
+ *   this view). The page's own date filters narrow what's shown.
  */
 import { createHash } from 'crypto';
 import { Router } from 'express';
@@ -25,7 +27,7 @@ const router = Router();
 /** Same window as before: 10h TTL for the raw revenue_details rows (shared across API instances). */
 const REPAIRS_RAW_TTL_SECS = 10 * 60 * 60;
 
-function repairsRawRedisKey(
+function repairsAggRedisKey(
   klOrgId: string,
   customerName: string,
   effectiveFromYmd: string,
@@ -38,11 +40,12 @@ function repairsRawRedisKey(
     from: effectiveFromYmd,
     to: toYmdValue,
     units: [...allowedUnitNumbers].sort(),
-    /** Bump when raw row shape/fields change (invalidates Redis blobs missing e.g. date_action_completed). */
-    rawSchema: 'v3',
+    /** Bump when the CACHED shape changes. agg-v1 = aggregated units (not raw
+     *  rows); invalidates older raw-row blobs which would deserialize wrong. */
+    shape: 'agg-v1',
   });
   const h = createHash('sha256').update(payload).digest('hex').slice(0, 24);
-  return `${env}:repairs:raw:${klOrgId}:${h}`;
+  return `${env}:repairs:agg:${klOrgId}:${h}`;
 }
 
 function isYmd(value: unknown): value is string {
@@ -54,7 +57,7 @@ function parseYmdToDate(value: string): Date {
   return new Date(value);
 }
 
-function toYmd(date: Date | string | null | undefined): string | null {
+export function toYmd(date: Date | string | null | undefined): string | null {
   if (date == null) return null;
   if (typeof date === 'string') {
     const d = new Date(date);
@@ -64,21 +67,21 @@ function toYmd(date: Date | string | null | undefined): string | null {
   return date.toISOString().split('T')[0] || null;
 }
 
-function toNumber(value: unknown): number {
+export function toNumber(value: unknown): number {
   if (value == null) return 0;
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
 }
 
 /** True if text mentions a drive-up (case-insensitive). Used for repair KPIs. */
-function textMentionsDriveUp(s: string | null | undefined): boolean {
+export function textMentionsDriveUp(s: string | null | undefined): boolean {
   const t = (s || '').toLowerCase();
   if (!t) return false;
   return /drive[\s,-]*up|driveup/.test(t);
 }
 
 /** Plain shape safe for JSON → Redis → JSON (Prisma Decimal / Date do not round-trip reliably). */
-type RepairsRawRow = {
+export type RepairsRawRow = {
   id: number;
   unit: string | null;
   number: string | null;
@@ -118,7 +121,7 @@ type RevenueDetailSelected = {
   date_action_completed: string | null;
 };
 
-function toRepairsRawRows(rows: RevenueDetailSelected[]): RepairsRawRow[] {
+export function toRepairsRawRows(rows: RevenueDetailSelected[]): RepairsRawRow[] {
   return rows.map((r) => ({
     id: r.id,
     unit: r.unit,
@@ -140,6 +143,230 @@ function toRepairsRawRows(rows: RevenueDetailSelected[]): RepairsRawRow[] {
     system: r.system,
     date_action_completed: r.date_action_completed ?? null,
   }));
+}
+
+// ---------------------------------------------------------------------------
+// Aggregation: unit → invoice → line (lines deduped by complaint+service).
+// This is exactly the shape the frontend consumes — raw revenue_details rows
+// never leave the server. The aggregated result (not raw rows) is what gets
+// cached: ~7x smaller and removes per-request re-aggregation from the hot path.
+// ---------------------------------------------------------------------------
+type LineAgg = {
+  /** complaint_description */
+  complaint: string | null;
+  /** service_description only; may be "" when this line is complaint-only */
+  correction: string;
+  /** OR of per-row flags: any source row had drive-up in complaint, service, or global service text */
+  hasDriveUpMention: boolean;
+  component: string | null;
+  system: string | null;
+  total: number;
+  tax: number;
+  count: number;
+};
+
+type InvoiceAgg = {
+  invoiceNumber: string;
+  /** invoice / closed — Y-M-D */
+  invoiceDate: string;
+  orderCreatedDate: string | null;
+  orderNumber: string | null;
+  shop: string | null;
+  total: number;
+  tax: number;
+  lineCount: number;
+  /** Y-M-D: latest revenue_details.date_action_completed on the job (order closed) */
+  orderClosedDate: string | null;
+  lines: Map<string, LineAgg>;
+};
+
+type UnitAgg = {
+  unitNumber: string;
+  invoiceCount: number;
+  total: number;
+  tax: number;
+  invoices: Map<string, InvoiceAgg>;
+};
+
+type RepairInvoiceFinal = {
+  invoiceNumber: string;
+  invoiceDate: string;
+  orderCreatedDate: string | null;
+  orderClosedDate: string | null;
+  orderNumber: string | null;
+  shop: string | null;
+  total: number;
+  tax: number;
+  lineCount: number;
+  lines: LineAgg[];
+};
+
+type RepairUnitFinal = {
+  unitNumber: string;
+  invoiceCount: number;
+  total: number;
+  tax: number;
+  invoices: RepairInvoiceFinal[];
+};
+
+/** Fully aggregated + sorted result — this is the cached payload (not raw rows). */
+export type RepairsAggregated = {
+  unitList: RepairUnitFinal[];
+  invoiceCount: number;
+  lineRowCount: number;
+  grandTotal: number;
+  grandTax: number;
+};
+
+export function aggregateRepairs(rows: RepairsRawRow[]): RepairsAggregated {
+  const units = new Map<string, UnitAgg>();
+  let invoiceCount = 0;
+  let lineRowCount = 0;
+  let grandTotal = 0;
+  let grandTax = 0;
+
+  for (const r of rows) {
+    const unitNumber = (r.unit || '').trim();
+    const invoiceNumber = (r.number || '').trim();
+    const invoiceDateYmd = toYmd(r.invoice_date) || null;
+
+    if (!unitNumber || !invoiceNumber || !invoiceDateYmd) continue;
+
+    const unitKey = unitNumber;
+    const invoiceKey = `${invoiceNumber}::${invoiceDateYmd}`;
+
+    const unitAgg =
+      units.get(unitKey) ||
+      ({
+        unitNumber,
+        invoiceCount: 0,
+        total: 0,
+        tax: 0,
+        invoices: new Map(),
+      } satisfies UnitAgg);
+
+    const invoiceAgg =
+      unitAgg.invoices.get(invoiceKey) ||
+      ({
+        invoiceNumber,
+        invoiceDate: invoiceDateYmd,
+        orderCreatedDate: toYmd(r.order_created_date),
+        orderNumber: r.order || null,
+        shop: r.shop || null,
+        total: 0,
+        tax: 0,
+        lineCount: 0,
+        orderClosedDate: null,
+        lines: new Map(),
+      } satisfies InvoiceAgg);
+
+    if (!invoiceAgg.orderCreatedDate) {
+      const ocd = toYmd(r.order_created_date);
+      if (ocd) invoiceAgg.orderCreatedDate = ocd;
+    }
+
+    const lineCompletedYmd = parseDateActionCompletedToYmd(r.date_action_completed);
+    if (lineCompletedYmd) {
+      invoiceAgg.orderClosedDate = ymdMax(invoiceAgg.orderClosedDate, lineCompletedYmd);
+    }
+
+    const complaintRaw = (r.complaint_description || '').trim();
+    // Many revenue_rows only populate global_service_description; service_description alone would drop all lines.
+    const serviceRaw = (r.service_description || r.global_service_description || '').trim();
+    if (!complaintRaw && !serviceRaw) continue;
+
+    const complaint: string | null = complaintRaw || null;
+    // Correction is labor/service text: prefer line-level service, else shop-global description (never part_description).
+    const correction = (r.service_description || '').trim() || (r.global_service_description || '').trim();
+
+    const lineKey = `${complaintRaw}\u0000${serviceRaw}`;
+
+    const lineTotal = toNumber(r.total);
+    const lineTax = toNumber(r.sales_tax);
+
+    const rowHasDriveUp =
+      textMentionsDriveUp(r.complaint_description) ||
+      textMentionsDriveUp(r.service_description) ||
+      textMentionsDriveUp(r.global_service_description);
+
+    const line =
+      invoiceAgg.lines.get(lineKey) || {
+        complaint,
+        correction,
+        hasDriveUpMention: rowHasDriveUp,
+        component: null,
+        system: null,
+        total: 0,
+        tax: 0,
+        count: 0,
+      };
+    line.hasDriveUpMention = line.hasDriveUpMention || rowHasDriveUp;
+
+    // Only update if current value is missing/falsy AND new value is truthy (not null/empty string)
+    // Also handle "N/A" string if it exists in DB
+    const isInvalid = (val: string | null) => !val || val === 'N/A' || val.trim() === '';
+
+    if (isInvalid(line.component) && !isInvalid(r.component)) line.component = r.component;
+    if (isInvalid(line.system) && !isInvalid(r.system)) line.system = r.system;
+
+    line.total += lineTotal;
+    line.tax += lineTax;
+    line.count += 1;
+    invoiceAgg.lines.set(lineKey, line);
+
+    invoiceAgg.total += lineTotal;
+    invoiceAgg.tax += lineTax;
+    invoiceAgg.lineCount += 1;
+
+    unitAgg.invoices.set(invoiceKey, invoiceAgg);
+    units.set(unitKey, unitAgg);
+
+    lineRowCount += 1;
+    grandTotal += lineTotal;
+    grandTax += lineTax;
+  }
+
+  // Finalize: compute counts + convert maps to arrays
+  const unitList = Array.from(units.values()).map((u) => {
+    const invoices = Array.from(u.invoices.values())
+      .sort((a, b) => b.invoiceDate.localeCompare(a.invoiceDate))
+      .map((inv) => ({
+        invoiceNumber: inv.invoiceNumber,
+        invoiceDate: inv.invoiceDate,
+        orderCreatedDate: inv.orderCreatedDate,
+        orderClosedDate: inv.orderClosedDate,
+        orderNumber: inv.orderNumber,
+        shop: inv.shop,
+        total: Number(inv.total.toFixed(2)),
+        tax: Number(inv.tax.toFixed(2)),
+        lineCount: inv.lineCount,
+        lines: Array.from(inv.lines.values()).sort((a, b) => b.total - a.total),
+      }));
+
+    const invoiceCountForUnit = invoices.length;
+    const totalForUnit = invoices.reduce((sum, i) => sum + i.total, 0);
+    const taxForUnit = invoices.reduce((sum, i) => sum + i.tax, 0);
+
+    invoiceCount += invoiceCountForUnit;
+
+    return {
+      unitNumber: u.unitNumber,
+      invoiceCount: invoiceCountForUnit,
+      total: Number(totalForUnit.toFixed(2)),
+      tax: Number(taxForUnit.toFixed(2)),
+      invoices,
+    };
+  });
+
+  unitList.sort((a, b) => a.unitNumber.localeCompare(b.unitNumber));
+
+  return {
+    unitList,
+    invoiceCount,
+    lineRowCount,
+    grandTotal: Number(grandTotal.toFixed(2)),
+    grandTax: Number(grandTax.toFixed(2)),
+  };
 }
 
 router.get('/', clerkAuthMiddleware, requireOrg, async (req: AuthRequest, res) => {
@@ -187,30 +414,29 @@ router.get('/', clerkAuthMiddleware, requireOrg, async (req: AuthRequest, res) =
     const requestedTo = query.to;
 
     const contractStartYmd = toYmd(config.contractStartDate) || '1970-01-01';
-    
-    console.log('[Repairs] Contract Config:', {
-      klOrgId,
-      customerName: config.customerName,
-      dbContractStartDate: config.contractStartDate,
-      parsedContractStartDate: contractStartYmd,
-      requestedFrom,
-      requestedTo
-    });
 
-    const fromYmd = requestedFrom ? String(requestedFrom) : contractStartYmd;
+    // The repair history view is NOT gated to the contract start — an explicit
+    // `from` is honored as far back as the repair DB goes (the picker can expand
+    // into full history on demand). But the DEFAULT (no `from`) is a trailing
+    // 12-month window so the common case stays small and cacheable; some
+    // customers have years of rows and an unbounded default blew the Redis
+    // size guard + shipped a huge payload. contractStartDate still bounds
+    // onboarding/backdate elsewhere — it just no longer clamps this view.
+    const trailing12mo = new Date();
+    trailing12mo.setMonth(trailing12mo.getMonth() - 12);
+    const defaultFromYmd = trailing12mo.toISOString().split('T')[0];
+    const fromYmd = requestedFrom ? String(requestedFrom) : defaultFromYmd;
     const toYmdValue = requestedTo
       ? String(requestedTo)
       : new Date().toISOString().split('T')[0];
-
-    // Clamp from to contract start
-    // If fromYmd is BEFORE contract start, use contract start
-    const effectiveFromYmd = fromYmd < contractStartYmd ? contractStartYmd : fromYmd;
+    const effectiveFromYmd = fromYmd;
 
     console.log('[Repairs] Date Range:', {
-      fromYmd,
+      klOrgId,
+      customerName: config.customerName,
+      from: effectiveFromYmd,
+      to: toYmdValue,
       contractStartYmd,
-      effectiveFromYmd,
-      comparison: `${fromYmd} < ${contractStartYmd} = ${fromYmd < contractStartYmd}`
     });
 
     const fromDate = parseYmdToDate(effectiveFromYmd);
@@ -249,14 +475,14 @@ router.get('/', clerkAuthMiddleware, requireOrg, async (req: AuthRequest, res) =
       return;
     }
 
-    const cacheKey = repairsRawRedisKey(
+    const cacheKey = repairsAggRedisKey(
       klOrgId,
       config.customerName,
       effectiveFromYmd,
       toYmdValue,
       allowedUnitNumbers
     );
-    const { value: rows, hit } = await cacheGetOrSetMeta<RepairsRawRow[]>(
+    const { value: agg, hit } = await cacheGetOrSetMeta<RepairsAggregated>(
       cacheKey,
       REPAIRS_RAW_TTL_SECS,
       async () => {
@@ -298,191 +524,12 @@ router.get('/', clerkAuthMiddleware, requireOrg, async (req: AuthRequest, res) =
           },
           orderBy: [{ unit: 'asc' }, { invoice_date: 'desc' }, { number: 'asc' }],
         });
-        return toRepairsRawRows(raw as RevenueDetailSelected[]);
+        return aggregateRepairs(toRepairsRawRows(raw as RevenueDetailSelected[]));
       }
     );
 
-    type LineAgg = {
-      /** complaint_description */
-      complaint: string | null;
-      /** service_description only; may be "" when this line is complaint-only */
-      correction: string;
-      /** OR of per-row flags: any source row had drive-up in complaint, service, or global service text */
-      hasDriveUpMention: boolean;
-      component: string | null;
-      system: string | null;
-      total: number;
-      tax: number;
-      count: number;
-    };
-
-    type InvoiceAgg = {
-      invoiceNumber: string;
-      /** invoice / closed — Y-M-D */
-      invoiceDate: string;
-      orderCreatedDate: string | null;
-      orderNumber: string | null;
-      shop: string | null;
-      total: number;
-      tax: number;
-      lineCount: number;
-      /** Y-M-D: latest revenue_details.date_action_completed on the job (order closed) */
-      orderClosedDate: string | null;
-      lines: Map<string, LineAgg>;
-    };
-
-    type UnitAgg = {
-      unitNumber: string;
-      invoiceCount: number;
-      total: number;
-      tax: number;
-      invoices: Map<string, InvoiceAgg>;
-    };
-
-    const units = new Map<string, UnitAgg>();
-    let invoiceCount = 0;
-    let lineRowCount = 0;
-    let grandTotal = 0;
-    let grandTax = 0;
-
-    for (const r of rows) {
-      const unitNumber = (r.unit || '').trim();
-      const invoiceNumber = (r.number || '').trim();
-      const invoiceDateYmd = toYmd(r.invoice_date) || null;
-
-      if (!unitNumber || !invoiceNumber || !invoiceDateYmd) continue;
-
-      const unitKey = unitNumber;
-      const invoiceKey = `${invoiceNumber}::${invoiceDateYmd}`;
-
-      const unitAgg =
-        units.get(unitKey) ||
-        ({
-          unitNumber,
-          invoiceCount: 0,
-          total: 0,
-          tax: 0,
-          invoices: new Map(),
-        } satisfies UnitAgg);
-
-      const invoiceAgg =
-        unitAgg.invoices.get(invoiceKey) ||
-        ({
-          invoiceNumber,
-          invoiceDate: invoiceDateYmd,
-          orderCreatedDate: toYmd(r.order_created_date),
-          orderNumber: r.order || null,
-          shop: r.shop || null,
-          total: 0,
-          tax: 0,
-          lineCount: 0,
-          orderClosedDate: null,
-          lines: new Map(),
-        } satisfies InvoiceAgg);
-
-      if (!invoiceAgg.orderCreatedDate) {
-        const ocd = toYmd(r.order_created_date);
-        if (ocd) invoiceAgg.orderCreatedDate = ocd;
-      }
-
-      const lineCompletedYmd = parseDateActionCompletedToYmd(r.date_action_completed);
-      if (lineCompletedYmd) {
-        invoiceAgg.orderClosedDate = ymdMax(invoiceAgg.orderClosedDate, lineCompletedYmd);
-      }
-
-      const complaintRaw = (r.complaint_description || '').trim();
-      // Many revenue_rows only populate global_service_description; service_description alone would drop all lines.
-      const serviceRaw = (r.service_description || r.global_service_description || '').trim();
-      if (!complaintRaw && !serviceRaw) continue;
-
-      const complaint: string | null = complaintRaw || null;
-      // Correction is labor/service text: prefer line-level service, else shop-global description (never part_description).
-      const correction = (r.service_description || '').trim() || (r.global_service_description || '').trim();
-
-      const lineKey = `${complaintRaw}\u0000${serviceRaw}`;
-
-      const lineTotal = toNumber(r.total);
-      const lineTax = toNumber(r.sales_tax);
-
-      const rowHasDriveUp =
-        textMentionsDriveUp(r.complaint_description) ||
-        textMentionsDriveUp(r.service_description) ||
-        textMentionsDriveUp(r.global_service_description);
-
-      const line =
-        invoiceAgg.lines.get(lineKey) || {
-          complaint,
-          correction,
-          hasDriveUpMention: rowHasDriveUp,
-          component: null,
-          system: null,
-          total: 0,
-          tax: 0,
-          count: 0,
-        };
-      line.hasDriveUpMention = line.hasDriveUpMention || rowHasDriveUp;
-
-      // Only update if current value is missing/falsy AND new value is truthy (not null/empty string)
-      // Also handle "N/A" string if it exists in DB
-      const isInvalid = (val: string | null) => !val || val === 'N/A' || val.trim() === '';
-      
-      if (isInvalid(line.component) && !isInvalid(r.component)) line.component = r.component;
-      if (isInvalid(line.system) && !isInvalid(r.system)) line.system = r.system;
-
-      line.total += lineTotal;
-      line.tax += lineTax;
-      line.count += 1;
-      invoiceAgg.lines.set(lineKey, line);
-
-      invoiceAgg.total += lineTotal;
-      invoiceAgg.tax += lineTax;
-      invoiceAgg.lineCount += 1;
-
-      unitAgg.invoices.set(invoiceKey, invoiceAgg);
-      units.set(unitKey, unitAgg);
-
-      lineRowCount += 1;
-      grandTotal += lineTotal;
-      grandTax += lineTax;
-    }
-
-    // Finalize: compute counts + convert maps to arrays
-    const unitList = Array.from(units.values()).map((u) => {
-      const invoices = Array.from(u.invoices.values())
-        .sort((a, b) => b.invoiceDate.localeCompare(a.invoiceDate))
-        .map((inv) => ({
-          invoiceNumber: inv.invoiceNumber,
-          invoiceDate: inv.invoiceDate,
-          orderCreatedDate: inv.orderCreatedDate,
-          orderClosedDate: inv.orderClosedDate,
-          orderNumber: inv.orderNumber,
-          shop: inv.shop,
-          total: Number(inv.total.toFixed(2)),
-          tax: Number(inv.tax.toFixed(2)),
-          lineCount: inv.lineCount,
-          lines: Array.from(inv.lines.values()).sort((a, b) => b.total - a.total),
-        }));
-
-      const invoiceCountForUnit = invoices.length;
-      const totalForUnit = invoices.reduce((sum, i) => sum + i.total, 0);
-      const taxForUnit = invoices.reduce((sum, i) => sum + i.tax, 0);
-
-      invoiceCount += invoiceCountForUnit;
-
-      return {
-        unitNumber: u.unitNumber,
-        invoiceCount: invoiceCountForUnit,
-        total: Number(totalForUnit.toFixed(2)),
-        tax: Number(taxForUnit.toFixed(2)),
-        invoices,
-      };
-    });
-
-    unitList.sort((a, b) => a.unitNumber.localeCompare(b.unitNumber));
-
-    // Apply pagination to the aggregated unit list
-    const totalUnits = unitList.length;
-    const pagedUnitList = unitList.slice((page - 1) * pageSize, page * pageSize);
+    const totalUnits = agg.unitList.length;
+    const pagedUnitList = agg.unitList.slice((page - 1) * pageSize, page * pageSize);
 
     const elapsedMs = Date.now() - startedAt;
     console.log('[Repairs] GET /repairs', {
@@ -490,10 +537,9 @@ router.get('/', clerkAuthMiddleware, requireOrg, async (req: AuthRequest, res) =
       klOrgId,
       customerName: config.customerName,
       period: { from: effectiveFromYmd, to: toYmdValue },
-      rawRows: Array.isArray(rows) ? rows.length : 0,
-      unitCount: unitList.length,
-      invoiceCount,
-      lineRowCount,
+      unitCount: totalUnits,
+      invoiceCount: agg.invoiceCount,
+      lineRowCount: agg.lineRowCount,
       cache: hit ? 'HIT' : 'MISS',
       elapsedMs,
     });
@@ -519,10 +565,10 @@ router.get('/', clerkAuthMiddleware, requireOrg, async (req: AuthRequest, res) =
       },
       summary: {
         unitCount: totalUnits,
-        invoiceCount,
-        lineRowCount,
-        total: Number(grandTotal.toFixed(2)),
-        tax: Number(grandTax.toFixed(2)),
+        invoiceCount: agg.invoiceCount,
+        lineRowCount: agg.lineRowCount,
+        total: agg.grandTotal,
+        tax: agg.grandTax,
       },
       units: pagedUnitList,
     });

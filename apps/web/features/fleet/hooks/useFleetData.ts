@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { useOrganization } from '@clerk/nextjs';
 import { ALL_TYPES, formatUnitTypeList, isUnitTypeFilterActive } from '@/components/UnitTypeFilter';
 import {
@@ -47,7 +47,25 @@ export function useFleetData() {
   const vehicleUtilQuery = useVehicleUtilizationQuery();
   const canLoadDrivers = orgSettings.tracksDrivers && orgSettings.telematicsProvider === 'MOTIVE';
   const driverUtilQuery = useDriverUtilizationQuery(canLoadDrivers ?? false);
-  const repairsQuery = useRepairsQuery();
+  // Repairs are loaded as a bounded, grow-only window. Default = trailing 12
+  // months (covers the "this year" preset instantly and stays small enough to
+  // cache). If the user picks a start date older than what's loaded, the
+  // window grows to cover it and we refetch once; it never shrinks back within
+  // a session, so narrowing the range again is instant from cache.
+  const { repairsDefaultFrom, todayStr } = useMemo(() => {
+    const ymd = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const now = new Date();
+    const twelveMoAgo = new Date(now);
+    twelveMoAgo.setMonth(twelveMoAgo.getMonth() - 12);
+    return { repairsDefaultFrom: ymd(twelveMoAgo), todayStr: ymd(now) };
+  }, []);
+  const [repairsFetchFrom, setRepairsFetchFrom] = useState(repairsDefaultFrom);
+  useEffect(() => {
+    if (filters.startDate < repairsFetchFrom) setRepairsFetchFrom(filters.startDate);
+  }, [filters.startDate, repairsFetchFrom]);
+
+  const repairsQuery = useRepairsQuery(repairsFetchFrom, todayStr);
 
   /** For telematics rows (VIN-keyed): type comes from the service-plan unit that owns the VIN. */
   const vinToUnitType = useMemo(() => {
@@ -159,7 +177,9 @@ export function useFleetData() {
       // Keep skeleton when re-fetching but stale cached data yields nothing to show.
       (vehicleUtilQuery.isFetching && vehicleData.length === 0));
 
-  const repairsLoading = hasActiveOrg && repairsQuery.isPending;
+  // isPending = first load; isFetching covers a window-expansion refetch so the
+  // user sees a loading state while older repair history streams in.
+  const repairsLoading = hasActiveOrg && (repairsQuery.isPending || repairsQuery.isFetching);
   const repairsError = (repairsQuery.error as Error | null)?.message || null;
   const orgSettingsError = filters.orgErrorDismissed
     ? null

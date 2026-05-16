@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useTransition } from 'react';
 import { OrganizationSwitcher, useOrganization } from '@clerk/nextjs';
 import { DateRangePicker } from '@/components/DateRangePicker';
 import { KpiCard, SkeletonKpiCard } from '@/components/KpiCard';
@@ -27,7 +27,6 @@ function formatDateLabel(start: string, end: string): string {
 export default function FleetOverviewPage() {
   const { organization } = useOrganization();
   const fleet = useFleetData();
-  const [repairSelectedUnit, setRepairSelectedUnit] = useState<string | null>(null);
   const [, startTransition] = useTransition();
 
   const dateLabel = formatDateLabel(fleet.startDate, fleet.endDate);
@@ -98,7 +97,7 @@ export default function FleetOverviewPage() {
               endDate={fleet.endDate}
               onStartDateChange={fleet.setStartDate}
               onEndDateChange={fleet.setEndDate}
-              minDate={fleet.earliestDataDate}
+              minDate={fleet.activeTab === 'repairs' ? undefined : fleet.earliestDataDate}
             />
           </div>
         </div>
@@ -221,7 +220,6 @@ export default function FleetOverviewPage() {
           error={fleet.repairsError}
           startDate={fleet.startDate}
           endDate={fleet.endDate}
-          onUnitSelect={setRepairSelectedUnit}
         />
       ) : fleet.telematicsView === 'overview' ? (
         <TelematicsTrendsView

@@ -279,8 +279,8 @@ export const keys = {
     ['vehicle-utilization', orgId, startDate, endDate] as const,
   driverUtilization: (orgId: string | undefined, startDate?: string, endDate?: string) =>
     ['driver-utilization', orgId, startDate, endDate] as const,
-  repairs: (orgId: string | undefined) =>
-    ['repairs', orgId] as const,
+  repairs: (orgId: string | undefined, from?: string, to?: string) =>
+    ['repairs', orgId, from, to] as const,
   unitDetail: (orgId: string | undefined, vin: string) =>
     ['unit-detail', orgId, vin] as const,
   servicePlan: (orgId: string) =>
@@ -378,14 +378,18 @@ export function useDriverUtilizationQuery(
   });
 }
 
-export function useRepairsQuery() {
+export function useRepairsQuery(from?: string, to?: string) {
   const { getApi } = useApiClient();
   const { organization } = useOrganization();
   return useQuery({
-    queryKey: keys.repairs(organization?.id),
+    queryKey: keys.repairs(organization?.id, from, to),
     queryFn: async (): Promise<RepairsResponse> => {
       const api = await getApi();
-      return api.get<RepairsResponse>('/repairs');
+      const params = new URLSearchParams();
+      if (from) params.set('from', from);
+      if (to) params.set('to', to);
+      const qs = params.toString();
+      return api.get<RepairsResponse>(`/repairs${qs ? `?${qs}` : ''}`);
     },
     enabled: !!organization?.id,
   });
