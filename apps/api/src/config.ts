@@ -49,6 +49,12 @@ export const config = {
   // When true, the SMS pipeline writes DriverWeeklyReportSent rows but never calls Twilio.
   // Auto-true when twilio config is missing OR TWILIO_DRY_RUN=true is set explicitly.
   smsDryRun: process.env.TWILIO_DRY_RUN === 'true' || !process.env.TWILIO_ACCOUNT_SID,
+  // Global master switch for the weekly driver SMS cron. Defaults OFF — the
+  // scheduled job is an inert no-op until WEEKLY_DRIVER_SMS_ENABLED=true is set
+  // (flip in Render env, no redeploy). Independent of per-org
+  // customerSmsReportConfig.enabled and of smsDryRun (which only controls
+  // whether Twilio is actually called once the job runs).
+  weeklyDriverSmsEnabled: process.env.WEEKLY_DRIVER_SMS_ENABLED === 'true',
   reportPublicBaseUrl:
     process.env.REPORT_PUBLIC_BASE_URL ?? 'https://www.kerryleasing.com',
 };

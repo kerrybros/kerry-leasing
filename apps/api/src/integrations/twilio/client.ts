@@ -71,7 +71,12 @@ export function validateInboundSignature(
   fullUrl: string,
   params: Record<string, string>
 ): boolean {
-  if (config.smsDryRun || !config.twilio) return true;
-  if (!signatureHeader) return false;
+  // Skip signature checks ONLY outside production (local dev without creds).
+  // In production we must fail CLOSED: no auth token => the request cannot be
+  // verified as coming from Twilio => reject. Failing open here would leave the
+  // public /webhooks/twilio/* endpoints accepting forged unauthenticated POSTs
+  // whenever Twilio is unconfigured (e.g. pre-launch dry-run on prod).
+  if (config.nodeEnv !== 'production' && (config.smsDryRun || !config.twilio)) return true;
+  if (!config.twilio || !signatureHeader) return false;
   return twilio.validateRequest(config.twilio.authToken, signatureHeader, fullUrl, params);
 }

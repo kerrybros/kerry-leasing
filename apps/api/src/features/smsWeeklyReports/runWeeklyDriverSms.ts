@@ -37,6 +37,16 @@ export async function runWeeklyDriverSms(
   const startedAt = Date.now();
   const prisma = getAppPrisma();
 
+  // Global master kill-switch. Until WEEKLY_DRIVER_SMS_ENABLED=true is set in
+  // the environment, this scheduled job is a guaranteed no-op regardless of
+  // per-org customerSmsReportConfig.enabled — safe to ship the cron disabled.
+  if (!config.weeklyDriverSmsEnabled) {
+    console.log(
+      '[smsWeeklyReports] master switch off (WEEKLY_DRIVER_SMS_ENABLED!=true) — skipping all orgs.'
+    );
+    return { totalOrgs: 0, successCount: 0, errorCount: 0, results: [], duration: Date.now() - startedAt };
+  }
+
   const where: { enabled: boolean; clerkOrgId?: string; sendHourEt?: number } = { enabled: true };
   if (options.onlyOrgId) where.clerkOrgId = options.onlyOrgId;
   if (options.targetHourEt != null && !options.onlyOrgId) {
