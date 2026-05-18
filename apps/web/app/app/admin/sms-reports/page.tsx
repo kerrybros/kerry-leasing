@@ -321,7 +321,7 @@ export default function AdminSmsReportsPage() {
             <CardContent className="p-4 space-y-3">
               <h2 className="font-medium">Send a test SMS</h2>
               <p className="text-xs text-muted-foreground">
-                Builds a sample report using last week's data and sends it to the phone you enter.
+                Builds a sample report using last week&apos;s data and sends it to the phone you enter.
                 The phone is normalized to E.164 (US default).
               </p>
               <form onSubmit={sendTest} className="flex flex-wrap gap-2 items-end">
@@ -429,7 +429,7 @@ export default function AdminSmsReportsPage() {
                   {!loadingDrivers && drivers.length === 0 && (
                     <tr>
                       <td colSpan={11} className="py-4 text-muted-foreground">
-                        No drivers yet. They'll appear after the first Motive sync, Whiparound sync, or via the manual add form above.
+                        No drivers yet. They&apos;ll appear after the first Motive sync, Whiparound sync, or via the manual add form above.
                       </td>
                     </tr>
                   )}
