@@ -22,6 +22,7 @@ export interface WeeklyKpiTrendPoint {
   totalMiles: number;
   hardEvents: number;
   idleFuelGal: number;
+  totalFuelGal: number;
 }
 
 export interface DriverWeeklyReport {
@@ -218,6 +219,7 @@ export async function buildWeeklyReports(orgId: string, now: Date = new Date()):
         totalMiles: r?.totalMiles ?? 0,
         hardEvents: r?.hardEvents ?? 0,
         idleFuelGal: r?.idleFuelGal ?? 0,
+        totalFuelGal: r?.totalFuelGal ?? 0,
       };
     });
 

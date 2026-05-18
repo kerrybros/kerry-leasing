@@ -44,13 +44,13 @@ interface PreviewResponse {
   drivers: DriverPreview[];
 }
 
-function formatWeekRange(weekStart: string, isUpcoming: boolean): string {
+function formatWeekRange(weekStart: string): string {
   const [y, m, d] = weekStart.split('-').map(Number);
   const startUtc = new Date(Date.UTC(y, m - 1, d));
   const endUtc = new Date(startUtc.getTime() + 6 * 24 * 60 * 60 * 1000);
   const fmt = (dt: Date) =>
     dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
-  return `${isUpcoming ? 'Upcoming: ' : ''}${fmt(startUtc)} – ${fmt(endUtc)}`;
+  return `${fmt(startUtc)} – ${fmt(endUtc)}`;
 }
 
 export function SmsPreviewView() {
@@ -103,10 +103,6 @@ export function SmsPreviewView() {
     () => preview?.drivers.find((d) => d.driverContactId === selectedDriverId) ?? null,
     [preview, selectedDriverId],
   );
-  const selectedWeekItem = useMemo(
-    () => weeks.find((w) => w.weekStart === selectedWeek) ?? null,
-    [weeks, selectedWeek],
-  );
 
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const toggleEnrollment = async (driverContactId: string, nextEnrolled: boolean) => {
@@ -140,7 +136,7 @@ export function SmsPreviewView() {
             >
               {weeks.map((w) => (
                 <option key={w.weekStart} value={w.weekStart}>
-                  {formatWeekRange(w.weekStart, w.isUpcoming)}{w.sendCount > 0 ? ` (${w.sendCount} sends)` : ''}
+                  {formatWeekRange(w.weekStart)}{w.sendCount > 0 ? ` (${w.sendCount} sends)` : ''}
                 </option>
               ))}
             </select>
@@ -148,9 +144,6 @@ export function SmsPreviewView() {
         </div>
 
         {!enabled && <Badge variant="outline">SMS not yet enabled for this org</Badge>}
-        {selectedWeekItem?.isUpcoming && (
-          <Badge variant="secondary">Live preview — built from current data</Badge>
-        )}
       </div>
 
       {loadingPreview ? (
@@ -161,12 +154,14 @@ export function SmsPreviewView() {
         </CardContent></Card>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-[280px,1fr] gap-4">
-          {/* Driver list — sorted by rank, top performer first */}
-          <div className="rounded-lg border border-border overflow-hidden">
-            <div className="bg-muted px-3 py-2 text-[10px] uppercase tracking-wider font-semibold text-muted-foreground">
+          {/* Driver list — sorted by rank, top performer first. The grid
+              stretches this column to match the detail pane's height so the
+              two bottom borders line up; the list scrolls internally. */}
+          <div className="rounded-lg border border-border overflow-hidden flex flex-col min-h-0">
+            <div className="shrink-0 bg-muted px-3 py-2 text-[10px] uppercase tracking-wider font-semibold text-muted-foreground">
               {preview.drivers.length} drivers · sorted by rank
             </div>
-            <ul className="divide-y divide-border max-h-[70vh] overflow-y-auto">
+            <ul className="divide-y divide-border flex-1 min-h-0 overflow-y-auto">
               {preview.drivers.map((d) => {
                 const isSelected = d.driverContactId === selectedDriverId;
                 const excluded = !d.enrolled;
@@ -233,7 +228,7 @@ export function SmsPreviewView() {
 
                 {!selectedDriver.enrolled && (
                   <div className="mb-3 rounded border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
-                    This driver is currently excluded. They won't receive the Monday SMS. The preview below is what they <em>would</em> get if you re-enable them.
+                    This driver is currently excluded. They won&apos;t receive the Monday SMS. The preview below is what they <em>would</em> get if you re-enable them.
                   </div>
                 )}
 
