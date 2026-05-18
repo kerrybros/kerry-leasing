@@ -143,8 +143,8 @@ export type ScorecardDriver = {
   totalFuelGal: number;
   drivingFuelGal: number;
   hardEvents: number;
-  hardEventBreakdown?: { hardAccels: number; hardBrakes: number; hardCorners: number };
-  subScores: { idle: number; mpg: number; utilization: number; fuelEconomy: number; safety: number };
+  hardEventBreakdown?: Record<string, number>; // count keyed by Motive event_type
+  subScores: { idle: number; mpg: number; safety: number };
 };
 
 export type DriverScorecardResponse = {
@@ -287,6 +287,8 @@ export const keys = {
     ['service-plan', orgId] as const,
   driverScorecard: (orgId: string | undefined, startDate?: string, endDate?: string) =>
     ['driver-scorecard', orgId, startDate, endDate] as const,
+  driverSafetyByPeriod: (orgId: string | undefined, sig: string) =>
+    ['driver-safety-by-period', orgId, sig] as const,
   whiparoundDefects: (orgId: string | undefined, filters?: Record<string, string>) =>
     ['whiparound-defects', orgId, filters] as const,
   whiparoundInspections: (orgId: string | undefined, filters?: Record<string, string>) =>
@@ -504,6 +506,33 @@ export function useDriverScorecardQuery(
       return api.get<DriverScorecardResponse>(`/telematics/normalized/driver-scorecard${qs}`);
     },
     enabled: !!organization?.id && enabled,
+  });
+}
+
+/** { [periodKey]: { [driverId]: 0–100 } } — per-period safety sub-score. */
+export type DriverSafetyByPeriod = Record<string, Record<number, number>>;
+
+/**
+ * Per-driver safety sub-score for a set of period windows (MoM/WoW grids).
+ * Same per-mile, Motive-weighted metric as the headline scorecard.
+ */
+export function useDriverSafetyByPeriodQuery(
+  enabled: boolean,
+  periods: { key: string; startDate: string; endDate: string }[],
+) {
+  const { getApi } = useApiClient();
+  const { organization } = useOrganization();
+  const sig = periods.map(p => p.key).join(',');
+  return useQuery({
+    queryKey: keys.driverSafetyByPeriod(organization?.id, sig),
+    queryFn: async (): Promise<DriverSafetyByPeriod> => {
+      const api = await getApi();
+      return api.post<DriverSafetyByPeriod>(
+        '/telematics/normalized/driver-safety-by-period',
+        { periods },
+      );
+    },
+    enabled: !!organization?.id && enabled && periods.length > 0,
   });
 }
 

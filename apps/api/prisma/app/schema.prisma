@@ -735,6 +735,72 @@ model MotiveDriverPerformanceEvent {
   @@map("motive_driver_performance_events")
 }
 
+// MOTIVE Speeding Events (per-event speeding incidents)
+// Source: GET /v1/speeding_events  (NOT returned by /v2/driver_performance_events)
+// Speeding carries a high Motive Safety-Score weight but is exposed only here.
+// One row per speeding interval; summable per driver/day for the safety leg.
+model MotiveSpeedingEvent {
+  id                   String    @id @default(cuid())
+  clerkOrgId           String    @map("clerk_org_id")
+  motiveEventId        BigInt    @map("motive_event_id") // speeding_event.id
+
+  // Driver (optional — unassigned trips have no driver)
+  driverId             BigInt?   @map("driver_id")
+  driverFirstName      String?   @map("driver_first_name")
+  driverLastName       String?   @map("driver_last_name")
+  driverEmail          String?   @map("driver_email")
+
+  // Vehicle
+  vehicleId            BigInt?   @map("vehicle_id")
+  vehicleNumber        String?   @map("vehicle_number")
+
+  // Classification
+  speedingType         String?   @map("speeding_type")    // "posted", etc.
+  severity             String?   // metadata.severity: low | medium | high — used for weighting
+  status               String?   // "valid" | "invalid" (invalid excluded from scoring)
+  coachingStatus       String?   @map("coaching_status")   // coachable, pending_review, reviewed, dismissed
+  isManuallyChanged    Boolean?  @map("is_manually_changed")
+
+  // Magnitude (all kph as returned by this endpoint, regardless of X-Metric-Units)
+  durationSec          Int?      @map("duration_sec")
+  speedingDistanceKm   Float?    @map("speeding_distance_km")
+  maxOverSpeedKph      Float?    @map("max_over_speed_kph")
+  avgOverSpeedKph      Float?    @map("avg_over_speed_kph")
+  minPostedLimitKph    Float?    @map("min_posted_limit_kph")
+  maxPostedLimitKph    Float?    @map("max_posted_limit_kph")
+  avgVehicleSpeedKph   Float?    @map("avg_vehicle_speed_kph")
+  maxVehicleSpeedKph   Float?    @map("max_vehicle_speed_kph")
+
+  // Timing
+  startTime            String    @map("start_time") // ISO 8601
+  endTime              String?   @map("end_time")   // ISO 8601
+  date                 String    // YYYY-MM-DD (derived from start_time, company-configured TZ)
+
+  // Location
+  startLat             Float?    @map("start_lat")
+  startLon             Float?    @map("start_lon")
+  endLat               Float?    @map("end_lat")
+  endLon               Float?    @map("end_lon")
+
+  // Data verification tracking
+  lastVerifiedAt       DateTime? @map("last_verified_at")
+  dataVersion          Int       @default(1) @map("data_version")
+
+  rawResponse          Json      @map("raw_response")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+
+  @@unique([clerkOrgId, motiveEventId])
+  @@index([clerkOrgId])
+  @@index([driverId])
+  @@index([vehicleId])
+  @@index([date])
+  @@index([clerkOrgId, date])
+  @@index([clerkOrgId, driverId, date])
+  @@index([lastVerifiedAt])
+  @@map("motive_speeding_events")
+}
+
 // System Config (key-value store for app-wide settings)
 // Used for: diesel_price_per_gallon (EIA weekly fetch), feature flags, etc.
 model SystemConfig {

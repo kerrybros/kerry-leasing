@@ -202,8 +202,11 @@ function comparisonRanges(
 function periodShortLabel(isoDate: string, granularity: Granularity): string {
   const d = new Date(isoDate + 'T00:00:00');
   if (granularity === 'monthly') {
-    return d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+    // No year — the selected period already makes the year obvious. Used by
+    // both the column sub-headers and the CSV export.
+    return d.toLocaleDateString('en-US', { month: 'short' });
   }
+  // Week still shows the week-of date so the window is unambiguous.
   return `wk ${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
 }
 
@@ -264,10 +267,9 @@ function ScoreFormulaPopover() {
           </div>
           <div className="flex flex-col gap-2 text-xs">
             {[
-              { label: 'Idle %',       weight: '30%', desc: '0% idle → 100 pts · ≥50% idle → 0 pts (linear)' },
-              { label: 'Safety',       weight: '20%', desc: '0 hard events → 100 pts; exponential decay per event' },
-              { label: 'MPG vs Fleet', weight: '25%', desc: 'Fleet average earns 60 pts; scaled proportionally' },
-              { label: 'Fuel Economy', weight: '10%', desc: 'Driving fuel ÷ total fuel — lower idle burn = higher pts' },
+              { label: 'Idle %',       weight: '40%', desc: '0% idle → 100 pts · ≥50% idle → 0 pts (linear). Absorbs idle-fuel waste.' },
+              { label: 'MPG vs Fleet', weight: '35%', desc: 'Fleet average earns 60 pts; scaled proportionally' },
+              { label: 'Safety',       weight: '25%', desc: 'Per-mile, Motive-weighted event rate (speeding, tailgating, hard brake/corner, stop-sign…)' },
             ].map(row => (
               <div key={row.label} className="flex items-start gap-2">
                 <span className="w-20 shrink-0 font-semibold text-foreground">{row.label}</span>
@@ -698,7 +700,7 @@ export default function ScorecardPage() {
                 <TableRow className="bg-muted hover:bg-muted">
                   <TableHead className="text-muted-foreground font-semibold uppercase tracking-wide text-[10px] px-3 py-2 h-auto w-8">#</TableHead>
                   <TableHead
-                    className="text-muted-foreground font-semibold uppercase tracking-wide text-[10px] px-3 py-2 h-auto cursor-pointer select-none"
+                    className={`text-muted-foreground font-semibold uppercase tracking-wide text-[10px] px-3 py-2 h-auto cursor-pointer select-none${showComparison ? ' border-r border-border' : ''}`}
                     onClick={() => handleSort('driverName')}
                   >
                     Driver<SortIcon k="driverName" />
@@ -715,7 +717,7 @@ export default function ScorecardPage() {
                         </TableHead>,
                         <TableHead
                           key={`${col.key}:cur`}
-                          className="text-muted-foreground font-semibold uppercase tracking-wide text-[10px] px-3 py-2 h-auto cursor-pointer select-none whitespace-nowrap text-right"
+                          className="text-muted-foreground font-semibold uppercase tracking-wide text-[10px] px-3 py-2 h-auto cursor-pointer select-none whitespace-nowrap text-right border-r border-border"
                           onClick={() => handleSort(col.key)}
                         >
                           {col.shortLabel}<SortIcon k={col.key} />
@@ -743,7 +745,7 @@ export default function ScorecardPage() {
                       className="hover:bg-muted/30 transition-colors"
                     >
                       <TableCell className="text-muted-foreground text-[11px] font-mono px-3 py-2">{idx + 1}</TableCell>
-                      <TableCell className="font-semibold text-[12px] px-3 py-2 whitespace-nowrap">{row.driverName}</TableCell>
+                      <TableCell className={`font-semibold text-[12px] px-3 py-2 whitespace-nowrap${showComparison ? ' border-r border-border' : ''}`}>{row.driverName}</TableCell>
                       {activeCols.map(col => {
                         const val = row[col.key] as number;
                         const prevVal = prev ? (prev[col.key] as number) : undefined;
@@ -757,7 +759,7 @@ export default function ScorecardPage() {
                             </TableCell>,
                             <TableCell
                               key={`${col.key}:cur`}
-                              className={`text-[12px] px-3 py-2 tabular-nums text-right ${improvementClass(val, prevVal, col.higherIsBetter, col.format)}`}
+                              className={`text-[12px] px-3 py-2 tabular-nums text-right border-r border-border ${improvementClass(val, prevVal, col.higherIsBetter, col.format)}`}
                             >
                               {col.format(val)}
                             </TableCell>,

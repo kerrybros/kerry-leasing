@@ -14,6 +14,7 @@ import { getAppPrisma } from '../lib/prisma.js';
 import { TelematicsProvider } from '../telematics/types.js';
 import { cacheGetOrSet } from '../lib/redis.js';
 import { config } from '../config.js';
+import { SAFETY_EVENT_WEIGHTS, weightedEventTotal, safetyScoreFromRate, type NormalizedSafetyEvent } from './safetyScore.js';
 
 const CACHE_TTL_SECS = 7200; // 2 hours — nightly sync invalidates anyway
 
@@ -344,6 +345,42 @@ export class TelematicsService {
     );
   }
 
+  /**
+   * The single source of "what are this org's safety events in [start,end]".
+   * Merges driver performance events + VALID speeding into one normalized
+   * stream — a speeding event is just a safety event. Every safety calculation
+   * (headline scorecard, SMS, MoM/WoW) goes through here, so there is exactly
+   * one place that decides what counts as a safety event.
+   */
+  private async _fetchSafetyEvents(
+    orgId: string,
+    startDate: string,
+    endDate: string
+  ): Promise<NormalizedSafetyEvent[]> {
+    const appPrisma = getAppPrisma();
+    const [perf, speeding] = await Promise.all([
+      appPrisma.motiveDriverPerformanceEvent.findMany({
+        where: { clerkOrgId: orgId, date: { gte: startDate, lte: endDate }, driverId: { not: null } },
+        select: { driverId: true, eventType: true, severity: true, date: true },
+      }),
+      // Valid speeding only — for this fleet ≈0 until Motive is configured.
+      appPrisma.motiveSpeedingEvent.findMany({
+        where: { clerkOrgId: orgId, date: { gte: startDate, lte: endDate }, driverId: { not: null }, status: 'valid' },
+        select: { driverId: true, severity: true, date: true },
+      }),
+    ]);
+    const out: NormalizedSafetyEvent[] = [];
+    for (const e of perf) {
+      if (e.driverId == null) continue;
+      out.push({ driverId: Number(e.driverId), date: e.date, eventType: e.eventType, severity: e.severity });
+    }
+    for (const s of speeding) {
+      if (s.driverId == null) continue;
+      out.push({ driverId: Number(s.driverId), date: s.date, eventType: 'speeding', severity: s.severity });
+    }
+    return out;
+  }
+
   private async _fetchDriverScorecard(
     orgId: string,
     startDate: string,
@@ -389,25 +426,21 @@ export class TelematicsService {
       distMap.set(key, (distMap.get(key) ?? 0) + (parseFloat(p.distance) || 0));
     }
 
-    // 3. Scorecard summaries for hard event counts
-    const scorecards = await appPrisma.motiveScorecardSummary.findMany({
-      where: { clerkOrgId: orgId, date: { gte: startDate, lte: endDate } },
-      select: { driverId: true, numHardAccels: true, numHardBrakes: true, numHardCorners: true },
-    });
-    const hardEventsMap = new Map<number, number>();
-    const hardBreakdownMap = new Map<number, { hardAccels: number; hardBrakes: number; hardCorners: number }>();
-    for (const sc of scorecards) {
-      if (sc.driverId == null) continue;
-      const accels = sc.numHardAccels ?? 0;
-      const brakes = sc.numHardBrakes ?? 0;
-      const corners = sc.numHardCorners ?? 0;
-      hardEventsMap.set(sc.driverId, (hardEventsMap.get(sc.driverId) ?? 0) + accels + brakes + corners);
-      const prev = hardBreakdownMap.get(sc.driverId) ?? { hardAccels: 0, hardBrakes: 0, hardCorners: 0 };
-      hardBreakdownMap.set(sc.driverId, {
-        hardAccels: prev.hardAccels + accels,
-        hardBrakes: prev.hardBrakes + brakes,
-        hardCorners: prev.hardCorners + corners,
-      });
+    // 3. Unified safety-event stream for the period (perf events + valid
+    // speeding, normalized to one shape — a speeding event IS a safety event).
+    // Summable per-event source — NOT Motive's daily score — so the safety
+    // sub-score rolls up correctly for any window. See safetyScore.ts.
+    const safetyEvents = await this._fetchSafetyEvents(orgId, startDate, endDate);
+    const weightedMap = new Map<number, number>();   // weighted event total per driver
+    const hardEventsMap = new Map<number, number>(); // count of scored (weighted>0) events
+    const hardBreakdownMap = new Map<number, Record<string, number>>(); // count by eventType
+    for (const e of safetyEvents) {
+      if ((SAFETY_EVENT_WEIGHTS[e.eventType] ?? 0) <= 0) continue; // excluded / non-behavioral / unknown
+      weightedMap.set(e.driverId, (weightedMap.get(e.driverId) ?? 0) + weightedEventTotal([e]));
+      hardEventsMap.set(e.driverId, (hardEventsMap.get(e.driverId) ?? 0) + 1);
+      const bd = hardBreakdownMap.get(e.driverId) ?? {};
+      bd[e.eventType] = (bd[e.eventType] ?? 0) + 1;
+      hardBreakdownMap.set(e.driverId, bd);
     }
 
     // 4. Fleet-average MPG from vehicle utilization
@@ -442,34 +475,31 @@ export class TelematicsService {
       agg.set(r.driverId, ex);
     }
 
-    // 6. Compute scores
+    // 6. Compute scores — 3 levers, cost-led: Idle 0.40 / MPG 0.35 / Safety 0.25.
+    // Utilization dropped; old "fuel economy" was a duplicate idle metric (folded
+    // into Idle). Safety is per-mile, Motive-weighted (safetyScore.ts).
     const MAX_IDLE_PCT = 50;
-    const SAFETY_DECAY = 12;
+    const W_IDLE = 0.40, W_MPG = 0.35, W_SAFETY = 0.25;
 
     const scored: ScorecardDriver[] = Array.from(agg.entries()).map(([driverId, d]) => {
       const engineOn = d.totalIdleTime + d.totalDrivingTime;
       const idlePct = engineOn > 0 ? (d.totalIdleTime / engineOn) * 100 : 0;
-      const driveTimePct = engineOn > 0 ? (d.totalDrivingTime / engineOn) * 100 : 0;
       const avgMpg = d.totalFuel > 0 && d.totalMiles > 0 ? d.totalMiles / d.totalFuel : 0;
       const drivingFuelGal = Math.max(0, d.totalFuel - d.totalIdleFuel);
-      const fuelRatio = d.totalFuel > 0 ? drivingFuelGal / d.totalFuel : 1;
       const hardEvents = hardEventsMap.get(driverId) ?? 0;
-      const hardEventBreakdown = hardBreakdownMap.get(driverId) ?? { hardAccels: 0, hardBrakes: 0, hardCorners: 0 };
+      const hardEventBreakdown = hardBreakdownMap.get(driverId) ?? {};
+      const weightedEvents = weightedMap.get(driverId) ?? 0;
 
       // Sub-scores
       const idleScore = Math.max(0, Math.min(100, (1 - idlePct / MAX_IDLE_PCT) * 100));
       const refMpg = fleetAvgMpg > 0 ? fleetAvgMpg : (avgMpg || 1);
       const mpgScore = Math.max(0, Math.min(100, (avgMpg / refMpg) * 60));
-      const utilizationScore = Math.max(0, Math.min(100, driveTimePct));
-      const fuelEconomyScore = Math.max(0, Math.min(100, fuelRatio * 100));
-      const safetyScore = Math.max(0, 100 * Math.exp(-hardEvents / SAFETY_DECAY));
+      const safetyScore = safetyScoreFromRate(weightedEvents, d.totalMiles);
 
       const score = Math.round(
-        idleScore * 0.30 +
-        mpgScore * 0.25 +
-        utilizationScore * 0.15 +
-        fuelEconomyScore * 0.10 +
-        safetyScore * 0.20
+        idleScore * W_IDLE +
+        mpgScore * W_MPG +
+        safetyScore * W_SAFETY
       );
 
       const grade =
@@ -496,8 +526,6 @@ export class TelematicsService {
         subScores: {
           idle: Math.round(idleScore),
           mpg: Math.round(mpgScore),
-          utilization: Math.round(utilizationScore),
-          fuelEconomy: Math.round(fuelEconomyScore),
           safety: Math.round(safetyScore),
         },
       };
@@ -508,6 +536,84 @@ export class TelematicsService {
     scored.forEach((d, i) => { (d as any).rank = i + 1; });
 
     return { data: scored, provider: 'MOTIVE', fleetAvgMpg: Math.round(fleetAvgMpg * 100) / 100, period: { startDate, endDate } };
+  }
+
+  /**
+   * Per-driver safety sub-score for an arbitrary set of period windows (used by
+   * the Month-over-Month / Week-over-Week trend grids so their safety is the
+   * SAME per-mile, Motive-weighted metric as the headline scorecard — just
+   * bucketed per period). One batched call; same helpers as the headline.
+   * Returns { [periodKey]: { [driverId]: 0–100 } }.
+   */
+  async getDriverSafetyByPeriod(
+    orgId: string,
+    periods: { key: string; startDate: string; endDate: string }[]
+  ): Promise<Record<string, Record<number, number>>> {
+    if (periods.length === 0) return {};
+    const env = config.nodeEnv === 'production' ? 'prod' : 'dev';
+    const keysSig = periods.map(p => `${p.key}:${p.startDate}:${p.endDate}`).sort().join(',');
+    const cacheKey = `${env}:telematics:safetybyperiod:${orgId}:${keysSig}`;
+    return cacheGetOrSet(cacheKey, CACHE_TTL_SECS, async () => {
+      const provider = await this.resolveProvider(orgId);
+      if (provider !== TelematicsProvider.MOTIVE) return {};
+      const appPrisma = getAppPrisma();
+
+      const minStart = periods.reduce((m, p) => (p.startDate < m ? p.startDate : m), periods[0].startDate);
+      const maxEnd = periods.reduce((m, p) => (p.endDate > m ? p.endDate : m), periods[0].endDate);
+
+      // Same unified safety-event stream as the headline scorecard (perf events
+      // + valid speeding) so MoM/WoW safety stays exactly consistent.
+      const [safetyEvents, drivingPeriods, utilRows] = await Promise.all([
+        this._fetchSafetyEvents(orgId, minStart, maxEnd),
+        appPrisma.motiveDrivingPeriod.findMany({
+          where: { clerkOrgId: orgId, date: { gte: minStart, lte: maxEnd }, driverId: { not: null } },
+          select: { driverId: true, date: true, distance: true },
+        }),
+        // Mirror the headline scorecard exactly: miles are only counted on
+        // (driver, date) pairs that have a driver-utilization record.
+        appPrisma.motiveDriverUtilization.findMany({
+          where: { clerkOrgId: orgId, date: { gte: minStart, lte: maxEnd } },
+          select: { driverId: true, date: true },
+        }),
+      ]);
+      const utilDates = new Set(
+        utilRows.filter((u: { driverId: number | null }) => u.driverId != null)
+          .map((u: { driverId: number | null; date: string }) => `${u.driverId}|${u.date}`),
+      );
+
+      // Per driver → per date → { weighted events, miles }
+      const byDriver = new Map<number, Map<string, { w: number; mi: number }>>();
+      const bump = (did: number, date: string, w: number, mi: number) => {
+        let m = byDriver.get(did);
+        if (!m) { m = new Map(); byDriver.set(did, m); }
+        const e = m.get(date) ?? { w: 0, mi: 0 };
+        e.w += w; e.mi += mi;
+        m.set(date, e);
+      };
+      for (const ev of safetyEvents) {
+        if (!SAFETY_EVENT_WEIGHTS[ev.eventType]) continue;
+        bump(ev.driverId, ev.date, weightedEventTotal([ev]), 0);
+      }
+      for (const p of drivingPeriods) {
+        if (p.driverId == null || !p.distance) continue;
+        if (!utilDates.has(`${Number(p.driverId)}|${p.date}`)) continue; // headline-consistent miles gating
+        bump(Number(p.driverId), p.date, 0, parseFloat(p.distance) || 0);
+      }
+
+      const out: Record<string, Record<number, number>> = {};
+      for (const per of periods) {
+        const map: Record<number, number> = {};
+        for (const [did, dateMap] of byDriver) {
+          let w = 0, mi = 0;
+          for (const [date, e] of dateMap) {
+            if (date >= per.startDate && date <= per.endDate) { w += e.w; mi += e.mi; }
+          }
+          if (mi > 0 || w > 0) map[did] = Math.round(safetyScoreFromRate(w, mi));
+        }
+        out[per.key] = map;
+      }
+      return out;
+    });
   }
 }
 
@@ -530,8 +636,8 @@ export interface ScorecardDriver {
   totalFuelGal: number;
   drivingFuelGal: number;
   hardEvents: number;
-  hardEventBreakdown: { hardAccels: number; hardBrakes: number; hardCorners: number };
-  subScores: { idle: number; mpg: number; utilization: number; fuelEconomy: number; safety: number };
+  hardEventBreakdown: Record<string, number>; // count keyed by Motive event_type
+  subScores: { idle: number; mpg: number; safety: number };
 }
 
 export interface DriverScorecardResponse {

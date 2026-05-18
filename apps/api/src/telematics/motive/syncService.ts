@@ -14,6 +14,7 @@ import { syncDrivingPeriods } from './sync/syncDrivingPeriods.js';
 import { syncGeofences } from './sync/syncGeofences.js';
 import { syncMotiveScorecard } from './sync/syncMotiveScorecard.js';
 import { syncDriverPerformanceEvents } from './sync/syncDriverPerformanceEvents.js';
+import { syncMotiveSpeeding } from './sync/syncMotiveSpeeding.js';
 import { syncMotiveUsers } from './sync/syncMotiveUsers.js';
 import { reconcileMotiveVehicleFromDrivingPeriods } from './sync/reconcileMotiveVehicleFromDrivingPeriods.js';
 import { getYesterday, getFourDaysAgo, SyncResult } from './types.js';
@@ -180,6 +181,17 @@ export async function syncMotiveOrgForDate(
     driverPerfResult.skipped
       ? `  ⏭  Driver perf events: skipped (${driverPerfResult.skipReason})`
       : `  ✓ Driver perf events: ${driverPerfResult.newCount} new, ${driverPerfResult.unchangedCount} unchanged, ${driverPerfResult.updatedCount} updated`
+  );
+
+  // 7b. Speeding events (separate Motive endpoint — not in driver_performance_events)
+  const speedingResult = await safeStep('speeding_events', date, () =>
+    syncMotiveSpeeding(clerkOrgId, apiKey, date, verify)
+  );
+  orgResult.results.push(speedingResult);
+  console.log(
+    speedingResult.skipped
+      ? `  ⏭  Speeding events: skipped (${speedingResult.skipReason})`
+      : `  ✓ Speeding events: ${speedingResult.newCount} new, ${speedingResult.unchangedCount} unchanged, ${speedingResult.updatedCount} updated`
   );
 
   // 8. Geofences (at most once per 24h)
