@@ -22,6 +22,9 @@ interface TrendPoint {
   totalMiles: number;
   hardEvents: number;
   idleFuelGal: number;
+  // Optional: snapshots persisted before total-fuel was added to the trend
+  // won't have it — render a dash in that case.
+  totalFuelGal?: number;
 }
 
 export interface OnePagerSnapshot {
@@ -126,7 +129,7 @@ export function DriverScorecardOnePager({ weekStart, snapshot, sentAt, isTest }:
             <p className="text-6xl font-bold leading-none mt-1">{s.rank}</p>
             <p className="text-sm text-slate-300 mt-2">of {s.totalDrivers} drivers in your fleet</p>
             <div className="h-px bg-slate-700 my-4" />
-            <p className="text-[11px] uppercase tracking-wider text-slate-300">Safety Score</p>
+            <p className="text-[11px] uppercase tracking-wider text-slate-300">Driver Score</p>
             <p className="text-3xl font-semibold mt-1">{s.current.score}</p>
           </section>
 
@@ -145,9 +148,9 @@ export function DriverScorecardOnePager({ weekStart, snapshot, sentAt, isTest }:
           <section>
             <h2 className="text-xs uppercase tracking-wider text-slate-500 mb-2">Fuel</h2>
             <div className="rounded-lg border border-slate-200 divide-y divide-slate-200">
-              <FuelRow label="Driving fuel" value={`${Math.round(s.current.drivingFuelGal)} gal`} />
-              <FuelRow label="Idle fuel" value={`${Math.round(s.current.idleFuelGal)} gal`} />
-              <FuelRow label="Total fuel" value={`${Math.round(s.current.totalFuelGal)} gal`} />
+              <FuelRow label="Driving fuel" value={`${s.current.drivingFuelGal.toFixed(1)} gal`} />
+              <FuelRow label="Idle fuel" value={`${s.current.idleFuelGal.toFixed(1)} gal`} />
+              <FuelRow label="Total fuel" value={`${s.current.totalFuelGal.toFixed(1)} gal`} />
               {s.fleetAvgMpg > 0 && (
                 <FuelRow
                   label="Fleet avg MPG"
@@ -173,6 +176,8 @@ export function DriverScorecardOnePager({ weekStart, snapshot, sentAt, isTest }:
                       <th className="text-right px-3 py-2 text-[11px] font-semibold uppercase tracking-wider">Idle</th>
                       <th className="text-right px-3 py-2 text-[11px] font-semibold uppercase tracking-wider">MPG</th>
                       <th className="text-right px-3 py-2 text-[11px] font-semibold uppercase tracking-wider">Miles</th>
+                      <th className="text-right px-3 py-2 text-[11px] font-semibold uppercase tracking-wider">Idle Fuel</th>
+                      <th className="text-right px-3 py-2 text-[11px] font-semibold uppercase tracking-wider">Total Fuel</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -188,6 +193,8 @@ export function DriverScorecardOnePager({ weekStart, snapshot, sentAt, isTest }:
                           <td className="px-3 py-2 text-right">{row.idlePct.toFixed(1)}%</td>
                           <td className="px-3 py-2 text-right">{row.avgMpg.toFixed(1)}</td>
                           <td className="px-3 py-2 text-right">{Math.round(row.totalMiles).toLocaleString()}</td>
+                          <td className="px-3 py-2 text-right">{row.idleFuelGal.toFixed(1)}</td>
+                          <td className="px-3 py-2 text-right">{row.totalFuelGal != null ? row.totalFuelGal.toFixed(1) : '—'}</td>
                         </tr>
                       );
                     })}

@@ -153,4 +153,46 @@ router.get(
   }
 );
 
+/**
+ * POST /telematics/normalized/driver-safety-by-period
+ * Body: { periods: [{ key, startDate, endDate }] }  (≤ 60 windows)
+ *
+ * Per-driver safety sub-score (same per-mile, Motive-weighted metric as the
+ * scorecard) for each window — feeds the MoM/WoW trend grids.
+ * Returns { [key]: { [driverId]: 0–100 } }.
+ */
+router.post(
+  '/driver-safety-by-period',
+  clerkAuthMiddleware,
+  requireOrg,
+  async (req: AuthRequest, res) => {
+    try {
+      const raw = (req.body?.periods ?? []) as unknown;
+      if (!Array.isArray(raw) || raw.length === 0 || raw.length > 60) {
+        return res.status(400).json({ error: 'Bad Request', message: 'periods must be a 1–60 item array' });
+      }
+      const periods: { key: string; startDate: string; endDate: string }[] = [];
+      for (const p of raw) {
+        const key = (p as any)?.key;
+        const startDate = (p as any)?.startDate;
+        const endDate = (p as any)?.endDate;
+        if (typeof key !== 'string' || !isValidDate(startDate) || !isValidDate(endDate) || startDate > endDate) {
+          return res.status(400).json({ error: 'Bad Request', message: 'invalid period entry' });
+        }
+        periods.push({ key, startDate, endDate });
+      }
+
+      const orgId = req.auth!.orgId!;
+      const result = await telematicsService.getDriverSafetyByPeriod(orgId, periods);
+
+      res.setHeader('Cache-Control', 'private, max-age=300');
+      res.setHeader('Vary', 'Authorization');
+      res.json(result);
+    } catch (error) {
+      console.error('[Normalized] Error fetching driver safety by period:', error);
+      res.status(500).json({ error: 'Internal Server Error', message: 'Failed to compute driver safety by period' });
+    }
+  }
+);
+
 export default router;

@@ -119,6 +119,12 @@ export default function DriverDetailPage() {
     return totalFuel > 0 ? totalMiles / totalFuel : undefined;
   }, [fleetUnitsQuery.data, vehicleUtilQuery.data]);
 
+  // Per-mile, Motive-weighted safety sub-score for this driver (backend-computed).
+  const driverSafety = useMemo(
+    () => scorecardQuery.data?.data.find(d => d.driverId === driverId)?.subScores?.safety,
+    [scorecardQuery.data, driverId],
+  );
+
   const kpis = useMemo(() => {
     let totalMiles = 0, totalFuel = 0, totalIdleTime = 0, totalDrivingTime = 0, totalIdleFuel = 0;
     driverRecords.forEach(r => {
@@ -130,16 +136,14 @@ export default function DriverDetailPage() {
     });
     const engineOn = totalIdleTime + totalDrivingTime;
     const idlePct = engineOn > 0 ? (totalIdleTime / engineOn) * 100 : 0;
-    const driveTimePct = engineOn > 0 ? (totalDrivingTime / engineOn) * 100 : 0;
     const avgMpg = totalFuel > 0 && totalMiles > 0 ? totalMiles / totalFuel : 0;
     const driveTimeHours = totalDrivingTime / 3600;
     const drivingFuelGal = Math.max(0, totalFuel - totalIdleFuel);
-    const drivingFuelRatio = totalFuel > 0 ? drivingFuelGal / totalFuel : 1;
-    const score = computeDriverScore({ idlePct, mpg: avgMpg, fleetAvgMpg, driveTimePct, drivingFuelRatio });
+    const score = computeDriverScore({ idlePct, mpg: avgMpg, fleetAvgMpg, safetyScore: driverSafety });
     const idleTimeHrs = totalIdleTime / 3600;
     const engineTimeHrs = (totalIdleTime + totalDrivingTime) / 3600;
     return { totalMiles, totalFuel, avgMpg, idlePct, totalIdleFuel, driveTimeHours, drivingFuelGal, idleTimeHrs, engineTimeHrs, score };
-  }, [driverRecords, fleetAvgMpg]);
+  }, [driverRecords, fleetAvgMpg, driverSafety]);
 
   const monthlyMetrics = useMemo((): MonthlyDriverMetrics[] => {
     const map = new Map<string, {
@@ -182,10 +186,18 @@ export default function DriverDetailPage() {
   const hardEventBreakdown = useMemo(() => {
     const bd = scorecardQuery.data?.data.find(d => d.driverId === driverId)?.hardEventBreakdown;
     if (!bd) return null;
-    const total = bd.hardAccels + bd.hardBrakes + bd.hardCorners;
-    if (total === 0) return null;
-    return bd;
+    const entries = Object.entries(bd)
+      .filter(([, v]) => (v ?? 0) > 0)
+      .map(([key, value]) => ({
+        key,
+        value: value as number,
+        label: key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+      }))
+      .sort((a, b) => b.value - a.value);
+    return entries.length ? entries : null;
   }, [scorecardQuery.data, driverId]);
+
+  const EVENT_COLORS = ['#ef4444', CHART_COLORS.idle, CHART_COLORS.primary, '#f59e0b', '#8b5cf6', '#06b6d4', '#ec4899', '#84cc16', '#64748b'];
 
   const availableYears = useMemo(() => {
     const years = [...new Set(monthlyMetrics.map(m => parseInt(m.monthKey.substring(0, 4))))].sort((a, b) => a - b);
@@ -507,18 +519,14 @@ export default function DriverDetailPage() {
               <ResponsiveContainer width="100%" height={200}>
                 <PieChart>
                   <Pie
-                    data={[
-                      { name: 'Hard Brakes', value: hardEventBreakdown.hardBrakes },
-                      { name: 'Hard Accels', value: hardEventBreakdown.hardAccels },
-                      { name: 'Hard Corners', value: hardEventBreakdown.hardCorners },
-                    ].filter(d => d.value > 0)}
+                    data={hardEventBreakdown.map(e => ({ name: e.label, value: e.value }))}
                     cx="50%" cy="50%"
                     innerRadius={50} outerRadius={75}
                     paddingAngle={3} dataKey="value" isAnimationActive={false}
                   >
-                    <Cell fill="#ef4444" />
-                    <Cell fill={CHART_COLORS.idle} />
-                    <Cell fill={CHART_COLORS.primary} />
+                    {hardEventBreakdown.map((e, i) => (
+                      <Cell key={e.key} fill={EVENT_COLORS[i % EVENT_COLORS.length]} />
+                    ))}
                   </Pie>
                   <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(val) => [`${Number(val)} events`]} />
                   <Legend formatter={(name) => <span style={LEGEND_STYLE}>{name}</span>} />
@@ -559,13 +567,9 @@ export default function DriverDetailPage() {
                   </div>
                 </div>
                 {hardEventBreakdown && (
-                  <div className="grid grid-cols-3 gap-3">
-                    {[
-                      { label: 'Hard Brakes', value: hardEventBreakdown.hardBrakes },
-                      { label: 'Hard Accels', value: hardEventBreakdown.hardAccels },
-                      { label: 'Hard Corners', value: hardEventBreakdown.hardCorners },
-                    ].map(item => (
-                      <div key={item.label} className="rounded-lg bg-muted/40 border border-border p-4 text-center">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    {hardEventBreakdown.map(item => (
+                      <div key={item.key} className="rounded-lg bg-muted/40 border border-border p-4 text-center">
                         <div className="text-2xl font-bold text-foreground">{item.value}</div>
                         <div className="text-xs text-muted-foreground mt-1 uppercase tracking-wide">{item.label}</div>
                       </div>

@@ -1,35 +1,34 @@
 /**
- * Driver score computation — weighted composite of efficiency, behavior, and safety metrics.
+ * Driver score — 3-lever, cost-led composite.
  *
  * Score range: 0–100
  *
  * Category weights:
- *   Idle %         → 30%  (lower idle = better fuel savings)
- *   MPG efficiency → 25%  (relative to fleet average)
- *   Utilization    → 15%  (drive time / total engine time)
- *   Fuel economy   → 10%  (driving fuel as share of total — lower idle fuel share)
- *   Safety         → 20%  (fewer violations = higher score)
+ *   Idle %   → 40%  (lower idle = less wasted fuel/$ — also absorbs the old
+ *                     "fuel economy" metric, which was a duplicate idle signal)
+ *   MPG      → 35%  (efficiency relative to fleet average)
+ *   Safety   → 25%  (per-mile, Motive-weighted event rate — computed backend-side
+ *                     in safetyScore.ts; passed in here as a 0–100 sub-score)
+ *
+ * Utilization was removed. Safety is NOT computed here: the per-mile weighted
+ * rate needs the raw event stream, so the backend supplies `safetyScore`.
  */
 
 export interface DriverScoreInput {
   idlePct: number;
   mpg: number;
   fleetAvgMpg?: number;
-  driveTimePct?: number;
-  drivingFuelRatio?: number;
-  safetyViolations?: number;
+  /** Backend per-mile safety sub-score (0–100). Absent → 100 (no penalty). */
+  safetyScore?: number;
 }
 
 export const SCORE_WEIGHTS = {
-  idle: 0.30,
-  mpg: 0.25,
-  utilization: 0.15,
-  fuelEconomy: 0.10,
-  safety: 0.20,
+  idle: 0.40,
+  mpg: 0.35,
+  safety: 0.25,
 } as const;
 
 const MAX_SCOREABLE_IDLE_PCT = 50;
-const SAFETY_DECAY_RATE = 12;
 
 export function computeDriverScore(metrics: DriverScoreInput): number {
   // Idle sub-score: 100 at 0% idle, 0 at MAX_SCOREABLE_IDLE_PCT or above
@@ -39,23 +38,13 @@ export function computeDriverScore(metrics: DriverScoreInput): number {
   const refMpg = metrics.fleetAvgMpg && metrics.fleetAvgMpg > 0 ? metrics.fleetAvgMpg : metrics.mpg || 1;
   const mpgScore = Math.max(0, Math.min(100, (metrics.mpg / refMpg) * 60));
 
-  // Utilization sub-score: % of engine-on time spent driving (100% drive = 100 score)
-  const driveTimePct = metrics.driveTimePct ?? (100 - metrics.idlePct);
-  const utilizationScore = Math.max(0, Math.min(100, driveTimePct));
-
-  // Fuel economy sub-score: driving fuel / total fuel ratio (1.0 = no idle fuel burn)
-  const fuelRatio = metrics.drivingFuelRatio ?? 1;
-  const fuelEconomyScore = Math.max(0, Math.min(100, fuelRatio * 100));
-
-  // Safety sub-score: exponential decay per violation (0 violations = 100)
-  const violations = metrics.safetyViolations ?? 0;
-  const safetyScore = Math.max(0, 100 * Math.exp(-violations / SAFETY_DECAY_RATE));
+  // Safety sub-score: precomputed backend-side (per-mile, Motive-weighted).
+  // No data → 100 (a driver with no scored events is not penalized).
+  const safetyScore = Math.max(0, Math.min(100, metrics.safetyScore ?? 100));
 
   return Math.round(
     idleScore * SCORE_WEIGHTS.idle +
     mpgScore * SCORE_WEIGHTS.mpg +
-    utilizationScore * SCORE_WEIGHTS.utilization +
-    fuelEconomyScore * SCORE_WEIGHTS.fuelEconomy +
     safetyScore * SCORE_WEIGHTS.safety
   );
 }

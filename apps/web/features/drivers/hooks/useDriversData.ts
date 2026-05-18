@@ -4,6 +4,7 @@ import {
   useOrgSettingsQuery,
   useDriverUtilizationQuery,
   useDriverScorecardQuery,
+  useDriverSafetyByPeriodQuery,
   useVehicleUtilizationQuery,
   useFleetUnitsQuery,
   type DriverUtilization,
@@ -71,21 +72,22 @@ function buildDriverSums(records: DriverUtilization[]): Map<number, DriverSums> 
   return grouped;
 }
 
-function sumsToRow(sums: DriverSums, fleetAvgMpg: number | undefined, dieselPrice = 5.0): DriverRow {
+function sumsToRow(
+  sums: DriverSums,
+  fleetAvgMpg: number | undefined,
+  dieselPrice = 5.0,
+  safetyScore?: number,
+): DriverRow {
   const engineOnSec = sums.totalIdleTime + sums.totalDrivingTime;
   const idlePct = engineOnSec > 0 ? (sums.totalIdleTime / engineOnSec) * 100 : 0;
-  const driveTimePct = engineOnSec > 0 ? (sums.totalDrivingTime / engineOnSec) * 100 : 0;
   const avgMpg = sums.totalFuel > 0 && sums.totalMiles > 0 ? sums.totalMiles / sums.totalFuel : 0;
   const drivingFuelGal = Math.max(0, sums.totalFuel - sums.totalIdleFuel);
-  const drivingFuelRatio = sums.totalFuel > 0 ? drivingFuelGal / sums.totalFuel : 1;
   const utilPct = sums.recordCount > 0 ? (engineOnSec / (sums.recordCount * 86400)) * 100 : 0;
   const score = computeDriverScore({
     idlePct,
     mpg: avgMpg,
     fleetAvgMpg,
-    driveTimePct,
-    drivingFuelRatio,
-    safetyViolations: 0,
+    safetyScore,
   });
   return {
     driverId: sums.driverId,
@@ -154,10 +156,14 @@ export function useDriversData(startDate: string, endDate: string, scorecardEnab
   const driverRows = useMemo((): DriverRow[] => {
     const grouped = buildDriverSums(periodRecords);
     const hardEventsMap = new Map<number, number>();
-    scorecardQuery.data?.data.forEach(d => hardEventsMap.set(d.driverId, d.hardEvents ?? 0));
+    const safetyMap = new Map<number, number>();
+    scorecardQuery.data?.data.forEach(d => {
+      hardEventsMap.set(d.driverId, d.hardEvents ?? 0);
+      if (typeof d.subScores?.safety === 'number') safetyMap.set(d.driverId, d.subScores.safety);
+    });
     return Array.from(grouped.values())
       .map(sums => {
-        const row = sumsToRow(sums, fleetAvgMpg, dieselPrice);
+        const row = sumsToRow(sums, fleetAvgMpg, dieselPrice, safetyMap.get(sums.driverId));
         row.hardEvents = hardEventsMap.get(sums.driverId) ?? 0;
         return row;
       })
@@ -187,6 +193,29 @@ export function useDriversData(startDate: string, endDate: string, scorecardEnab
       return localDateStr(weekStart);
     });
   }, []);
+
+  // Per-period safety sub-score for every MoM month + WoW week, so the trend
+  // grids use the SAME per-mile, Motive-weighted safety as the headline score.
+  // Month key YYYY-MM → [YYYY-MM-01, last day]; week key (Mon) → [Mon, Mon+6].
+  const safetyPeriods = useMemo(() => {
+    const out: { key: string; startDate: string; endDate: string }[] = [];
+    for (const mk of months) {
+      const [y, m] = mk.split('-').map(Number);
+      const last = new Date(y, m, 0).getDate();
+      out.push({ key: mk, startDate: `${mk}-01`, endDate: `${mk}-${String(last).padStart(2, '0')}` });
+    }
+    for (const wk of weeks) {
+      const d = new Date(wk + 'T00:00:00');
+      d.setDate(d.getDate() + 6);
+      out.push({ key: wk, startDate: wk, endDate: localDateStr(d) });
+    }
+    return out;
+  }, [months, weeks]);
+  const safetyByPeriodQuery = useDriverSafetyByPeriodQuery(canShow, safetyPeriods);
+  const safetyByKey = useMemo(
+    () => safetyByPeriodQuery.data ?? {},
+    [safetyByPeriodQuery.data],
+  );
 
   // Weekly breakdown for the WoW view (uses all raw data, no period filter)
   const weeklyByDriver = useMemo((): Map<number, WeeklyDriverData> => {
@@ -226,12 +255,12 @@ export function useDriversData(startDate: string, endDate: string, scorecardEnab
       const driverName = driverNames.get(driverId) || `Driver ${driverId}`;
       const weekRows = new Map<string, DriverRow>();
       weekMap.forEach((sums, weekKey) => {
-        weekRows.set(weekKey, sumsToRow(sums, fleetAvgMpg, dieselPrice));
+        weekRows.set(weekKey, sumsToRow(sums, fleetAvgMpg, dieselPrice, safetyByKey[weekKey]?.[driverId]));
       });
       result.set(driverId, { driverName, weeks: weekRows });
     });
     return result;
-  }, [driverUtilQuery.data, weeks, fleetAvgMpg]);
+  }, [driverUtilQuery.data, weeks, fleetAvgMpg, safetyByKey]);
 
   // Monthly breakdown for the MoM view (uses all raw data, no period filter)
   const monthlyByDriver = useMemo((): Map<number, MonthlyDriverData> => {
@@ -271,12 +300,12 @@ export function useDriversData(startDate: string, endDate: string, scorecardEnab
       const driverName = driverNames.get(driverId) || `Driver ${driverId}`;
       const monthRows = new Map<string, DriverRow>();
       monthMap.forEach((sums, monthKey) => {
-        monthRows.set(monthKey, sumsToRow(sums, fleetAvgMpg, dieselPrice));
+        monthRows.set(monthKey, sumsToRow(sums, fleetAvgMpg, dieselPrice, safetyByKey[monthKey]?.[driverId]));
       });
       result.set(driverId, { driverName, months: monthRows });
     });
     return result;
-  }, [driverUtilQuery.data, months, fleetAvgMpg]);
+  }, [driverUtilQuery.data, months, fleetAvgMpg, safetyByKey]);
 
   // Match fleet: do not show infinite loading when org is not yet selected (queries disabled).
   // Driver utilization is the main table; scorecard (hard events) can finish slightly later.

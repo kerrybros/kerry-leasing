@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
 
 interface DateRangePickerProps {
   startDate: string;
@@ -108,23 +109,37 @@ export function DateRangePicker({
   const [activePreset, setActivePreset] = useState<PresetId>(
     () => detectPreset(startDate, endDate)
   );
+  // Draft values for the manual date inputs. They're applied only when the
+  // user clicks "Apply Dates" (or presses Enter) so we don't refetch the
+  // whole range on every keystroke. Presets still apply immediately — a
+  // preset is a single deliberate action, not a per-character change.
+  const [draftStart, setDraftStart] = useState(startDate);
+  const [draftEnd, setDraftEnd] = useState(endDate);
 
   useEffect(() => {
     setActivePreset(detectPreset(startDate, endDate));
+    setDraftStart(startDate);
+    setDraftEnd(endDate);
   }, [startDate, endDate]);
 
   const applyPreset = (preset: PresetId) => {
     const range = computePreset(preset);
     if (!range) return;
     setActivePreset(preset);
+    setDraftStart(range.start);
+    setDraftEnd(range.end);
     onStartDateChange(range.start);
     onEndDateChange(range.end);
   };
 
-  const handleManualChange = (type: 'start' | 'end', value: string) => {
-    setActivePreset('custom');
-    if (type === 'start') onStartDateChange(value);
-    else onEndDateChange(value);
+  const pending = draftStart !== startDate || draftEnd !== endDate;
+  const invalid = !!draftStart && !!draftEnd && draftStart > draftEnd;
+
+  const applyDraft = () => {
+    if (!pending || invalid) return;
+    setActivePreset(detectPreset(draftStart, draftEnd));
+    onStartDateChange(draftStart);
+    onEndDateChange(draftEnd);
   };
 
   return (
@@ -146,21 +161,32 @@ export function DateRangePicker({
 
       <Input
         type="date"
-        value={startDate}
+        value={draftStart}
         min={minDate}
         max={todayStr}
-        onChange={e => handleManualChange('start', e.target.value)}
+        onChange={e => { setActivePreset('custom'); setDraftStart(e.target.value); }}
+        onKeyDown={e => { if (e.key === 'Enter') applyDraft(); }}
         className="w-[138px] h-9 text-sm"
       />
       <span className="text-muted-foreground text-xs">to</span>
       <Input
         type="date"
-        value={endDate}
-        min={startDate}
+        value={draftEnd}
+        min={draftStart}
         max={todayStr}
-        onChange={e => handleManualChange('end', e.target.value)}
+        onChange={e => { setActivePreset('custom'); setDraftEnd(e.target.value); }}
+        onKeyDown={e => { if (e.key === 'Enter') applyDraft(); }}
         className="w-[138px] h-9 text-sm"
       />
+      <Button
+        size="sm"
+        onClick={applyDraft}
+        disabled={!pending || invalid}
+        className="h-9"
+        title={invalid ? 'Start date must be on or before end date' : undefined}
+      >
+        Apply Dates
+      </Button>
     </div>
   );
 }
