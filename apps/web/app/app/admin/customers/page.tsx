@@ -7,6 +7,8 @@ import { Skeleton } from '@/components/Skeleton';
 import { useApiClient } from '@/hooks/useApiClient';
 import { AddCustomerDrawer } from '@/features/admin/components/AddCustomerDrawer';
 
+type BackdateStatus = 'RUNNING' | 'COMPLETED' | 'FAILED';
+
 interface OrgRow {
   clerkOrgId: string;
   displayName: string | null;
@@ -14,12 +16,39 @@ interface OrgRow {
   status: 'ACTIVE' | 'ERROR' | 'DISABLED';
   lastSyncAt: string | null;
   lastError: string | null;
+  backdateStatus: BackdateStatus | null;
+  backdateStartedAt: string | null;
+  lastBackdateReport: { error?: string; failedAt?: string; completedAt?: string } | null;
   vehicleCount: number;
   repairCustomerName: string | null;
   contractStartDate: string | null;
   tracksDrivers: boolean;
   contractTermYears: number | null;
   createdAt: string;
+}
+
+// If a backdate has been RUNNING for longer than this, treat it as stuck —
+// the API process most likely died mid-loop. Picked conservatively: a 5-year
+// Motive backfill for a 100-vehicle fleet finishes well inside this window.
+const BACKDATE_STUCK_AFTER_HOURS = 6;
+
+type DisplayStatus =
+  | { kind: 'backfilling'; elapsedHours: number }
+  | { kind: 'backfill-stuck'; elapsedHours: number }
+  | { kind: 'backfill-failed'; error: string | null }
+  | { kind: 'provider'; status: OrgRow['status'] };
+
+function deriveDisplayStatus(org: OrgRow): DisplayStatus {
+  if (org.backdateStatus === 'RUNNING' && org.backdateStartedAt) {
+    const elapsedHours = (Date.now() - new Date(org.backdateStartedAt).getTime()) / 3_600_000;
+    return elapsedHours > BACKDATE_STUCK_AFTER_HOURS
+      ? { kind: 'backfill-stuck', elapsedHours }
+      : { kind: 'backfilling', elapsedHours };
+  }
+  if (org.backdateStatus === 'FAILED') {
+    return { kind: 'backfill-failed', error: org.lastBackdateReport?.error ?? org.lastError ?? null };
+  }
+  return { kind: 'provider', status: org.status };
 }
 
 function timeAgo(iso: string | null): string {
@@ -42,6 +71,48 @@ function StatusBadge({ status }: { status: OrgRow['status'] }) {
   return (
     <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${styles[status]}`}>
       {status.charAt(0) + status.slice(1).toLowerCase()}
+    </span>
+  );
+}
+
+function DisplayStatusBadge({ display }: { display: DisplayStatus }) {
+  if (display.kind === 'provider') return <StatusBadge status={display.status} />;
+
+  if (display.kind === 'backfilling') {
+    const elapsed = display.elapsedHours < 1
+      ? `${Math.max(1, Math.round(display.elapsedHours * 60))}m`
+      : `${display.elapsedHours.toFixed(1)}h`;
+    return (
+      <span
+        title={`Historical backfill in progress (running ${elapsed})`}
+        className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
+      >
+        <svg className="w-3 h-3 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+        </svg>
+        Backfilling
+      </span>
+    );
+  }
+
+  if (display.kind === 'backfill-stuck') {
+    return (
+      <span
+        title={`Backfill has been running for ${display.elapsedHours.toFixed(1)}h with no completion — probably stuck. Re-run from CLI: pnpm backdate`}
+        className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300"
+      >
+        Backfill stuck
+      </span>
+    );
+  }
+
+  // backfill-failed
+  return (
+    <span
+      title={display.error ?? 'Backfill failed — see Last Error column'}
+      className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
+    >
+      Backfill failed
     </span>
   );
 }
@@ -195,7 +266,7 @@ export default function CustomersPage() {
                     <ProviderBadge provider={org.provider} />
                   </td>
                   <td className="px-4 py-3">
-                    <StatusBadge status={org.status} />
+                    <DisplayStatusBadge display={deriveDisplayStatus(org)} />
                   </td>
                   <td className="px-4 py-3 text-muted-foreground text-xs">
                     {timeAgo(org.lastSyncAt)}
