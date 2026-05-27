@@ -96,6 +96,8 @@ model TelematicsProviderAccount {
   lastSyncAt      DateTime?                  @map("last_sync_at")
   lastError       String?                    @map("last_error")
   lastBackdateReport Json?                   @map("last_backdate_report")
+  backdateStatus     BackdateStatus?         @map("backdate_status")
+  backdateStartedAt  DateTime?               @map("backdate_started_at")
   createdAt       DateTime                   @default(now()) @map("created_at")
   updatedAt       DateTime                   @updatedAt @map("updated_at")
 
@@ -444,6 +446,12 @@ enum TelematicsProviderStatus {
   ACTIVE
   ERROR
   DISABLED
+}
+
+enum BackdateStatus {
+  RUNNING
+  COMPLETED
+  FAILED
 }
 
 // Service Plan Units: Links repair units to telematics and manages inclusion

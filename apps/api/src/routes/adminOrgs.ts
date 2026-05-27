@@ -90,6 +90,9 @@ router.get('/', async (_req: AuthRequest, res) => {
           status: acct.status,
           lastSyncAt: acct.lastSyncAt,
           lastError: acct.lastError,
+          backdateStatus: acct.backdateStatus,
+          backdateStartedAt: acct.backdateStartedAt,
+          lastBackdateReport: acct.lastBackdateReport,
           vehicleCount: vehicleMap.get(acct.clerkOrgId) ?? 0,
           repairCustomerName: repair?.customerName ?? null,
           contractStartDate: repair?.contractStartDate
@@ -211,95 +214,125 @@ router.post('/create', async (req: AuthRequest, res) => {
     if (!apiKey?.trim()) return res.status(400).json({ error: 'apiKey is required' });
     if (!contractStartDate) return res.status(400).json({ error: 'contractStartDate is required' });
 
-    // 1. Create Clerk organization
-    const clerkOrg = await clerk.organizations.createOrganization({
-      name: displayName.trim(),
-    });
-    const clerkOrgId = clerkOrg.id;
-
-    // Add the onboarding user as an org:admin automatically
-    const onboardingUserId = (req as AuthRequest).auth?.userId;
-    if (onboardingUserId) {
-      await clerk.organizations.createOrganizationMembership({
-        organizationId: clerkOrgId,
-        userId: onboardingUserId,
-        role: 'org:admin',
+    // Repair link is all-or-nothing — having one without the other produces a
+    // half-linked org that some queries find and others don't.
+    const hasRepairId = !!repairCustomerId?.trim();
+    const hasRepairName = !!repairCustomerName?.trim();
+    if (hasRepairId !== hasRepairName) {
+      return res.status(400).json({
+        error: 'repairCustomerId and repairCustomerName must be provided together (or both omitted)',
       });
     }
 
-    // 2. Encrypt credentials
-    const credentials = provider === 'MOTIVE'
-      ? { apiKey: apiKey.trim() }
-      : { apiToken: apiKey.trim() };
-    const encryptedCredentials = encryptCredentials(credentials);
+    const onboardingUserId = (req as AuthRequest).auth?.userId;
+    if (!onboardingUserId) {
+      return res.status(401).json({ error: 'Authenticated userId required to create org (Clerk createdBy)' });
+    }
 
-    // 3. Write all DB records in a transaction
-    const appPrisma = getAppPrisma();
-    await appPrisma.$transaction(async (tx) => {
-      await tx.telematicsProviderAccount.create({
-        data: {
-          clerkOrgId,
-          provider: provider as 'MOTIVE' | 'SAMSARA',
-          credentialsJson: encryptedCredentials,
-          status: 'ACTIVE',
-        },
-      });
+    // 1. Create Clerk organization. createdBy is required by Clerk's API and
+    // auto-adds the user as org:admin — no separate membership call needed.
+    const clerkOrg = await clerk.organizations.createOrganization({
+      name: displayName.trim(),
+      createdBy: onboardingUserId,
+    });
+    const clerkOrgId = clerkOrg.id;
 
-      await tx.organizationSettings.create({
-        data: {
-          clerkOrgId,
-          tracksDrivers: Boolean(tracksDrivers),
-          contractTermYears: contractTermYears ?? null,
-          serviceRequestUrl: serviceRequestUrl?.trim() || null,
-        },
-      });
+    // Everything past this point may leave an orphaned Clerk org if it fails,
+    // so wrap in a rollback try/catch.
+    try {
+      // 2. Encrypt credentials
+      const credentials = provider === 'MOTIVE'
+        ? { apiKey: apiKey.trim() }
+        : { apiToken: apiKey.trim() };
+      const encryptedCredentials = encryptCredentials(credentials);
 
-      if (repairCustomerName?.trim()) {
-        await tx.repairCustomerConfig.create({
-          data: {
-            klOrgId: clerkOrgId,
-            customerName: repairCustomerName.trim(),
-            contractStartDate: new Date(contractStartDate),
-          },
-        });
-      }
-
-      if (repairCustomerId?.trim()) {
-        await tx.customerOrgMap.create({
+      // 3. Write all DB records in a transaction
+      const appPrisma = getAppPrisma();
+      await appPrisma.$transaction(async (tx) => {
+        await tx.telematicsProviderAccount.create({
           data: {
             clerkOrgId,
-            customerId: repairCustomerId.trim(),
+            provider: provider as 'MOTIVE' | 'SAMSARA',
+            credentialsJson: encryptedCredentials,
+            status: 'ACTIVE',
+            // The setImmediate backdate runs *after* the response, so without
+            // this the row exists for a beat with backdateStatus=NULL and the
+            // UI shows "never backfilled" instead of "in flight."
+            backdateStatus: 'RUNNING',
+            backdateStartedAt: new Date(),
           },
         });
-      }
-    });
 
-    // 4. Fire backdate + service plan sync in background (non-blocking)
-    const backdateStart = contractStartDate;
-    const backdateEnd = new Date().toISOString().split('T')[0];
+        await tx.organizationSettings.create({
+          data: {
+            clerkOrgId,
+            tracksDrivers: Boolean(tracksDrivers),
+            contractTermYears: contractTermYears ?? null,
+            serviceRequestUrl: serviceRequestUrl?.trim() || null,
+          },
+        });
 
-    setImmediate(async () => {
+        if (hasRepairName) {
+          await tx.repairCustomerConfig.create({
+            data: {
+              klOrgId: clerkOrgId,
+              customerName: repairCustomerName!.trim(),
+              contractStartDate: new Date(contractStartDate),
+            },
+          });
+        }
+
+        if (hasRepairId) {
+          await tx.customerOrgMap.create({
+            data: {
+              clerkOrgId,
+              customerId: repairCustomerId!.trim(),
+            },
+          });
+        }
+      });
+
+      // 4. Fire backdate + service plan sync in background (non-blocking)
+      const backdateStart = contractStartDate;
+      const backdateEnd = new Date().toISOString().split('T')[0];
+
+      setImmediate(async () => {
+        try {
+          console.log(`[adminOrgs] Starting backdate for ${clerkOrgId} (${backdateStart} → ${backdateEnd})`);
+          const run = provider === 'MOTIVE'
+            ? backdateMotiveData({ clerkOrgId, startDate: backdateStart, endDate: backdateEnd })
+            : backdateSamsaraData({ clerkOrgId, startDate: backdateStart, endDate: backdateEnd });
+          await run;
+          console.log(`[adminOrgs] Backdate complete for ${clerkOrgId}. Triggering service plan sync...`);
+          await triggerServicePlanSync(clerkOrgId, repairCustomerName?.trim() ?? null, new Date(contractStartDate), provider as 'MOTIVE' | 'SAMSARA');
+        } catch (err) {
+          console.error(`[adminOrgs] Background setup failed for ${clerkOrgId}:`, err);
+        }
+      });
+
+      res.json({
+        ok: true,
+        clerkOrgId,
+        displayName: displayName.trim(),
+        provider,
+        backdateStarted: true,
+        backdateRange: { start: backdateStart, end: backdateEnd },
+      });
+    } catch (innerErr) {
+      // Rollback: delete the Clerk org so we don't leave it dangling without
+      // app-DB rows. Best-effort — if rollback itself fails, we log loudly so
+      // an operator can clean up by hand.
       try {
-        console.log(`[adminOrgs] Starting backdate for ${clerkOrgId} (${backdateStart} → ${backdateEnd})`);
-        const run = provider === 'MOTIVE'
-          ? backdateMotiveData({ clerkOrgId, startDate: backdateStart, endDate: backdateEnd })
-          : backdateSamsaraData({ clerkOrgId, startDate: backdateStart, endDate: backdateEnd });
-        await run;
-        console.log(`[adminOrgs] Backdate complete for ${clerkOrgId}. Triggering service plan sync...`);
-        await triggerServicePlanSync(clerkOrgId, repairCustomerName?.trim() ?? null, new Date(contractStartDate), provider as 'MOTIVE' | 'SAMSARA');
-      } catch (err) {
-        console.error(`[adminOrgs] Background setup failed for ${clerkOrgId}:`, err);
+        await clerk.organizations.deleteOrganization(clerkOrgId);
+        console.error(`[adminOrgs] Rolled back Clerk org ${clerkOrgId} after failed setup:`, innerErr);
+      } catch (rollbackErr) {
+        console.error(`[adminOrgs] FAILED to roll back Clerk org ${clerkOrgId} — manual cleanup required.`, {
+          original: innerErr,
+          rollback: rollbackErr,
+        });
       }
-    });
-
-    res.json({
-      ok: true,
-      clerkOrgId,
-      displayName: displayName.trim(),
-      provider,
-      backdateStarted: true,
-      backdateRange: { start: backdateStart, end: backdateEnd },
-    });
+      throw innerErr;
+    }
   } catch (err: any) {
     console.error('[adminOrgs] POST /admin/orgs/create error:', err);
     res.status(500).json({ error: err.message ?? 'Failed to create org' });

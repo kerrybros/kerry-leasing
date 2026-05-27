@@ -118,72 +118,99 @@ export async function backdateMotiveData(options: BackdateOptions): Promise<void
   const apiKey = readCredentials(providerAccount.credentialsJson).apiKey as string;
   if (!apiKey) throw new Error(`No API key in credentials for ${clerkOrgId}`);
 
-  const dates = getDateRange(startDate, endDate);
-  console.log(`  ${dates.length} days to process\n`);
-
-  const dayReports: DayReport[] = [];
-
-  for (let i = 0; i < dates.length; i++) {
-    const date = dates[i];
-    const verify = isWithinVerifyWindow(date, MOTIVE_VERIFY_DAYS);
-    const progress = `[${String(i + 1).padStart(String(dates.length).length)}/${dates.length}]`;
-    const modeTag = verify ? ' (verify)' : '';
-
-    try {
-      const result = await syncMotiveOrgForDate(clerkOrgId, apiKey, date, verify);
-
-      const totalNew = result.results.reduce((s, r) => s + r.newCount, 0);
-      const totalUpdated = result.results.reduce((s, r) => s + r.updatedCount, 0);
-      const totalErrors = result.results.reduce((s, r) => s + r.errorCount, 0);
-
-      const statusIcon = result.success ? '✓' : '✗';
-      console.log(
-        `  ${progress} ${date}${modeTag}  ${statusIcon}  ` +
-        `new=${totalNew} updated=${totalUpdated} errors=${totalErrors}  ` +
-        `(${Math.round(result.duration / 1000)}s)`
-      );
-
-      dayReports.push({
-        date,
-        success: result.success,
-        verify,
-        duration: result.duration,
-        results: result.results,
-        error: result.error,
-      });
-    } catch (err: any) {
-      console.error(`  ${progress} ${date}${modeTag}  ✗  ${err.message}`);
-      dayReports.push({ date, success: false, verify, duration: 0, results: [], error: err.message });
-    }
-
-    // Courtesy delay — avoids hammering Motive API
-    if (i < dates.length - 1) {
-      await new Promise((r) => setTimeout(r, 1500));
-    }
-  }
-
-  const successCount = dayReports.filter((d) => d.success).length;
-  const errorCount = dayReports.filter((d) => !d.success).length;
-  const errors = dayReports.filter((d) => !d.success).map((d) => ({ date: d.date, error: d.error ?? 'unknown' }));
-
-  // Write run report to DB
+  // Mark RUNNING so the admin UI can show the backfill is in flight. The rest
+  // of the function is wrapped in try/catch so an unexpected throw lands as
+  // FAILED instead of leaving the row stuck on RUNNING.
   await appPrisma.telematicsProviderAccount.update({
     where: { id: providerAccount.id },
-    data: {
-      lastError: errors.length > 0 ? `Backdate completed with ${errors.length} errors` : null,
-      lastBackdateReport: {
-        completedAt: new Date().toISOString(),
-        startDate,
-        endDate,
-        totalDays: dates.length,
-        successCount,
-        errorCount,
-        failedDates: errors,
-      } as any,
-    },
+    data: { backdateStatus: 'RUNNING', backdateStartedAt: new Date() },
   });
 
-  printSummaryTable(dayReports, `${clerkOrgId}  ${startDate} → ${endDate}`);
+  try {
+    const dates = getDateRange(startDate, endDate);
+    console.log(`  ${dates.length} days to process\n`);
+
+    const dayReports: DayReport[] = [];
+
+    for (let i = 0; i < dates.length; i++) {
+      const date = dates[i];
+      const verify = isWithinVerifyWindow(date, MOTIVE_VERIFY_DAYS);
+      const progress = `[${String(i + 1).padStart(String(dates.length).length)}/${dates.length}]`;
+      const modeTag = verify ? ' (verify)' : '';
+
+      try {
+        const result = await syncMotiveOrgForDate(clerkOrgId, apiKey, date, verify);
+
+        const totalNew = result.results.reduce((s, r) => s + r.newCount, 0);
+        const totalUpdated = result.results.reduce((s, r) => s + r.updatedCount, 0);
+        const totalErrors = result.results.reduce((s, r) => s + r.errorCount, 0);
+
+        const statusIcon = result.success ? '✓' : '✗';
+        console.log(
+          `  ${progress} ${date}${modeTag}  ${statusIcon}  ` +
+          `new=${totalNew} updated=${totalUpdated} errors=${totalErrors}  ` +
+          `(${Math.round(result.duration / 1000)}s)`
+        );
+
+        dayReports.push({
+          date,
+          success: result.success,
+          verify,
+          duration: result.duration,
+          results: result.results,
+          error: result.error,
+        });
+      } catch (err: any) {
+        console.error(`  ${progress} ${date}${modeTag}  ✗  ${err.message}`);
+        dayReports.push({ date, success: false, verify, duration: 0, results: [], error: err.message });
+      }
+
+      // Courtesy delay — avoids hammering Motive API
+      if (i < dates.length - 1) {
+        await new Promise((r) => setTimeout(r, 1500));
+      }
+    }
+
+    const successCount = dayReports.filter((d) => d.success).length;
+    const errorCount = dayReports.filter((d) => !d.success).length;
+    const errors = dayReports.filter((d) => !d.success).map((d) => ({ date: d.date, error: d.error ?? 'unknown' }));
+
+    // Write run report + COMPLETED status
+    await appPrisma.telematicsProviderAccount.update({
+      where: { id: providerAccount.id },
+      data: {
+        backdateStatus: 'COMPLETED',
+        lastError: errors.length > 0 ? `Backdate completed with ${errors.length} errors` : null,
+        lastBackdateReport: {
+          completedAt: new Date().toISOString(),
+          startDate,
+          endDate,
+          totalDays: dates.length,
+          successCount,
+          errorCount,
+          failedDates: errors,
+        } as any,
+      },
+    });
+
+    printSummaryTable(dayReports, `${clerkOrgId}  ${startDate} → ${endDate}`);
+  } catch (err: any) {
+    const message = err?.message ?? String(err);
+    await appPrisma.telematicsProviderAccount.update({
+      where: { id: providerAccount.id },
+      data: {
+        backdateStatus: 'FAILED',
+        lastError: message,
+        lastBackdateReport: {
+          failedAt: new Date().toISOString(),
+          startDate,
+          endDate,
+          error: message,
+        } as any,
+      },
+    });
+    throw err;
+  }
 }
 
 function parseArgs(): BackdateOptions {
