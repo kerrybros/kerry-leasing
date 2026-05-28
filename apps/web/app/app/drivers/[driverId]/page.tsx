@@ -81,7 +81,8 @@ export default function DriverDetailPage() {
   const periodLabel = selectedPeriod === 'all' ? 'All Time' : PERIODS.find(p => p.id === selectedPeriod)!.label;
 
   const orgSettingsQuery = useOrgSettingsQuery();
-  const canQuery = !!(orgSettingsQuery.data?.tracksDrivers && orgSettingsQuery.data?.telematicsProvider === 'MOTIVE');
+  const provider = orgSettingsQuery.data?.telematicsProvider;
+  const canQuery = !!(orgSettingsQuery.data?.tracksDrivers && (provider === 'MOTIVE' || provider === 'SAMSARA'));
   const driverUtilQuery = useDriverUtilizationQuery(canQuery);
   const scorecardQuery = useDriverScorecardQuery(canQuery);
   const fleetUnitsQuery = useFleetUnitsQuery();

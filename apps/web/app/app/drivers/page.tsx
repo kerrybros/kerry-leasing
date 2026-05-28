@@ -549,7 +549,7 @@ export default function ScorecardPage() {
           description={
             !orgSettingsQuery.data?.tracksDrivers
               ? 'Driver tracking is not enabled for this organization. Enable it in Org Settings.'
-              : 'Driver data requires a Motive telematics integration.'
+              : 'Driver data requires a Motive or Samsara telematics integration.'
           }
         />
       </div>

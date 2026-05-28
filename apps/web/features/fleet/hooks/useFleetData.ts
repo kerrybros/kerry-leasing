@@ -45,7 +45,9 @@ export function useFleetData() {
   const orgSettings = orgSettingsQuery.data ?? defaultOrgSettings;
 
   const vehicleUtilQuery = useVehicleUtilizationQuery();
-  const canLoadDrivers = orgSettings.tracksDrivers && orgSettings.telematicsProvider === 'MOTIVE';
+  const canLoadDrivers =
+    orgSettings.tracksDrivers &&
+    (orgSettings.telematicsProvider === 'MOTIVE' || orgSettings.telematicsProvider === 'SAMSARA');
   const driverUtilQuery = useDriverUtilizationQuery(canLoadDrivers ?? false);
   // Repairs are loaded as a bounded, grow-only window. Default = trailing 12
   // months (covers the "this year" preset instantly and stays small enough to

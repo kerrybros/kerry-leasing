@@ -486,7 +486,7 @@ export function useServicePlanSummaryQuery() {
 
 /**
  * Driver scorecard — weighted composite score per driver for the given date range.
- * Currently Motive-only. Returns empty data for Samsara orgs.
+ * Provider-agnostic: backend normalizes Motive and Samsara into the same shape.
  */
 export function useDriverScorecardQuery(
   enabled = true,

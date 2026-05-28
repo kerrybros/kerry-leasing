@@ -10,6 +10,7 @@ import { clerkAuthMiddleware, requireOrg, AuthRequest } from '../middleware/auth
 import { getAppPrisma, getRepairPrisma } from '../lib/prisma.js';
 import { REPAIR_SHOP_ORG_ID } from '../config/repairShop.js';
 import { getSamsaraIdleAggregatesByDate } from '../telematics/samsara/idleAggregates.js';
+import { SamsaraConversions } from '../telematics/samsara/endpoints/fuelEnergyReports.js';
 import { getDieselPricePerGallon } from '../lib/eiaFuelPrice.js';
 import { cacheGetOrSet, getRedis } from '../lib/redis.js';
 import { config } from '../config.js';
@@ -604,24 +605,63 @@ router.get('/units/:identifier', clerkAuthMiddleware, requireOrg, async (req: Au
 
 /**
  * GET /fleet/geofences
- * Returns active Motive geofences for the org (id, name, category, locationPoints, address).
+ * Returns geofences for the org. Provider-agnostic: unions Motive `motive_geofences`
+ * (polygon-only) with Samsara `samsara_addresses` (polygons + polygon-converted circles).
+ * Frontend treats both identically via the shared `locationPoints` shape.
  */
 router.get('/geofences', clerkAuthMiddleware, requireOrg, async (req: AuthRequest, res) => {
   try {
     const clerkOrgId = req.auth!.orgId!;
     const appPrisma = getAppPrisma();
 
-    const geofences = await appPrisma.motiveGeofence.findMany({
-      where: { clerkOrgId, status: 'active' },
-      select: {
-        id: true,
-        name: true,
-        category: true,
-        locationPoints: true,
-        address: true,
-      },
-      orderBy: { name: 'asc' },
+    const providerAccount = await appPrisma.telematicsProviderAccount.findUnique({
+      where: { clerkOrgId },
+      select: { provider: true },
     });
+
+    let geofences: Array<{
+      id: string;
+      name: string;
+      category: string | null;
+      locationPoints: any;
+      address: string | null;
+    }> = [];
+
+    if (providerAccount?.provider === 'MOTIVE') {
+      const rows = await appPrisma.motiveGeofence.findMany({
+        where: { clerkOrgId, status: 'active' },
+        select: { id: true, name: true, category: true, locationPoints: true, address: true },
+        orderBy: { name: 'asc' },
+      });
+      geofences = rows.map(r => ({
+        id: r.id,
+        name: r.name,
+        category: r.category ?? null,
+        locationPoints: r.locationPoints,
+        address: r.address ?? null,
+      }));
+    } else if (providerAccount?.provider === 'SAMSARA') {
+      const rows = await appPrisma.samsaraAddress.findMany({
+        where: { clerkOrgId },
+        select: {
+          id: true,
+          name: true,
+          formattedAddress: true,
+          locationPoints: true,
+          geofenceType: true,
+        },
+        orderBy: { name: 'asc' },
+      });
+      geofences = rows.map(r => ({
+        id: r.id,
+        name: r.name,
+        // Samsara has no built-in category; surface the geometry type so the
+        // frontend can still distinguish polygons vs (converted) circles if needed.
+        category: r.geofenceType ?? null,
+        locationPoints: r.locationPoints,
+        address: r.formattedAddress ?? null,
+      }));
+    }
 
     res.json({ geofences });
   } catch (error: any) {
@@ -757,9 +797,14 @@ router.get('/idle-events', clerkAuthMiddleware, requireOrg, async (req: AuthRequ
           id: true,
           assetId: true,
           startTime: true,
+          endTime: true,
           eventDate: true,
           durationMilliseconds: true,
           fuelConsumedMilliliters: true,
+          latitude: true,
+          longitude: true,
+          operatorId: true,
+          addressId: true,
         },
       });
       // Build set of included Samsara assetIds via VIN cross-reference
@@ -769,18 +814,61 @@ router.get('/idle-events', clerkAuthMiddleware, requireOrg, async (req: AuthRequ
       const unitTypeByAssetId = new Map(
         vehicleMaps.filter(v => v.vin).map(v => [v.providerVehicleId, unitTypeByVin.get(v.vin!) ?? null])
       );
+
+      // Resolve operator_id → driver name and address_id → formattedAddress in one round-trip each.
+      const operatorIds = Array.from(new Set(rows.map(r => r.operatorId).filter((x): x is string => !!x)));
+      const addressIds = Array.from(new Set(rows.map(r => r.addressId).filter((x): x is string => !!x)));
+
+      const [drivers, addresses] = await Promise.all([
+        operatorIds.length > 0
+          ? appPrisma.samsaraDriver.findMany({
+              where: { clerkOrgId, samsaraDriverId: { in: operatorIds } },
+              select: { samsaraDriverId: true, firstName: true, lastName: true, name: true },
+            })
+          : Promise.resolve([]),
+        addressIds.length > 0
+          ? appPrisma.samsaraAddress.findMany({
+              where: { clerkOrgId, samsaraAddressId: { in: addressIds } },
+              select: { samsaraAddressId: true, name: true, formattedAddress: true },
+            })
+          : Promise.resolve([]),
+      ]);
+
+      const driverById = new Map(drivers.map(d => [d.samsaraDriverId, d]));
+      const addressById = new Map(addresses.map(a => [a.samsaraAddressId, a]));
+
       for (const r of rows) {
         if (includedAssetIds.size > 0 && !includedAssetIds.has(r.assetId)) continue;
+
+        const drv = r.operatorId ? driverById.get(r.operatorId) : null;
+        let driverFirstName: string | null = null;
+        let driverLastName: string | null = null;
+        if (drv) {
+          if (drv.firstName || drv.lastName) {
+            driverFirstName = drv.firstName ?? null;
+            driverLastName = drv.lastName ?? null;
+          } else if (drv.name) {
+            // Fallback: stuff full name into firstName so the UI's `${first} ${last}` join still works.
+            driverFirstName = drv.name;
+          }
+        }
+
+        const addr = r.addressId ? addressById.get(r.addressId) : null;
+        const location = addr ? (addr.formattedAddress ?? addr.name ?? null) : null;
+
         events.push({
           id: r.id,
           unitNumber: vehicleNameById.get(r.assetId) ?? r.assetId,
           startTime: r.startTime,
+          endTime: r.endTime ?? null,
           date: r.eventDate,
           durationMinutes: r.durationMilliseconds != null ? Math.round(r.durationMilliseconds / 60000) : null,
-          idleFuelGallons: r.fuelConsumedMilliliters != null ? r.fuelConsumedMilliliters / 3785.41 : null,
-          lat: null,
-          lon: null,
-          location: null,
+          idleFuelGallons: r.fuelConsumedMilliliters != null ? SamsaraConversions.millilitersToGallons(r.fuelConsumedMilliliters) : null,
+          lat: r.latitude ?? null,
+          lon: r.longitude ?? null,
+          location,
+          driverFirstName,
+          driverLastName,
           unitType: unitTypeByAssetId.get(r.assetId) ?? null,
         });
       }

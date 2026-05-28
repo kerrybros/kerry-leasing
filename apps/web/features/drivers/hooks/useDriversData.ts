@@ -119,8 +119,9 @@ export function useDriversData(startDate: string, endDate: string, scorecardEnab
   const dieselPrice = orgSettings?.dieselPricePerGallon ?? 5.0;
 
   const isMotive = orgSettings?.telematicsProvider === 'MOTIVE';
+  const isSamsara = orgSettings?.telematicsProvider === 'SAMSARA';
   const tracksDrivers = orgSettings?.tracksDrivers === true;
-  const canShow = isMotive && tracksDrivers;
+  const canShow = (isMotive || isSamsara) && tracksDrivers;
 
   const driverUtilQuery = useDriverUtilizationQuery(canShow);
   const scorecardQuery = useDriverScorecardQuery(canShow && scorecardEnabled, startDate, endDate);

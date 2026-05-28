@@ -56,6 +56,29 @@ export async function syncFuelEnergyReports(
         const vehicleId = String(assetId);
         const eventDate = date;
 
+        const e = event as Record<string, any>;
+        const durationMs = e.durationMilliseconds ?? null;
+        const startMs = Date.parse(event.startTime);
+        const endTime = durationMs != null && Number.isFinite(startMs)
+          ? new Date(startMs + durationMs).toISOString()
+          : null;
+        const fuelCostUsd =
+          e.fuelCost?.currency === 'usd' && e.fuelCost?.amount != null
+            ? Number(e.fuelCost.amount)
+            : null;
+        const extracted = {
+          durationMilliseconds: durationMs,
+          fuelConsumedMilliliters: e.fuelConsumedMilliliters ?? null,
+          fuelCostUsd: fuelCostUsd != null && Number.isFinite(fuelCostUsd) ? fuelCostUsd : null,
+          latitude: typeof e.latitude === 'number' ? e.latitude : null,
+          longitude: typeof e.longitude === 'number' ? e.longitude : null,
+          endTime,
+          operatorId: e.operator?.id != null ? String(e.operator.id) : null,
+          addressId: e.address?.id != null ? String(e.address.id) : null,
+          eventUuid: typeof e.eventUuid === 'string' ? e.eventUuid : null,
+          ptoState: typeof e.ptoState === 'string' ? e.ptoState : null,
+        };
+
         // Store raw idling event
         await appPrisma.samsaraIdlingEvent.upsert({
           where: {
@@ -65,14 +88,12 @@ export async function syncFuelEnergyReports(
             clerkOrgId,
             assetId: vehicleId,
             startTime: event.startTime,
-            durationMilliseconds: event.durationMilliseconds ?? null,
-            fuelConsumedMilliliters: event.fuelConsumedMilliliters ?? null,
             eventDate,
+            ...extracted,
             rawResponse: event as any,
           },
           update: {
-            durationMilliseconds: event.durationMilliseconds ?? null,
-            fuelConsumedMilliliters: event.fuelConsumedMilliliters ?? null,
+            ...extracted,
             rawResponse: event as any,
           },
         });
