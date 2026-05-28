@@ -196,7 +196,9 @@ export async function syncSamsaraOrgForDate(
           ? `  ⏭  Addresses: skipped (${addressesResult.skipReason})`
           : `  ✓ Addresses: ${addressesResult.newCount} new, ${addressesResult.updatedCount} updated, ${addressesResult.errorCount} errors`
       );
-      if (!addressesResult.skipped && addressesResult.errorCount === 0) {
+      // Set the gate even on auth-skips (401 → errorCount=0, skipped=true): retrying
+      // a missing-scope token every cron tick just burns API calls and doesn't help.
+      if (addressesResult.errorCount === 0) {
         addressesLastSyncDate.set(clerkOrgId, date);
       }
     } else {
@@ -213,7 +215,7 @@ export async function syncSamsaraOrgForDate(
           ? `  ⏭  Drivers: skipped (${driversResult.skipReason})`
           : `  ✓ Drivers: ${driversResult.newCount} new, ${driversResult.updatedCount} updated, ${driversResult.errorCount} errors`
       );
-      if (!driversResult.skipped && driversResult.errorCount === 0) {
+      if (driversResult.errorCount === 0) {
         driversLastSyncDate.set(clerkOrgId, date);
       }
     } else {
