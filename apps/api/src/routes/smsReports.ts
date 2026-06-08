@@ -1,19 +1,24 @@
 /**
  * FLEET-USER SMS REPORTS
  *
- * Fleet admin endpoints for the Weekly SMS Preview tab on /app/drivers.
+ * Endpoints for the Weekly SMS Preview tab on /app/drivers.
  *
  *   GET  /sms-reports/weeks       — list of selectable weeks (upcoming + past sends)
  *   GET  /sms-reports/preview     — full one-pager data for every eligible driver in
  *                                   the week, sorted by rank (top performer first).
  *                                   Same snapshot shape as /r/<token> so the same
  *                                   React renderer works in both places.
+ *   PATCH /sms-reports/drivers/:id/enrollment — include/exclude a driver from sends.
+ *
+ * Read (GET) routes are open to any member of the org; the enrollment mutation
+ * is org-admin-only (see requireRole on that route). Access control is applied
+ * here per-route, not at the mount in routes/index.ts.
  */
 
 import { Router, Response } from 'express';
 import { z } from 'zod';
 import { getAppPrisma } from '../lib/prisma.js';
-import { AuthRequest } from '../middleware/auth.js';
+import { AuthRequest, requireRole } from '../middleware/auth.js';
 import { config } from '../config.js';
 import { buildWeeklyReports } from '../features/smsWeeklyReports/weeklyReportBuilder.js';
 import { getLastWeekRange } from '../features/smsWeeklyReports/dateWindow.js';
@@ -187,9 +192,12 @@ router.get('/preview', async (req: AuthRequest, res: Response) => {
  * PATCH /sms-reports/drivers/:id/enrollment
  * Fleet-scoped toggle: include or exclude this driver from future Monday
  * sends. Wraps a single boolean update on DriverContact.enrolled.
+ *
+ * Admin-only: the GET preview routes above are open to any org member, but
+ * mutating who receives a send is gated to org-admins.
  */
 const EnrollmentSchema = z.object({ enrolled: z.boolean() });
-router.patch('/drivers/:id/enrollment', async (req: AuthRequest, res: Response) => {
+router.patch('/drivers/:id/enrollment', requireRole(['internal']), async (req: AuthRequest, res: Response) => {
   const orgId = req.auth!.orgId!;
   const parsed = EnrollmentSchema.safeParse(req.body);
   if (!parsed.success) {
