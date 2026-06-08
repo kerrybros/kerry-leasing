@@ -158,7 +158,16 @@ function extractCellText(cell: ExcelJS.Cell): string {
     const y = value.getUTCFullYear();
     return `${m}/${d}/${y}`;
   }
-  return cell.text ?? '';
+  // exceljs's `.text` getter throws for a merged "slave" cell whose master is
+  // empty — MergeValue.toString() calls null.toString(). A single such cell
+  // (e.g. an empty merged banner row added in the source workbook) would
+  // otherwise crash the whole parse and 502 the page. Slaves render blank
+  // anyway (the master spans them), so an empty string is the correct fallback.
+  try {
+    return cell.text ?? '';
+  } catch {
+    return '';
+  }
 }
 
 // ---------------------------------------------------------------------------
