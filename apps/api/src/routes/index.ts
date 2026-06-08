@@ -491,13 +491,15 @@ router.use(
   adminSmsReportsRoutes
 );
 
-// Mount fleet-user SMS-reports endpoints (internal role = org-admin in the user's own org)
-// Used by the customer-facing weekly preview tab on the driver scorecard page.
+// Mount fleet-user SMS-reports endpoints.
+// GET /weeks and /preview are read-only and available to any member of the org
+// (the customer-facing weekly preview tab on the driver scorecard page). They're
+// already org-scoped via req.auth.orgId. The enrollment mutation is gated to
+// org-admins inside the router (requireRole on that route only).
 router.use(
   '/sms-reports',
   clerkAuthMiddleware,
   requireOrg,
-  requireRole(['internal']),
   smsReportsRoutes
 );
 

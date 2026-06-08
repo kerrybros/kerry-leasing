@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { useOrganization } from '@clerk/nextjs';
 import { useApiClient } from '@/hooks/useApiClient';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -55,10 +56,14 @@ function formatWeekRange(weekStart: string): string {
 
 export function SmsPreviewView() {
   const { getApi } = useApiClient();
+  // Org-admins can toggle who's enrolled; plain members get a read-only preview.
+  const { membership } = useOrganization();
+  const isAdmin = membership?.role === 'org:admin';
   const [loadingWeeks, setLoadingWeeks] = useState(true);
   const [weeks, setWeeks] = useState<WeekItem[]>([]);
   const [selectedWeek, setSelectedWeek] = useState<string | null>(null);
   const [enabled, setEnabled] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [preview, setPreview] = useState<PreviewResponse | null>(null);
   const [selectedDriverId, setSelectedDriverId] = useState<string | null>(null);
@@ -68,12 +73,17 @@ export function SmsPreviewView() {
     (async () => {
       try {
         setLoadingWeeks(true);
+        setError(null);
         const api = await getApi();
         const res = await api.get<WeeksResponse>('/sms-reports/weeks');
         if (cancelled) return;
         setWeeks(res.weeks);
         setEnabled(res.enabled);
         if (res.weeks.length > 0) setSelectedWeek(res.weeks[0].weekStart);
+      } catch (e) {
+        // Surface the real reason instead of silently falling back to the
+        // empty state (which misleadingly reads as "SMS not yet enabled").
+        if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to load weeks');
       } finally {
         if (!cancelled) setLoadingWeeks(false);
       }
@@ -143,10 +153,14 @@ export function SmsPreviewView() {
           )}
         </div>
 
-        {!enabled && <Badge variant="outline">SMS not yet enabled for this org</Badge>}
+        {!enabled && !error && <Badge variant="outline">SMS not yet enabled for this org</Badge>}
       </div>
 
-      {loadingPreview ? (
+      {error ? (
+        <Card><CardContent className="p-6 text-sm text-rose-700">
+          Couldn&apos;t load the SMS preview: {error}
+        </CardContent></Card>
+      ) : loadingPreview ? (
         <Skeleton className="h-96" />
       ) : !preview || preview.drivers.length === 0 ? (
         <Card><CardContent className="p-6 text-sm text-muted-foreground">
@@ -204,7 +218,7 @@ export function SmsPreviewView() {
           <div className="rounded-lg border border-border bg-slate-50 p-4">
             {selectedDriver ? (
               <>
-                {/* Fleet-only header: contact info + enrollment toggle. */}
+                {/* Header: contact info + (admin-only) enrollment toggle. */}
                 <div className="mb-3 rounded border bg-white px-4 py-3 flex items-center gap-4 flex-wrap">
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold truncate">{selectedDriver.driverName}</p>
@@ -213,22 +227,27 @@ export function SmsPreviewView() {
                       <span>✉ {selectedDriver.email ?? '(no email)'}</span>
                     </div>
                   </div>
-                  <button
-                    onClick={() => toggleEnrollment(selectedDriver.driverContactId, !selectedDriver.enrolled)}
-                    disabled={togglingId === selectedDriver.driverContactId}
-                    className={`inline-flex items-center gap-2 h-8 px-3 rounded-md border text-xs font-medium transition-colors cursor-pointer ${
-                      selectedDriver.enrolled
-                        ? 'border-rose-300 text-rose-700 bg-white hover:bg-rose-50'
-                        : 'border-emerald-300 text-emerald-700 bg-white hover:bg-emerald-50'
-                    }`}
-                  >
-                    {selectedDriver.enrolled ? 'Exclude from send' : 'Include in send'}
-                  </button>
+                  {isAdmin && (
+                    <button
+                      onClick={() => toggleEnrollment(selectedDriver.driverContactId, !selectedDriver.enrolled)}
+                      disabled={togglingId === selectedDriver.driverContactId}
+                      className={`inline-flex items-center gap-2 h-8 px-3 rounded-md border text-xs font-medium transition-colors cursor-pointer ${
+                        selectedDriver.enrolled
+                          ? 'border-rose-300 text-rose-700 bg-white hover:bg-rose-50'
+                          : 'border-emerald-300 text-emerald-700 bg-white hover:bg-emerald-50'
+                      }`}
+                    >
+                      {selectedDriver.enrolled ? 'Exclude from send' : 'Include in send'}
+                    </button>
+                  )}
                 </div>
 
                 {!selectedDriver.enrolled && (
                   <div className="mb-3 rounded border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
-                    This driver is currently excluded. They won&apos;t receive the Monday SMS. The preview below is what they <em>would</em> get if you re-enable them.
+                    This driver is currently excluded — they won&apos;t receive the Monday SMS.
+                    {isAdmin
+                      ? <> The preview below is what they <em>would</em> get if you re-enable them.</>
+                      : <> The preview below is what they <em>would</em> get if enrolled.</>}
                   </div>
                 )}
 
