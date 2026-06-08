@@ -38,6 +38,10 @@ services:
         sync: false
       - key: TWILIO_STATUS_CALLBACK_URL
         sync: false
+      # Weekly driver report email — sender mailbox. Sent via the MICROSOFT_GRAPH_*
+      # app creds already configured on this service (daily-service workbook).
+      - key: REPORT_EMAIL_FROM
+        sync: false
 
   - type: cron
     name: kerry-whiparound-sync
@@ -84,6 +88,20 @@ services:
       - key: REPORT_PUBLIC_BASE_URL
         sync: false
       - key: EIA_API_KEY
+        sync: false
+      # Email channel (weekly driver reports). This cron is a separate Render
+      # service, so it needs its own copy of the Graph app creds + sender mailbox.
+      - key: MICROSOFT_GRAPH_TENANT_ID
+        sync: false
+      - key: MICROSOFT_GRAPH_CLIENT_ID
+        sync: false
+      - key: MICROSOFT_GRAPH_CLIENT_SECRET
+        sync: false
+      - key: MICROSOFT_GRAPH_SITE_HOSTNAME
+        sync: false
+      - key: MICROSOFT_GRAPH_SITE_PATH
+        sync: false
+      - key: REPORT_EMAIL_FROM
         sync: false
 
   - type: cron

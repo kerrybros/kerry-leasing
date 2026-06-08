@@ -22,6 +22,7 @@ import sharepointRoutes from './sharepoint.js';
 import dailyServiceRoutes from './daily-service.js';
 import whiparoundRoutes from './whiparound.js';
 import publicReportsRoutes from './publicReports.js';
+import emailUnsubscribeRoutes from './emailUnsubscribe.js';
 import twilioWebhookRoutes from './twilioWebhooks.js';
 import adminSmsReportsRoutes from './adminSmsReports.js';
 import smsReportsRoutes from './smsReports.js';
@@ -478,6 +479,9 @@ router.use('/whiparound', whiparoundRoutes);
 
 // Mount public tokenized weekly-report endpoint (no Clerk auth — drivers use SMS link)
 router.use('/r', publicReportsRoutes);
+
+// Public tokenized email unsubscribe (POST-only opt-out; no Clerk auth)
+router.use('/u', emailUnsubscribeRoutes);
 
 // Mount Twilio webhook handlers (signature-verified, no Clerk auth)
 router.use('/webhooks/twilio', twilioWebhookRoutes);

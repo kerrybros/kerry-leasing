@@ -964,6 +964,7 @@ enum DriverSmsStatus {
   FAILED
   OPTED_OUT
   NO_PHONE
+  NO_EMAIL
   SKIPPED
 }
 
@@ -979,6 +980,7 @@ model CustomerSmsReportConfig {
   clerkOrgId  String   @unique @map("clerk_org_id")
   enabled     Boolean  @default(false)
   kpis        Json     // string[] of SAFETY | IDLE_PCT | MPG | MILES | HARD_EVENTS
+  channels    Json?    // string[] of SMS | EMAIL. null/absent = ["SMS"] (backward compatible)
   sendHourEt  Int      @default(5) @map("send_hour_et") // 5..8 ET
   lastSentAt  DateTime? @map("last_sent_at")
   createdAt   DateTime @default(now()) @map("created_at")
@@ -1003,6 +1005,8 @@ model DriverContact {
   enrolled            Boolean             @default(true)
   optedOut            Boolean             @default(false) @map("opted_out")
   optedOutAt          DateTime?           @map("opted_out_at")
+  emailOptedOut       Boolean             @default(false) @map("email_opted_out")
+  emailOptedOutAt     DateTime?           @map("email_opted_out_at")
   lastTwilioError     String?             @map("last_twilio_error")
   createdAt           DateTime            @default(now()) @map("created_at")
   updatedAt           DateTime            @updatedAt @map("updated_at")
@@ -1024,7 +1028,8 @@ model DriverWeeklyReportSent {
   weekStartDate    String          @map("week_start_date") // YYYY-MM-DD, Monday in ET
   sentAt           DateTime        @map("sent_at")
   status           DriverSmsStatus
-  twilioSid        String?         @map("twilio_sid")
+  channel          String          @default("SMS") // SMS | EMAIL — delivery channel for this send
+  twilioSid        String?         @map("twilio_sid") // SMS only; null for email sends
   twilioErrorCode  String?         @map("twilio_error_code")
   token            String          @unique
   tokenExpiresAt   DateTime        @map("token_expires_at")
@@ -1033,7 +1038,7 @@ model DriverWeeklyReportSent {
   isTest           Boolean         @default(false) @map("is_test")
   createdAt        DateTime        @default(now()) @map("created_at")
 
-  @@unique([clerkOrgId, driverContactId, weekStartDate])
+  @@unique([clerkOrgId, driverContactId, weekStartDate, channel], map: "driver_weekly_reports_sent_org_driver_week_channel_key")
   @@index([clerkOrgId, weekStartDate(sort: Desc)])
   @@index([driverContactId])
   @@index([token])
