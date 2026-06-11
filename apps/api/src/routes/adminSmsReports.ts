@@ -19,13 +19,16 @@ import { buildWeeklyReports } from '../features/smsWeeklyReports/weeklyReportBui
 import { loadExcludedMotiveDriverIds } from '../features/drivers/excludedDrivers.js';
 import { formatSmsBody } from '../features/smsWeeklyReports/smsBodyFormatter.js';
 import { runWeeklyDriverSms } from '../features/smsWeeklyReports/runWeeklyDriverSms.js';
+import { resolveChannels } from '../features/smsWeeklyReports/sendOrgWeeklyReports.js';
 
 const router = Router();
 
 const KpiSchema = z.enum(['SAFETY', 'IDLE_PCT', 'MPG', 'MILES', 'HARD_EVENTS']);
+const ChannelSchema = z.enum(['SMS', 'EMAIL']);
 const ConfigUpdateSchema = z.object({
   enabled: z.boolean().optional(),
   kpis: z.array(KpiSchema).optional(),
+  channels: z.array(ChannelSchema).min(1).optional(),
   sendHourEt: z.number().int().min(0).max(23).optional(),
 });
 
@@ -72,15 +75,18 @@ router.get('/config', async (req: AuthRequest, res: Response) => {
   const orgId = req.auth!.orgId!;
   const prisma = getAppPrisma();
   const cfg = await prisma.customerSmsReportConfig.findUnique({ where: { clerkOrgId: orgId } });
+  const base = cfg ?? {
+    clerkOrgId: orgId,
+    enabled: false,
+    kpis: ['SAFETY', 'IDLE_PCT', 'MPG', 'MILES', 'HARD_EVENTS'],
+    sendHourEt: 5,
+    lastSentAt: null,
+  };
   res.json({
-    config: cfg ?? {
-      clerkOrgId: orgId,
-      enabled: false,
-      kpis: ['SAFETY', 'IDLE_PCT', 'MPG', 'MILES', 'HARD_EVENTS'],
-      sendHourEt: 5,
-      lastSentAt: null,
-    },
-    dryRun: config.smsDryRun,
+    // channels is stored as nullable JSON; normalize to a clean ['SMS'|'EMAIL'] list.
+    config: { ...base, channels: resolveChannels(cfg?.channels) },
+    dryRun: config.smsDryRun,        // SMS provider (Twilio) in dry-run?
+    emailDryRun: config.emailDryRun, // Email provider (Graph) in dry-run?
   });
 });
 
@@ -96,11 +102,13 @@ router.put('/config', async (req: AuthRequest, res: Response) => {
       clerkOrgId: orgId,
       enabled: parsed.data.enabled ?? false,
       kpis: parsed.data.kpis ?? ['SAFETY', 'IDLE_PCT', 'MPG', 'MILES', 'HARD_EVENTS'],
+      channels: parsed.data.channels ?? ['SMS'],
       sendHourEt: parsed.data.sendHourEt ?? 5,
     },
     update: {
       ...(parsed.data.enabled !== undefined && { enabled: parsed.data.enabled }),
       ...(parsed.data.kpis !== undefined && { kpis: parsed.data.kpis }),
+      ...(parsed.data.channels !== undefined && { channels: parsed.data.channels }),
       ...(parsed.data.sendHourEt !== undefined && { sendHourEt: parsed.data.sendHourEt }),
     },
   });
@@ -422,6 +430,7 @@ router.get('/history', async (req: AuthRequest, res: Response) => {
       driverPhone: byId.get(r.driverContactId)?.phoneE164 ?? null,
       optedOut: byId.get(r.driverContactId)?.optedOut ?? false,
       weekStartDate: r.weekStartDate,
+      channel: r.channel,
       sentAt: r.sentAt,
       status: r.status,
       twilioSid: r.twilioSid,

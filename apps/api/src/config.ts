@@ -57,6 +57,18 @@ export const config = {
   weeklyDriverSmsEnabled: process.env.WEEKLY_DRIVER_SMS_ENABLED === 'true',
   reportPublicBaseUrl:
     process.env.REPORT_PUBLIC_BASE_URL ?? 'https://www.kerryleasing.com',
+  // Weekly driver report email. Sent via Microsoft Graph (reuses the existing
+  // microsoftGraph app credentials) from this mailbox, e.g. reports@kerrybros.com.
+  // The Graph app registration must be granted the Mail.Send application
+  // permission, and this mailbox must exist in the tenant.
+  reportEmailFrom: process.env.REPORT_EMAIL_FROM ?? null,
+  // When true, the email pipeline writes DriverWeeklyReportSent rows but never
+  // calls Graph. Auto-true when no from-address is set OR Graph isn't configured
+  // — mirrors smsDryRun so the feature can ship before the mailbox is live.
+  emailDryRun:
+    process.env.EMAIL_DRY_RUN === 'true' ||
+    !process.env.REPORT_EMAIL_FROM ||
+    !process.env.MICROSOFT_GRAPH_TENANT_ID,
 };
 
 // Validate required env vars

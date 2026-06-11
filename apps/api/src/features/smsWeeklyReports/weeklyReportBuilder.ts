@@ -31,8 +31,10 @@ export interface DriverWeeklyReport {
   displayName: string;
   firstName: string;
   phoneE164: string | null;
+  email: string | null;
   enrolled: boolean;
   optedOut: boolean;
+  emailOptedOut: boolean;
   noActivity: boolean;
 
   // Current week
@@ -134,6 +136,7 @@ export async function buildWeeklyReports(orgId: string, now: Date = new Date()):
       motiveDriverId: true,
       enrolled: true,
       optedOut: true,
+      emailOptedOut: true,
     },
   });
   const byNorm = new Map(contacts.map((c) => [c.normalizedName, c]));
@@ -191,6 +194,7 @@ export async function buildWeeklyReports(orgId: string, now: Date = new Date()):
           motiveDriverId: true,
           enrolled: true,
           optedOut: true,
+          emailOptedOut: true,
         },
       });
       byNorm.set(created.normalizedName, created);
@@ -261,8 +265,10 @@ export async function buildWeeklyReports(orgId: string, now: Date = new Date()):
       displayName: row.driverName,
       firstName: firstName(row.driverName),
       phoneE164: contact?.phoneE164 ?? null,
+      email: contact?.email ?? null,
       enrolled: contact?.enrolled ?? false,
       optedOut: contact?.optedOut ?? false,
+      emailOptedOut: contact?.emailOptedOut ?? false,
       noActivity,
       current: row,
       rank,

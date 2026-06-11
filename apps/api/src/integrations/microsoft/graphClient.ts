@@ -384,6 +384,54 @@ export async function getDriveItemContent(
   return Buffer.from(arrayBuffer);
 }
 
+// ---------------------------------------------------------------------------
+// Mail (send email as an app mailbox)
+// ---------------------------------------------------------------------------
+
+export interface SendMailInput {
+  from: string; // sender mailbox UPN/address, e.g. reports@kerrybros.com
+  to: string;
+  subject: string;
+  text: string; // plain-text body (used as content when html is omitted)
+  html?: string; // optional HTML body
+  replyTo?: string;
+}
+
+/**
+ * Sends an email as `from` via Graph (POST /users/{from}/sendMail). Requires the
+ * app registration to hold the Mail.Send APPLICATION permission, and `from` to
+ * be a real mailbox in the tenant. Graph returns 202 Accepted (no body) on success.
+ */
+export async function sendMail(cfg: GraphClientConfig, input: SendMailInput): Promise<void> {
+  const token = await getAccessToken(cfg.tenantId, cfg.clientId, cfg.clientSecret);
+  const url = `${GRAPH_BASE}/users/${encodeURIComponent(input.from)}/sendMail`;
+  const message: Record<string, unknown> = {
+    subject: input.subject,
+    body: {
+      contentType: input.html ? 'HTML' : 'Text',
+      content: input.html ?? input.text,
+    },
+    toRecipients: [{ emailAddress: { address: input.to } }],
+  };
+  if (input.replyTo) {
+    message.replyTo = [{ emailAddress: { address: input.replyTo } }];
+  }
+
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ message, saveToSentItems: false }),
+  });
+
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => 'unknown');
+    throw new Error(`Graph sendMail failed (${resp.status}): ${text}`);
+  }
+}
+
 export async function listDriveItems(
   cfg: GraphClientConfig,
   folderPath: string | null,

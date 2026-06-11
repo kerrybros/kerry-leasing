@@ -20,10 +20,13 @@ const KPI_OPTIONS = [
 ] as const;
 type Kpi = typeof KPI_OPTIONS[number]['value'];
 
+type Channel = 'SMS' | 'EMAIL';
+
 interface SmsConfig {
   clerkOrgId: string;
   enabled: boolean;
   kpis: Kpi[];
+  channels: Channel[];
   sendHourEt: number;
   lastSentAt: string | null;
 }
@@ -53,6 +56,7 @@ interface HistoryRow {
   driverPhone: string | null;
   optedOut: boolean;
   weekStartDate: string;
+  channel: string;
   sentAt: string;
   status: string;
   twilioErrorCode: string | null;
@@ -71,6 +75,7 @@ export default function AdminSmsReportsPage() {
   // Config state
   const [config, setConfig] = useState<SmsConfig | null>(null);
   const [dryRunFlag, setDryRunFlag] = useState(false);
+  const [emailDryRunFlag, setEmailDryRunFlag] = useState(false);
   const [savingConfig, setSavingConfig] = useState(false);
   const [configMsg, setConfigMsg] = useState<string | null>(null);
 
@@ -99,9 +104,10 @@ export default function AdminSmsReportsPage() {
   const loadConfig = async () => {
     if (!organization?.id) return;
     const api = await getApi();
-    const res = await api.get<{ config: SmsConfig; dryRun: boolean }>('/admin/sms-reports/config');
+    const res = await api.get<{ config: SmsConfig; dryRun: boolean; emailDryRun: boolean }>('/admin/sms-reports/config');
     setConfig(res.config);
     setDryRunFlag(res.dryRun);
+    setEmailDryRunFlag(res.emailDryRun);
   };
 
   const loadDrivers = async () => {
@@ -148,6 +154,15 @@ export default function AdminSmsReportsPage() {
     });
   };
 
+  const toggleChannel = (channel: Channel, on: boolean) => {
+    if (!config) return;
+    const next = on
+      ? [...new Set([...config.channels, channel])]
+      : config.channels.filter((c) => c !== channel);
+    if (next.length === 0) return; // keep at least one channel enabled
+    setConfig({ ...config, channels: next });
+  };
+
   const saveConfig = async () => {
     if (!config) return;
     setSavingConfig(true);
@@ -157,6 +172,7 @@ export default function AdminSmsReportsPage() {
       await api.put('/admin/sms-reports/config', {
         enabled: config.enabled,
         kpis: config.kpis,
+        channels: config.channels,
         sendHourEt: config.sendHourEt,
       });
       setConfigMsg('Saved.');
@@ -284,6 +300,36 @@ export default function AdminSmsReportsPage() {
                       onCheckedChange={(v) => setConfig({ ...config, enabled: !!v })}
                     />
                     <Label htmlFor="enabled">Feature enabled for this customer</Label>
+                  </div>
+
+                  <div className="space-y-2">
+                    <span className="text-sm font-medium">Delivery channels</span>
+                    <div className="flex items-center gap-3">
+                      <Checkbox
+                        id="ch-sms"
+                        checked={config.channels.includes('SMS')}
+                        onCheckedChange={(v) => toggleChannel('SMS', !!v)}
+                      />
+                      <Label htmlFor="ch-sms">SMS (text)</Label>
+                      {dryRunFlag && config.channels.includes('SMS') && (
+                        <span className="text-xs text-muted-foreground">dry-run — Twilio not configured</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <Checkbox
+                        id="ch-email"
+                        checked={config.channels.includes('EMAIL')}
+                        onCheckedChange={(v) => toggleChannel('EMAIL', !!v)}
+                      />
+                      <Label htmlFor="ch-email">Email</Label>
+                      {emailDryRunFlag && config.channels.includes('EMAIL') && (
+                        <span className="text-xs text-amber-600">dry-run — set REPORT_EMAIL_FROM to send</span>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      A driver receives a channel only if they have the matching contact info
+                      (phone for SMS, email for Email). Drivers can unsubscribe from email independently of SMS.
+                    </p>
                   </div>
 
                   <div className="flex items-center gap-3">
@@ -548,6 +594,7 @@ export default function AdminSmsReportsPage() {
                   <tr>
                     <th className="py-2 pr-3">Week</th>
                     <th className="py-2 pr-3">Driver</th>
+                    <th className="py-2 pr-3">Channel</th>
                     <th className="py-2 pr-3">Phone</th>
                     <th className="py-2 pr-3">Status</th>
                     <th className="py-2 pr-3">Sent</th>
@@ -555,14 +602,15 @@ export default function AdminSmsReportsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {loadingHistory && (<tr><td colSpan={6}><Skeleton className="h-8 my-2" /></td></tr>)}
+                  {loadingHistory && (<tr><td colSpan={7}><Skeleton className="h-8 my-2" /></td></tr>)}
                   {!loadingHistory && history.length === 0 && (
-                    <tr><td colSpan={6} className="py-4 text-muted-foreground">No sends yet.</td></tr>
+                    <tr><td colSpan={7} className="py-4 text-muted-foreground">No sends yet.</td></tr>
                   )}
                   {history.map((r) => (
                     <tr key={r.id} className="border-b">
                       <td className="py-2 pr-3">{r.weekStartDate}{r.isTest && <Badge variant="outline" className="ml-1">test</Badge>}</td>
                       <td className="py-2 pr-3">{r.driverName}</td>
+                      <td className="py-2 pr-3"><Badge variant="outline">{r.channel}</Badge></td>
                       <td className="py-2 pr-3 text-xs">{r.driverPhone ?? '—'}</td>
                       <td className="py-2 pr-3">
                         <Badge variant={r.status === 'DELIVERED' || r.status === 'SENT' ? 'default' : r.status === 'FAILED' ? 'destructive' : 'secondary'}>{r.status}</Badge>
