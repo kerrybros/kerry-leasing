@@ -20,6 +20,7 @@ interface TelematicsTrendsViewProps {
   loading: boolean;
   monthlyMetrics: { chartData: MonthlyMetrics[]; tableData: MonthlyMetrics[] };
   fleetTotals: FleetTotals;
+  monthlyTableTotals: FleetTotals;
   showYearToggle: boolean;
   availableYears: number[];
   selectedTableYear: number;
@@ -38,6 +39,7 @@ export function TelematicsTrendsView({
   loading,
   monthlyMetrics,
   fleetTotals,
+  monthlyTableTotals,
   showYearToggle,
   availableYears,
   selectedTableYear,
@@ -245,13 +247,13 @@ export function TelematicsTrendsView({
                   ))}
                   <TableRow className="bg-primary/10 border-t-2">
                     <TableCell className="font-bold text-[11px] px-2 py-1 h-auto sticky left-0 bg-primary/10 z-10">Total</TableCell>
-                    <TableCell className="font-bold text-[11px] px-1.5 py-1 h-auto tabular-nums">{Math.round(fleetTotals.totalMiles).toLocaleString()}</TableCell>
-                    <TableCell className="font-bold text-[11px] px-1.5 py-1 h-auto tabular-nums">{Number(fleetTotals.avgMpg).toFixed(1)}</TableCell>
-                    <TableCell className="font-bold text-[11px] px-1.5 py-1 h-auto tabular-nums">{Math.round(fleetTotals.totalFuel).toLocaleString()}</TableCell>
-                    <TableCell className="font-bold text-[11px] px-1.5 py-1 h-auto tabular-nums">{Math.round(fleetTotals.totalDrivingFuel).toLocaleString()}</TableCell>
-                    <TableCell className="font-bold text-[11px] px-1.5 py-1 h-auto tabular-nums" style={{ color: 'var(--warning)' }}>{Math.round(fleetTotals.totalIdleFuel).toLocaleString()}</TableCell>
-                    <TableCell className="font-bold text-[11px] px-1.5 py-1 h-auto tabular-nums" style={{ color: 'var(--warning)' }}>{Number(fleetTotals.idlePercentage).toFixed(1)}%</TableCell>
-                    <TableCell className="font-bold text-[11px] px-1.5 py-1 h-auto tabular-nums" style={{ color: 'var(--warning)' }}>{fmtIdleTime(fleetTotals.totalIdleTime)}</TableCell>
+                    <TableCell className="font-bold text-[11px] px-1.5 py-1 h-auto tabular-nums">{Math.round(monthlyTableTotals.totalMiles).toLocaleString()}</TableCell>
+                    <TableCell className="font-bold text-[11px] px-1.5 py-1 h-auto tabular-nums">{Number(monthlyTableTotals.avgMpg).toFixed(1)}</TableCell>
+                    <TableCell className="font-bold text-[11px] px-1.5 py-1 h-auto tabular-nums">{Math.round(monthlyTableTotals.totalFuel).toLocaleString()}</TableCell>
+                    <TableCell className="font-bold text-[11px] px-1.5 py-1 h-auto tabular-nums">{Math.round(monthlyTableTotals.totalDrivingFuel).toLocaleString()}</TableCell>
+                    <TableCell className="font-bold text-[11px] px-1.5 py-1 h-auto tabular-nums" style={{ color: 'var(--warning)' }}>{Math.round(monthlyTableTotals.totalIdleFuel).toLocaleString()}</TableCell>
+                    <TableCell className="font-bold text-[11px] px-1.5 py-1 h-auto tabular-nums" style={{ color: 'var(--warning)' }}>{Number(monthlyTableTotals.idlePercentage).toFixed(1)}%</TableCell>
+                    <TableCell className="font-bold text-[11px] px-1.5 py-1 h-auto tabular-nums" style={{ color: 'var(--warning)' }}>{fmtIdleTime(monthlyTableTotals.totalIdleTime)}</TableCell>
                   </TableRow>
                 </TableBody>
               </Table>
