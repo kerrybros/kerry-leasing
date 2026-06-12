@@ -136,9 +136,18 @@ model SamsaraIdlingEvent {
   clerkOrgId             String   @map("clerk_org_id")
   assetId                String   @map("asset_id")   // same as vehicle.id in fuel-energy
   startTime              String   @map("start_time") // ISO 8601
+  endTime                String?  @map("end_time")   // ISO 8601, derived = startTime + durationMs
   durationMilliseconds   Float?   @map("duration_milliseconds")
   fuelConsumedMilliliters Float?  @map("fuel_consumed_milliliters")
+  fuelCostUsd            Float?   @map("fuel_cost_usd")  // Samsara pre-prices idle fuel
   eventDate              String   @map("event_date") // YYYY-MM-DD for querying
+  // Map / attribution fields (extracted from raw_response on sync)
+  latitude               Float?
+  longitude              Float?
+  operatorId             String?  @map("operator_id") // Samsara driver ID; resolved to name in a later tier
+  addressId              String?  @map("address_id")  // Samsara address/geofence ID; resolved in a later tier
+  eventUuid              String?  @map("event_uuid")  // stable provider event ID
+  ptoState               String?  @map("pto_state")   // "active" | "inactive" — legitimate-idle signal
   rawResponse            Json?    @map("raw_response")
   createdAt              DateTime @default(now()) @map("created_at")
 
@@ -436,6 +445,66 @@ model MotiveGeofence {
   @@map("motive_geofences")
 }
 
+// SAMSARA Addresses (geofence equivalent)
+// Source: GET /addresses — paginated, polygon OR circle geometry.
+// Circles are converted to 32-vertex polygons at sync time so locationPoints
+// can be consumed uniformly by the IDLE map alongside Motive geofences.
+model SamsaraAddress {
+  id                  String   @id @default(cuid())
+  clerkOrgId          String   @map("clerk_org_id")
+  samsaraAddressId    String   @map("samsara_address_id")
+
+  name                String
+  formattedAddress    String?  @map("formatted_address")
+  geofenceType        String   @map("geofence_type") // "polygon" | "circle"
+
+  // Unified polygon (circles expanded to 32 vertices)
+  locationPoints      Json     @map("location_points") // [{lat, lon}, ...]
+
+  // Original circle data (kept for reference)
+  circleLat           Float?   @map("circle_lat")
+  circleLon           Float?   @map("circle_lon")
+  circleRadiusMeters  Float?   @map("circle_radius_meters")
+
+  // Top-level lat/lon (centroid as returned by Samsara)
+  latitude            Float?
+  longitude           Float?
+
+  rawResponse         Json     @map("raw_response")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  @@unique([clerkOrgId, samsaraAddressId])
+  @@index([clerkOrgId])
+  @@map("samsara_addresses")
+}
+
+// SAMSARA Drivers
+// Source: GET /fleet/drivers — operator.id on idle events resolves into this table.
+model SamsaraDriver {
+  id                      String   @id @default(cuid())
+  clerkOrgId              String   @map("clerk_org_id")
+  samsaraDriverId         String   @map("samsara_driver_id")
+
+  name                    String?  // Samsara returns a full "name" field directly
+  firstName               String?  @map("first_name")
+  lastName                String?  @map("last_name")
+  username                String?
+  email                   String?
+  phone                   String?
+  licenseNumber           String?  @map("license_number")
+  externalIds             Json?    @map("external_ids")
+  driverActivationStatus  String?  @map("driver_activation_status") // active/deactivated
+
+  rawResponse             Json     @map("raw_response")
+  createdAt               DateTime @default(now()) @map("created_at")
+  updatedAt               DateTime @updatedAt @map("updated_at")
+
+  @@unique([clerkOrgId, samsaraDriverId])
+  @@index([clerkOrgId])
+  @@map("samsara_drivers")
+}
+
 // Enums for telematics
 enum TelematicsProvider {
   SAMSARA
@@ -580,7 +649,7 @@ model SamsaraSafetyEvent {
   driverId      String?  @map("driver_id")
   driverName    String?  @map("driver_name")
 
-  behaviorLabel String   @map("behavior_label") // e.g. "harshAccel", "harshBrake"
+  behaviorLabel String   @map("behavior_label") // e.g. "acceleration", "braking", "harshTurn" (legacy /fleet/safety-events camelCase)
   severity      String?                          // "low", "medium", "high"
   maxValue      Float?   @map("max_value")
   time          String                           // ISO 8601

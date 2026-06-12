@@ -12,20 +12,21 @@ import { SamsaraClient } from '../client.js';
 import { getESTDayBounds } from '../../dates.js';
 import { SyncResult } from '../types.js';
 
-interface SafetyEventBehavior {
-  behaviorLabel: string;
-  maxValue?: number;
-  maxValueUnit?: string;
-  severity?: string;
+interface SafetyEventBehaviorLabel {
+  label: string;          // e.g. "harshTurn", "lightSpeeding", "crash" — camelCase
+  source?: string;        // "automated" | "userGenerated"
+  name?: string;          // Human-readable, e.g. "Harsh Turn"
 }
 
 interface SafetyEvent {
   id: string;
   time: string;
-  vehicle: { id: string; name: string };
+  vehicle: { id: string; name: string; externalIds?: Record<string, string> };
   driver?: { id: string; name: string };
-  behaviors: SafetyEventBehavior[] | null;
-  location?: { latitude: number; longitude: number; formattedAddress?: string };
+  behaviorLabels?: SafetyEventBehaviorLabel[] | null;
+  location?: { latitude: number; longitude: number };
+  coachingState?: string;
+  maxAccelerationGForce?: number;
 }
 
 export async function syncSamsaraSafetyEvents(
@@ -59,39 +60,49 @@ export async function syncSamsaraSafetyEvents(
 
     for (const event of events) {
       try {
-        // behaviors may be null/undefined for certain event types (e.g. dashcam-only events)
-        const behaviors = Array.isArray(event.behaviors) ? event.behaviors : [];
-        for (const behavior of behaviors) {
-          // Each behavior on an event gets its own row
-          const samsaraId = `${event.id}_${behavior.behaviorLabel}`;
+        // The modern /fleet/safety-events response uses `behaviorLabels[]` with
+        // `{ label, source, name }` per entry. The legacy interface assumed
+        // `behaviors[].behaviorLabel` — wrong, so the loop silently no-op'd and
+        // 0 rows were ever written. Severity is no longer a top-level API field;
+        // it's encoded in the label tier (lightSpeeding/heavy/severe…) and the
+        // behaviorLabelMap derives it at scorecard-read time.
+        const behaviorLabels = Array.isArray(event.behaviorLabels) ? event.behaviorLabels : [];
+        for (const behavior of behaviorLabels) {
+          const label = behavior.label;
+          if (!label) continue;
+          const samsaraId = `${event.id}_${label}`;
 
-          const existing = await appPrisma.samsaraSafetyEvent.findUnique({
+          await appPrisma.samsaraSafetyEvent.upsert({
             where: { clerkOrgId_samsaraId: { clerkOrgId, samsaraId } },
+            create: {
+              clerkOrgId,
+              samsaraId,
+              vehicleId: event.vehicle.id,
+              vehicleName: event.vehicle.name,
+              driverId: event.driver?.id ?? null,
+              driverName: event.driver?.name ?? null,
+              behaviorLabel: label,
+              severity: null,
+              maxValue: event.maxAccelerationGForce ?? null,
+              time: event.time,
+              eventDate: date,
+              lat: event.location?.latitude ?? null,
+              lon: event.location?.longitude ?? null,
+              rawResponse: event as any,
+            },
+            update: {
+              vehicleId: event.vehicle.id,
+              vehicleName: event.vehicle.name,
+              driverId: event.driver?.id ?? null,
+              driverName: event.driver?.name ?? null,
+              maxValue: event.maxAccelerationGForce ?? null,
+              time: event.time,
+              lat: event.location?.latitude ?? null,
+              lon: event.location?.longitude ?? null,
+              rawResponse: event as any,
+            },
           });
-
-          const row = {
-            vehicleId: event.vehicle.id,
-            vehicleName: event.vehicle.name,
-            driverId: event.driver?.id ?? null,
-            driverName: event.driver?.name ?? null,
-            behaviorLabel: behavior.behaviorLabel,
-            severity: behavior.severity ?? null,
-            maxValue: behavior.maxValue ?? null,
-            time: event.time,
-            eventDate: date,
-            lat: event.location?.latitude ?? null,
-            lon: event.location?.longitude ?? null,
-            rawResponse: event as any,
-          };
-
-          if (!existing) {
-            await appPrisma.samsaraSafetyEvent.create({
-              data: { clerkOrgId, samsaraId, ...row },
-            });
-            result.newCount++;
-          } else {
-            result.unchangedCount++;
-          }
+          result.newCount++;
         }
       } catch (err: any) {
         result.errorCount++;

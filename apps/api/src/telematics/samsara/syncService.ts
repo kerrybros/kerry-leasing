@@ -20,6 +20,10 @@ import { syncFuelEnergyReports } from './sync/syncFuelEnergyReports.js';
 import { syncSamsaraVehicles } from './sync/syncSamsaraVehicles.js';
 import { syncSamsaraVehicleStats } from './sync/syncSamsaraVehicleStats.js';
 import { syncSamsaraSafetyEvents } from './sync/syncSamsaraSafetyEvents.js';
+import { syncSamsaraAddresses } from './sync/syncSamsaraAddresses.js';
+import { syncSamsaraDrivers } from './sync/syncSamsaraDrivers.js';
+import { syncSamsaraDriverFuelEnergy } from './sync/syncSamsaraDriverFuelEnergy.js';
+import { syncSamsaraDriverSafetyScores } from './sync/syncSamsaraDriverSafetyScores.js';
 import { getYesterday, getTwoDaysAgo, SyncResult } from './types.js';
 import { getThreeDaysAgo } from '../dates.js';
 import { readCredentials } from '../../lib/credentials.js';
@@ -28,6 +32,12 @@ import { TelematicsAuthError } from '../errors.js';
 // In-memory gate: track last vehicle roster sync time per org (7-day interval)
 const vehicleRosterLastSyncAt = new Map<string, number>();
 const VEHICLE_ROSTER_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
+
+// Addresses (geofences) + drivers are configuration data — sync once per day on
+// the primary pass. Tracked per-sync so a partial failure (e.g. drivers 401s
+// while addresses succeeds) doesn't force both to re-run the next cron tick.
+const addressesLastSyncDate = new Map<string, string>();
+const driversLastSyncDate = new Map<string, string>();
 
 interface OrgSyncResult {
   clerkOrgId: string;
@@ -170,7 +180,76 @@ export async function syncSamsaraOrgForDate(
   }
 
 
-  // 4. Safety events
+  // 4. Addresses + drivers (config data — once per day, primary pass only).
+  // Drives geofence layer and operator → driver-name resolution on the IDLE map.
+  // Tracked per-sync so a partial failure doesn't drag both into re-runs.
+  if (verify) {
+    console.log(`  ⏭  Addresses + drivers: skipped (verify pass — primary sync only)`);
+  } else {
+    if (addressesLastSyncDate.get(clerkOrgId) !== date) {
+      const addressesResult = await safeStep('addresses', date, () =>
+        syncSamsaraAddresses(clerkOrgId, apiToken)
+      );
+      orgResult.results.push(addressesResult);
+      console.log(
+        addressesResult.skipped
+          ? `  ⏭  Addresses: skipped (${addressesResult.skipReason})`
+          : `  ✓ Addresses: ${addressesResult.newCount} new, ${addressesResult.updatedCount} updated, ${addressesResult.errorCount} errors`
+      );
+      // Set the gate even on auth-skips (401 → errorCount=0, skipped=true): retrying
+      // a missing-scope token every cron tick just burns API calls and doesn't help.
+      if (addressesResult.errorCount === 0) {
+        addressesLastSyncDate.set(clerkOrgId, date);
+      }
+    } else {
+      console.log(`  ⏭  Addresses: skipped (already synced today)`);
+    }
+
+    if (driversLastSyncDate.get(clerkOrgId) !== date) {
+      const driversResult = await safeStep('drivers', date, () =>
+        syncSamsaraDrivers(clerkOrgId, apiToken)
+      );
+      orgResult.results.push(driversResult);
+      console.log(
+        driversResult.skipped
+          ? `  ⏭  Drivers: skipped (${driversResult.skipReason})`
+          : `  ✓ Drivers: ${driversResult.newCount} new, ${driversResult.updatedCount} updated, ${driversResult.errorCount} errors`
+      );
+      if (driversResult.errorCount === 0) {
+        driversLastSyncDate.set(clerkOrgId, date);
+      }
+    } else {
+      console.log(`  ⏭  Drivers: skipped (already synced today)`);
+    }
+  }
+
+  // 5. Driver fuel-energy (per-driver-per-day) → samsara_driver_fuel_energy
+  const driverFuelResult = await safeStep('driver_fuel_energy', date, () =>
+    syncSamsaraDriverFuelEnergy(clerkOrgId, apiToken, date, verify)
+  );
+  orgResult.results.push(driverFuelResult);
+  console.log(
+    driverFuelResult.skipped
+      ? `  ⏭  Driver fuel-energy: skipped (${driverFuelResult.skipReason})`
+      : `  ✓ Driver fuel-energy: ${driverFuelResult.newCount} new, ${driverFuelResult.unchangedCount} unchanged, ` +
+        `${driverFuelResult.updatedCount} updated` +
+        (driverFuelResult.errorCount > 0 ? `, ${driverFuelResult.errorCount} errors` : '')
+  );
+
+  // 6. Driver safety scores (per-driver-per-day) → samsara_driver_efficiency
+  const driverSafetyResult = await safeStep('driver_safety_scores', date, () =>
+    syncSamsaraDriverSafetyScores(clerkOrgId, apiToken, date, verify)
+  );
+  orgResult.results.push(driverSafetyResult);
+  console.log(
+    driverSafetyResult.skipped
+      ? `  ⏭  Driver safety-scores: skipped (${driverSafetyResult.skipReason})`
+      : `  ✓ Driver safety-scores: ${driverSafetyResult.newCount} new, ${driverSafetyResult.unchangedCount} unchanged, ` +
+        `${driverSafetyResult.updatedCount} updated` +
+        (driverSafetyResult.errorCount > 0 ? `, ${driverSafetyResult.errorCount} errors` : '')
+  );
+
+  // 7. Safety events
   const safetyResult = await safeStep('safety_events', date, () =>
     syncSamsaraSafetyEvents(clerkOrgId, apiToken, date)
   );
