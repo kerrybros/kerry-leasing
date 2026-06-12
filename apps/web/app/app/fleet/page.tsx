@@ -226,6 +226,7 @@ export default function FleetOverviewPage() {
           loading={fleet.telematicsLoading}
           monthlyMetrics={fleet.monthlyMetrics}
           fleetTotals={fleet.fleetTotals}
+          monthlyTableTotals={fleet.monthlyTableTotals}
           showYearToggle={fleet.showYearToggle}
           availableYears={fleet.availableYears}
           selectedTableYear={fleet.selectedTableYear}

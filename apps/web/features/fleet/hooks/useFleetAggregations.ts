@@ -84,6 +84,23 @@ export function useFleetAggregations({
     [dateFilteredVehicleData, dateFilteredDriverData, viewMode, fuelPricePerGallon]
   );
 
+  // Totals for the Monthly Summary table — filtered to the selected year (and the
+  // selected unit/driver, if any), against the full dataset (not the date-range
+  // picker), matching the source/scope of the per-month rows in aggregateMonthlyMetrics.
+  const monthlyTableTotals = useMemo(() => {
+    const yearPrefix = `${selectedTableYear}-`;
+    if (viewMode === 'unit') {
+      const filtered = vehicleData.filter(
+        r => r.date.startsWith(yearPrefix) && (selectedId == null || r.vin === selectedId)
+      );
+      return aggregateFleetTotals(filtered, 'unit', fuelPricePerGallon);
+    }
+    const filtered = driverData.filter(
+      r => r.date.startsWith(yearPrefix) && (selectedId == null || r.driverId === selectedId)
+    );
+    return aggregateFleetTotals(filtered, 'driver', fuelPricePerGallon);
+  }, [vehicleData, driverData, viewMode, selectedId, selectedTableYear, fuelPricePerGallon]);
+
   const fleetKpis = useMemo(
     () => aggregateFleetKpis(dateFilteredVehicleData, fuelPricePerGallon),
     [dateFilteredVehicleData, fuelPricePerGallon]
@@ -116,10 +133,21 @@ export function useFleetAggregations({
   }, [repairUnits, repairStartDate, repairEndDate]);
 
   const availableYears = useMemo(() => {
-    const yearSet = new Set<number>();
-    vehicleData.forEach(r => yearSet.add(new Date(r.date).getFullYear()));
-    driverData.forEach(r => yearSet.add(new Date(r.date).getFullYear()));
-    const years = Array.from(yearSet).sort();
+    // Use string-prefix extraction (timezone-safe) — `new Date(iso).getFullYear()`
+    // shifts dates like "2024-01-01" into 2023 in negative-offset locales, creating
+    // phantom year tabs with no rows. Also drop years whose records are all zero.
+    const yearTotals = new Map<number, number>();
+    const addRecord = (date: string, miles: number, fuel: number) => {
+      const year = parseInt(date.substring(0, 4), 10);
+      if (!Number.isFinite(year)) return;
+      yearTotals.set(year, (yearTotals.get(year) || 0) + (miles || 0) + (fuel || 0));
+    };
+    vehicleData.forEach(r => addRecord(r.date, r.totalDistance || 0, r.totalFuel || 0));
+    driverData.forEach(r => addRecord(r.date, r.totalDistance || 0, (r.drivingFuel || 0) + (r.idleFuel || 0)));
+    const years = Array.from(yearTotals.entries())
+      .filter(([, total]) => total > 0)
+      .map(([year]) => year)
+      .sort();
     if (years.length === 0) years.push(new Date().getFullYear());
     return years;
   }, [vehicleData, driverData]);
@@ -135,6 +163,7 @@ export function useFleetAggregations({
     driverMetrics,
     monthlyMetrics,
     fleetTotals,
+    monthlyTableTotals,
     fleetKpis,
     repairKpis,
     showYearToggle,
