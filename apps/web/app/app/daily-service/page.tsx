@@ -67,6 +67,19 @@ function isBlankRow(row: string[]): boolean {
 // first-row header, and click-to-sort. The rest render verbatim with no extra UI.
 const TABS_WITH_FILTER_AND_STICKY = new Set(['Completed Units']);
 
+// The "Out of Service" tab leads — it's the one the service team opens to first.
+// Match is normalized (case/spacing/punctuation-insensitive) so a small rename
+// in the source workbook won't silently fall back to the old order.
+function isOutOfServiceTab(name: string): boolean {
+  return name.replace(/[^a-z0-9]/gi, '').toLowerCase().includes('outofservice');
+}
+
+function orderTabs<T extends { name: string }>(tabs: T[]): T[] {
+  const oos = tabs.filter((t) => isOutOfServiceTab(t.name));
+  const rest = tabs.filter((t) => !isOutOfServiceTab(t.name));
+  return [...oos, ...rest];
+}
+
 // Within Completed Units, only these column headers get sort UI.
 const SORTABLE_HEADERS = new Set(['Date Out of Service', 'Completion Date']);
 
@@ -302,7 +315,7 @@ export default function DailyServicePage() {
       setData(result);
       setError(null);
       if (initialLoadRef.current && result.tabs.length > 0) {
-        setActiveTab(result.tabs[0].name);
+        setActiveTab(orderTabs(result.tabs)[0].name);
         initialLoadRef.current = false;
       }
     } catch (err) {
@@ -352,6 +365,10 @@ export default function DailyServicePage() {
 
   if (!data) return null;
 
+  // Out of Service first; everything else keeps its workbook order.
+  const orderedTabs = orderTabs(data.tabs);
+  const defaultTabName = orderedTabs[0]?.name;
+
   return (
     <div className="flex flex-col p-4 pt-6 gap-3" style={{ height: '100vh' }}>
       <div className="flex items-center justify-between">
@@ -382,13 +399,13 @@ export default function DailyServicePage() {
 
       <div className="relative flex-1 min-h-0 rounded-xl border border-border overflow-hidden">
         <Tabs
-          value={activeTab ?? data.tabs[0]?.name}
+          value={activeTab ?? defaultTabName}
           onValueChange={(v) => setActiveTab(v as string)}
           className="h-full flex flex-col gap-0"
         >
           <TabsList className="m-2 self-start gap-1">
-            {data.tabs.map((tab) => {
-              const isActive = (activeTab ?? data.tabs[0]?.name) === tab.name;
+            {orderedTabs.map((tab) => {
+              const isActive = (activeTab ?? defaultTabName) === tab.name;
               return (
                 <TabsTrigger
                   key={tab.name}
@@ -404,7 +421,7 @@ export default function DailyServicePage() {
               );
             })}
           </TabsList>
-          {data.tabs.map((tab) => (
+          {orderedTabs.map((tab) => (
             <TabsContent key={tab.name} value={tab.name} className="flex-1 min-h-0 overflow-hidden">
               <SheetTable
                 tab={tab}
