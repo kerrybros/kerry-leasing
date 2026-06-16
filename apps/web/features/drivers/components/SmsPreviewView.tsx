@@ -173,7 +173,7 @@ export function SmsPreviewView() {
               two bottom borders line up; the list scrolls internally. */}
           <div className="rounded-lg border border-border overflow-hidden flex flex-col min-h-0">
             <div className="shrink-0 bg-muted px-3 py-2 text-[10px] uppercase tracking-wider font-semibold text-muted-foreground">
-              {preview.drivers.length} drivers · sorted by rank
+              {preview.drivers.length} drivers · sorted by Motive safety score
             </div>
             <ul className="divide-y divide-border flex-1 min-h-0 overflow-y-auto">
               {preview.drivers.map((d) => {
@@ -194,7 +194,7 @@ export function SmsPreviewView() {
                       }`}
                     >
                       <span className={`text-xs font-mono w-6 ${excluded ? 'text-rose-400 line-through' : 'text-muted-foreground'}`}>
-                        {d.snapshot.rank ?? '—'}
+                        {d.snapshot.safetyRank || '—'}
                       </span>
                       <span className="flex-1 min-w-0">
                         <span className={`block text-sm font-medium truncate ${excluded ? 'text-rose-700 line-through' : ''}`}>
@@ -203,7 +203,7 @@ export function SmsPreviewView() {
                         <span className={`block text-[11px] truncate ${excluded ? 'text-rose-500' : 'text-muted-foreground'}`}>
                           {excluded
                             ? 'Excluded from send'
-                            : `Score ${d.snapshot.current?.score ?? '—'} · MPG ${d.snapshot.current?.avgMpg?.toFixed?.(1) ?? '—'}`}
+                            : `Safety ${d.snapshot.motiveScore ?? '—'} · MPG ${d.snapshot.current?.avgMpg?.toFixed?.(1) ?? '—'}`}
                         </span>
                       </span>
                       <ChevronRight className={`h-3.5 w-3.5 flex-shrink-0 ${isSelected ? 'text-primary' : 'text-muted-foreground'}`} />

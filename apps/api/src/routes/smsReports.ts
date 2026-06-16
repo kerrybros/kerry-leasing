@@ -97,7 +97,9 @@ router.get('/preview', async (req: AuthRequest, res: Response) => {
     // currently excluded and toggle them back on.
     const reachable = built.reports
       .filter((r) => !r.optedOut && r.phoneE164 != null)
-      .sort((a, b) => a.rank - b.rank);
+      // Order by Motive safety score (safetyRank 1..N); drivers without a Motive
+      // score (safetyRank 0) sort to the bottom.
+      .sort((a, b) => (a.safetyRank || Infinity) - (b.safetyRank || Infinity));
 
     // Fetch email per driver in one query (snapshot doesn't carry it).
     const contactRows = await prisma.driverContact.findMany({
@@ -191,7 +193,7 @@ router.get('/preview', async (req: AuthRequest, res: Response) => {
       };
     })
     .filter((d): d is NonNullable<typeof d> => d != null)
-    .sort((a, b) => (a.snapshot.rank ?? 999) - (b.snapshot.rank ?? 999));
+    .sort((a, b) => (a.snapshot.safetyRank || 999) - (b.snapshot.safetyRank || 999));
 
   res.json({
     weekStart: parsed.data.weekStart,
