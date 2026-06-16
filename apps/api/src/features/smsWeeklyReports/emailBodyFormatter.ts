@@ -9,8 +9,6 @@
 
 export interface EmailFormatInput {
   firstName: string;
-  rank: number;
-  totalDrivers: number;
   noActivity: boolean;
   reportUrl: string;
   unsubscribeUrl: string;
@@ -31,15 +29,13 @@ function escapeHtml(s: string): string {
 }
 
 export function formatEmailBody(input: EmailFormatInput): EmailBody {
-  const { firstName, rank, totalDrivers, noActivity, reportUrl, unsubscribeUrl } = input;
+  const { firstName, noActivity, reportUrl, unsubscribeUrl } = input;
 
-  const subject = noActivity
-    ? 'Your weekly driver scorecard'
-    : `You ranked ${rank} of ${totalDrivers} this week`;
+  const subject = 'Your weekly driver scorecard';
 
   const line = noActivity
     ? `Hi ${firstName}, no driving recorded last week.`
-    : `Hi ${firstName}, you ranked ${rank} of ${totalDrivers} this week.`;
+    : `Hi ${firstName}, your idle and safety rankings for last week are ready.`;
 
   const text = `${line}\n\nView your full scorecard: ${reportUrl}\n\n—\nUnsubscribe from these emails: ${unsubscribeUrl}`;
 

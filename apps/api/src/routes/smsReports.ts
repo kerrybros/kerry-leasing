@@ -21,6 +21,7 @@ import { getAppPrisma } from '../lib/prisma.js';
 import { AuthRequest, requireRole } from '../middleware/auth.js';
 import { config } from '../config.js';
 import { buildWeeklyReports } from '../features/smsWeeklyReports/weeklyReportBuilder.js';
+import { formatSmsBody } from '../features/smsWeeklyReports/smsBodyFormatter.js';
 import { getLastWeekRange } from '../features/smsWeeklyReports/dateWindow.js';
 
 const router = Router();
@@ -111,11 +112,19 @@ router.get('/preview', async (req: AuthRequest, res: Response) => {
       phoneE164: r.phoneE164,
       email: emailById.get(r.driverContactId) ?? null,
       enrolled: r.enrolled,
-      smsBodyPreview: `Hi ${r.firstName}, you ranked ${r.rank} of ${r.totalDrivers} this week. Full scorecard: ${config.reportPublicBaseUrl.replace(/\/$/, '')}/r/<token>`,
+      smsBodyPreview: formatSmsBody({
+        firstName: r.firstName,
+        noActivity: r.noActivity,
+        reportUrl: `${config.reportPublicBaseUrl.replace(/\/$/, '')}/r/<token>`,
+      }),
       snapshot: {
         displayName: r.displayName,
         firstName: r.firstName,
+        motiveScore: r.motiveScore,
         rank: r.rank,
+        idleRank: r.idleRank,
+        safetyRank: r.safetyRank,
+        safetyTotal: r.safetyTotal,
         totalDrivers: r.totalDrivers,
         fleetAvgMpg: r.fleetAvgMpg,
         noActivity: r.noActivity,
@@ -166,7 +175,11 @@ router.get('/preview', async (req: AuthRequest, res: Response) => {
         snapshot: {
           displayName: snap.displayName ?? c.displayName,
           firstName: snap.firstName,
+          motiveScore: snap.motiveScore ?? null,
           rank: snap.rank,
+          idleRank: snap.idleRank ?? null,
+          safetyRank: snap.safetyRank ?? null,
+          safetyTotal: snap.safetyTotal ?? snap.totalDrivers,
           totalDrivers: snap.totalDrivers,
           fleetAvgMpg: snap.fleetAvgMpg,
           noActivity: snap.noActivity,

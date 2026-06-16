@@ -53,10 +53,33 @@ export async function runWeeklyDriverSms(
     where.sendHourEt = options.targetHourEt;
   }
 
-  const configs = await prisma.customerSmsReportConfig.findMany({
+  const configsRaw = await prisma.customerSmsReportConfig.findMany({
     where,
     select: { clerkOrgId: true },
   });
+
+  // Weekly driver reports are Motive-only — the headline safety number is
+  // Motive's own rolling score, which Samsara orgs don't have. Skip any enabled
+  // org whose active telematics provider isn't Motive.
+  const motiveOrgIds = new Set(
+    (
+      await prisma.telematicsProviderAccount.findMany({
+        where: {
+          clerkOrgId: { in: configsRaw.map((c) => c.clerkOrgId) },
+          provider: 'MOTIVE',
+          status: 'ACTIVE',
+        },
+        select: { clerkOrgId: true },
+      })
+    ).map((a) => a.clerkOrgId),
+  );
+  const skippedNonMotive = configsRaw.filter((c) => !motiveOrgIds.has(c.clerkOrgId));
+  if (skippedNonMotive.length > 0) {
+    console.log(
+      `[smsWeeklyReports] skipping ${skippedNonMotive.length} non-Motive org(s): ${skippedNonMotive.map((c) => c.clerkOrgId).join(', ')}`,
+    );
+  }
+  const configs = configsRaw.filter((c) => motiveOrgIds.has(c.clerkOrgId));
 
   // Invalidate the per-org scorecard cache before building reports. The
   // Monday cron runs early morning ET; if Motive's late-Sunday sync wrote

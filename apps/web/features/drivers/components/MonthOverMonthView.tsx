@@ -188,6 +188,15 @@ export function MonthOverMonthView({
         </div>
       </div>
 
+      {/* Like-for-like comparison note. Periods are fixed-length buckets so each
+          column covers the same span as the one beside it; the most recent
+          column can be a period still in progress. */}
+      <p className="text-[11px] text-muted-foreground -mt-1">
+        {granularity === 'weekly'
+          ? 'Each column is a full Mon–Sun week (7 days), so weeks compare like-for-like. The most recent week may still be in progress.'
+          : 'Each column is one full calendar month, so months compare like-for-like. The most recent month may still be in progress.'}
+      </p>
+
       {/* Table */}
       <div className="overflow-x-auto rounded-lg border border-border">
         <Table>

@@ -341,8 +341,6 @@ router.post('/send-test', async (req: AuthRequest, res: Response) => {
   const reportUrl = `${config.reportPublicBaseUrl.replace(/\/$/, '')}/r/${token}`;
   const body = formatSmsBody({
     firstName: sample.firstName,
-    rank: sample.rank,
-    totalDrivers: sample.totalDrivers,
     noActivity: sample.noActivity,
     reportUrl,
   });
@@ -359,7 +357,11 @@ router.post('/send-test', async (req: AuthRequest, res: Response) => {
       kpiSnapshot: {
         displayName: sample.displayName,
         firstName: sample.firstName,
+        motiveScore: sample.motiveScore,
         rank: sample.rank,
+        idleRank: sample.idleRank,
+        safetyRank: sample.safetyRank,
+        safetyTotal: sample.safetyTotal,
         totalDrivers: sample.totalDrivers,
         fleetAvgMpg: sample.fleetAvgMpg,
         current: sample.current,

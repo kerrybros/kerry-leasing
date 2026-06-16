@@ -2,22 +2,20 @@ import { describe, it, expect } from 'vitest';
 import { formatSmsBody } from '../../../src/features/smsWeeklyReports/smsBodyFormatter.js';
 
 describe('formatSmsBody', () => {
-  it('formats a regular weekly body — greeting + rank + link only', () => {
+  it('formats a regular weekly body — greeting + link only (no composite rank)', () => {
     const body = formatSmsBody({
       firstName: 'Jane',
-      rank: 4,
-      totalDrivers: 23,
       noActivity: false,
       reportUrl: 'https://k.l/r/abc',
     });
-    expect(body).toBe('Hi Jane, you ranked 4 of 23 this week. Full scorecard: https://k.l/r/abc');
+    expect(body).toBe('Hi Jane, your weekly driver scorecard is ready: https://k.l/r/abc');
+    // Rankings now live on the linked page, not in the SMS body.
+    expect(body).not.toContain('ranked');
   });
 
   it('formats a no-activity body', () => {
     const body = formatSmsBody({
       firstName: 'Jane',
-      rank: 30,
-      totalDrivers: 30,
       noActivity: true,
       reportUrl: 'https://k.l/r/abc',
     });
@@ -29,8 +27,6 @@ describe('formatSmsBody', () => {
   it('stays inside a single SMS segment for typical names + URLs', () => {
     const body = formatSmsBody({
       firstName: 'Christopher',
-      rank: 12,
-      totalDrivers: 30,
       noActivity: false,
       reportUrl: 'https://www.kerryleasing.com/r/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
     });
@@ -41,8 +37,6 @@ describe('formatSmsBody', () => {
   it('never mentions tier / gold / silver / bronze', () => {
     const body = formatSmsBody({
       firstName: 'Jane',
-      rank: 1,
-      totalDrivers: 23,
       noActivity: false,
       reportUrl: 'https://k.l/r/abc',
     });

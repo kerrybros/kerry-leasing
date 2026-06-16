@@ -13,10 +13,20 @@ import { getAppPrisma } from '../../lib/prisma.js';
 import { DriverContactSource } from '../../generated/app-client/index.js';
 import { getLastWeekRange, getTrailing4WeekRanges, type WeekRange } from './dateWindow.js';
 import { loadExcludedMotiveDriverIds } from '../drivers/excludedDrivers.js';
+import { readCredentials } from '../../lib/credentials.js';
+import { MotiveClient } from '../../telematics/motive/client.js';
+
+/** Add one calendar day to a YYYY-MM-DD string (UTC-safe). */
+function nextYmd(ymd: string): string {
+  const [y, m, d] = ymd.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10);
+}
 
 export interface WeeklyKpiTrendPoint {
   weekStart: string;
   score: number;
+  /** Motive's OWN rolling-4-week safety score as-of this week's end (null if none stored). */
+  motiveScore: number | null;
   idlePct: number;
   avgMpg: number;
   totalMiles: number;
@@ -39,7 +49,12 @@ export interface DriverWeeklyReport {
 
   // Current week
   current: ScorecardDriver;
-  rank: number;
+  /** Motive's OWN rolling-4-week safety score as-of the report week end (null if none). */
+  motiveScore: number | null;
+  rank: number;            // overall composite-score rank (within reachable pop.)
+  idleRank: number;        // rank by idle % (lower is better), within reachable pop.
+  safetyRank: number;      // rank by Motive's safety score (higher is better), reachable w/ score
+  safetyTotal: number;     // denominator for safetyRank (reachable drivers that have a Motive score)
   totalDrivers: number;
   fleetAvgMpg: number;
 
@@ -123,6 +138,65 @@ export async function buildWeeklyReports(orgId: string, now: Date = new Date()):
   ];
 
   const totalDrivers = current.data.length;
+
+  // Motive's OWN safety score is a rolling 4-week number, anchored to a date and
+  // REFRESHED every Monday (Motive docs: "Safety Score"). The refresh that runs
+  // the Monday AFTER a week closes is the one that reflects that week's driving,
+  // and it's what a fleet manager sees if they pull the driver up — so we anchor
+  // each week's score to its Monday-after (weekEnd + 1), not the week end itself.
+  // Surfaced verbatim (no recompute) so the number is reproducible in Motive.
+  const currentAnchor = nextYmd(last.endDate); // Monday after the report week
+  const scoreRows = await prisma.motiveScorecardSummary.findMany({
+    where: {
+      clerkOrgId: orgId,
+      date: { gte: trailing[0].startDate, lte: currentAnchor },
+      score: { not: null },
+    },
+    select: { driverId: true, date: true, score: true },
+    orderBy: { date: 'desc' },
+  });
+  const motiveScoresByDriver = new Map<number, { date: string; score: number }[]>();
+  for (const r of scoreRows) {
+    if (r.score == null) continue;
+    const arr = motiveScoresByDriver.get(r.driverId) ?? [];
+    arr.push({ date: r.date, score: r.score }); // pushed in date-desc order
+    motiveScoresByDriver.set(r.driverId, arr);
+  }
+  /** Latest stored Motive score with date <= asOf (the rolling score as of that day). */
+  const motiveScoreAsOf = (driverId: number, asOf: string): number | null => {
+    const arr = motiveScoresByDriver.get(driverId);
+    const hit = arr?.find((x) => x.date <= asOf);
+    return hit ? hit.score : null;
+  };
+
+  // The current-week anchor (this Monday) usually ISN'T in our daily snapshots
+  // yet — the daily sync pulls "yesterday", so a Monday-morning send predates
+  // it. Pull that one refresh live (one call, all drivers) so the report matches
+  // what Motive shows right now. Stored value is the fallback if the call fails.
+  let liveCurrent: Map<number, number> | null = null;
+  try {
+    const acct = await prisma.telematicsProviderAccount.findUnique({
+      where: { clerkOrgId: orgId, provider: 'MOTIVE' },
+    });
+    if (acct?.status === 'ACTIVE') {
+      const apiKey = readCredentials(acct.credentialsJson).apiKey as string | undefined;
+      if (apiKey) {
+        const rows = await new MotiveClient(apiKey).get<{ driver?: { id?: number }; score?: number }>(
+          '/v1/scorecard_summary',
+          { start_date: currentAnchor, end_date: currentAnchor },
+        );
+        liveCurrent = new Map();
+        for (const r of rows) {
+          if (r.driver?.id != null && r.score != null) liveCurrent.set(r.driver.id, r.score);
+        }
+      }
+    }
+  } catch (err: any) {
+    console.warn(`[smsWeeklyReports] live Motive score pull failed for ${orgId}, using stored: ${err.message}`);
+  }
+  /** Motive's score reflecting the just-closed report week (live Monday refresh, else stored). */
+  const currentMotiveScore = (driverId: number): number | null =>
+    liveCurrent?.get(driverId) ?? motiveScoreAsOf(driverId, currentAnchor);
 
   // Load all DriverContact rows for the org once
   const contacts = await prisma.driverContact.findMany({
@@ -215,9 +289,14 @@ export async function buildWeeklyReports(orgId: string, now: Date = new Date()):
     // Build trend from each week's data (oldest → newest)
     const trend: WeeklyKpiTrendPoint[] = trendOldestToNewest.map(({ week, rows }) => {
       const r = rows.find((x) => x.driverId === row.driverId);
+      const isCurrentWeek = week.startDate === last.startDate;
       return {
         weekStart: week.startDate,
         score: r?.score ?? 0,
+        // Each week's score = Motive's refresh the Monday after it closed.
+        motiveScore: isCurrentWeek
+          ? currentMotiveScore(row.driverId)
+          : motiveScoreAsOf(row.driverId, nextYmd(week.endDate)),
         idlePct: r?.idlePct ?? 0,
         avgMpg: r?.avgMpg ?? 0,
         totalMiles: r?.totalMiles ?? 0,
@@ -271,7 +350,11 @@ export async function buildWeeklyReports(orgId: string, now: Date = new Date()):
       emailOptedOut: contact?.emailOptedOut ?? false,
       noActivity,
       current: row,
+      motiveScore: currentMotiveScore(row.driverId),
       rank,
+      idleRank: 0,    // assigned below, within the reachable population
+      safetyRank: 0,  // assigned below, within the reachable population
+      safetyTotal: 0, // assigned below (reachable drivers that have a Motive score)
       totalDrivers,
       fleetAvgMpg: current.fleetAvgMpg,
       trend,
@@ -292,11 +375,33 @@ export async function buildWeeklyReports(orgId: string, now: Date = new Date()):
     r.rank = i + 1;
     r.totalDrivers = totalReachable;
   });
+
+  // Idle rank — lower % is better, across the full reachable population.
+  [...reachable]
+    .sort((a, b) => a.current.idlePct - b.current.idlePct)
+    .forEach((r, i) => { r.idleRank = i + 1; });
+
+  // Safety rank — by Motive's OWN rolling score (higher is better), among
+  // reachable drivers that actually have a score. Drivers without one are left
+  // unranked (safetyRank 0) rather than dumped at the bottom, and the safety
+  // denominator (safetyTotal) reflects only the scored population.
+  const reachableWithScore = reachable.filter((r) => r.motiveScore != null);
+  reachableWithScore.sort((a, b) => (b.motiveScore ?? 0) - (a.motiveScore ?? 0));
+  const safetyTotal = reachableWithScore.length;
+  reachableWithScore.forEach((r, i) => { r.safetyRank = i + 1; });
+  for (const r of reachable) {
+    r.safetyTotal = safetyTotal;
+    if (r.motiveScore == null) r.safetyRank = 0;
+  }
+
   // Unreachable drivers won't be shown / sent. Sentinel rank=0 so any
   // downstream consumer can tell them apart from a real rank.
   for (const r of reports) {
     if (!reachable.includes(r)) {
       r.rank = 0;
+      r.idleRank = 0;
+      r.safetyRank = 0;
+      r.safetyTotal = safetyTotal;
       r.totalDrivers = totalReachable;
     }
   }

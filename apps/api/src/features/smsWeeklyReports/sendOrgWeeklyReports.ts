@@ -87,7 +87,11 @@ function buildKpiSnapshot(report: DriverWeeklyReport): object {
     firstName: report.firstName,
     motiveDriverId: report.motiveDriverId,
     weekStart: report.trend.length > 0 ? report.trend[report.trend.length - 1].weekStart : '',
+    motiveScore: report.motiveScore,
     rank: report.rank,
+    idleRank: report.idleRank,
+    safetyRank: report.safetyRank,
+    safetyTotal: report.safetyTotal,
     totalDrivers: report.totalDrivers,
     fleetAvgMpg: report.fleetAvgMpg,
     noActivity: report.noActivity,
@@ -214,8 +218,6 @@ export async function sendOrgWeeklyReports(
       if (isEmail) {
         emailParts = formatEmailBody({
           firstName: report.firstName,
-          rank: report.rank,
-          totalDrivers: report.totalDrivers,
           noActivity: report.noActivity,
           reportUrl: reportUrl(token),
           unsubscribeUrl: unsubscribeUrl(token),
@@ -224,8 +226,6 @@ export async function sendOrgWeeklyReports(
       } else {
         body = formatSmsBody({
           firstName: report.firstName,
-          rank: report.rank,
-          totalDrivers: report.totalDrivers,
           noActivity: report.noActivity,
           reportUrl: reportUrl(token),
         });

@@ -8,8 +8,6 @@
 
 export interface SmsFormatInput {
   firstName: string;
-  rank: number;
-  totalDrivers: number;
   noActivity: boolean;
   reportUrl: string;
 }
@@ -18,5 +16,5 @@ export function formatSmsBody(input: SmsFormatInput): string {
   if (input.noActivity) {
     return `Hi ${input.firstName}, no driving recorded last week. Full scorecard: ${input.reportUrl}`;
   }
-  return `Hi ${input.firstName}, you ranked ${input.rank} of ${input.totalDrivers} this week. Full scorecard: ${input.reportUrl}`;
+  return `Hi ${input.firstName}, your weekly driver scorecard is ready: ${input.reportUrl}`;
 }
