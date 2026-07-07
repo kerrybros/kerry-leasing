@@ -7,6 +7,7 @@ import routes from './routes/index.js';
 import { disconnectRepairDb, isRepairDbAvailable } from './db/repairRepo.js';
 import { disconnectAppDb, isAppDbAvailable } from './db/appRepo.js';
 import { assertRepairDbSafety } from './safety/repairDbSafety.js';
+import { integrationStatus, formatIntegrationStatusLines } from './features/opsStatus/opsStatus.js';
 
 // Create Express app
 const app = express();
@@ -134,6 +135,20 @@ async function startServer() {
         console.log(`✓ Redis configured (${config.redisUrl.replace(/\/\/.*@/, '//**@')})`);
       } else {
         console.warn('⚠️  Redis not configured — caching disabled (set REDIS_URL to enable)');
+      }
+
+      console.log('\n📋 Integration status:');
+      for (const line of formatIntegrationStatusLines(
+        integrationStatus({
+          twilioConfigured: !!config.twilio,
+          smsDryRun: config.smsDryRun,
+          graphConfigured: !!config.microsoftGraph,
+          emailDryRun: config.emailDryRun,
+          reportEmailFrom: config.reportEmailFrom,
+          weeklyDriverSmsEnabled: config.weeklyDriverSmsEnabled,
+        }),
+      )) {
+        console.log(`   ${line}`);
       }
     });
   } catch (error) {

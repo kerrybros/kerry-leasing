@@ -9,44 +9,14 @@
 import { getAppPrisma } from '../lib/prisma.js';
 import { config } from '../config.js';
 import { sendMail } from '../integrations/microsoft/graphClient.js';
-import { CronJobType } from '../generated/app-client/index.js';
-import {
-  evaluateCronHealth,
-  formatCronHealthAlert,
-  type CronHealthCheck,
-} from '../features/cronHealth/cronHealth.js';
-
-async function lastSuccessAt(job: CronJobType): Promise<Date | null> {
-  const row = await getAppPrisma().telematicsCronRun.findFirst({
-    where: { job, allSucceeded: true },
-    orderBy: { startedAt: 'desc' },
-    select: { startedAt: true },
-  });
-  return row?.startedAt ?? null;
-}
+import { evaluateCronHealth, formatCronHealthAlert } from '../features/cronHealth/cronHealth.js';
+import { gatherCronHealthChecks } from '../features/cronHealth/cronHealthData.js';
 
 async function main() {
   const prisma = getAppPrisma();
   const now = new Date();
 
-  const [motive, samsara, weekly, diesel] = await Promise.all([
-    lastSuccessAt(CronJobType.MOTIVE_DAILY),
-    lastSuccessAt(CronJobType.SAMSARA_DAILY),
-    lastSuccessAt(CronJobType.SMS_WEEKLY_DRIVER_REPORT),
-    prisma.systemConfig.findUnique({
-      where: { key: 'diesel_price_per_gallon' },
-      select: { updatedAt: true },
-    }),
-  ]);
-
-  const checks: CronHealthCheck[] = [
-    { label: 'Motive daily sync', lastSuccessAt: motive, maxAgeHours: 26 },
-    { label: 'Samsara daily sync', lastSuccessAt: samsara, maxAgeHours: 26 },
-    { label: 'Weekly driver SMS/email', lastSuccessAt: weekly, maxAgeHours: 24 * 8 },
-    { label: 'EIA diesel price', lastSuccessAt: diesel?.updatedAt ?? null, maxAgeHours: 48 },
-  ];
-
-  const results = evaluateCronHealth(checks, now);
+  const results = evaluateCronHealth(await gatherCronHealthChecks(), now);
   for (const r of results) {
     console.log(
       `[cronHealth] ${r.overdue ? 'OVERDUE' : 'ok     '} ${r.label} — ` +

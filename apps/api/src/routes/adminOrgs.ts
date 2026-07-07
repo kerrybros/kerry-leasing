@@ -23,6 +23,9 @@ import { createId } from '@paralleldrive/cuid2';
 import { config } from '../config.js';
 import { loadSamsaraTelematicsVinSetForServicePlan } from '../lib/servicePlanSamsaraTelematics.js';
 import { invalidateCachesAfterServicePlanChange } from '../lib/fleetCache.js';
+import { integrationStatus } from '../features/opsStatus/opsStatus.js';
+import { evaluateCronHealth } from '../features/cronHealth/cronHealth.js';
+import { gatherCronHealthChecks } from '../features/cronHealth/cronHealthData.js';
 
 const router = Router();
 
@@ -698,6 +701,34 @@ router.get('/cron-health', async (_req: AuthRequest, res) => {
       error: enriched.filter(a => a.status === 'ERROR').length,
       staleCount: enriched.filter(a => a.stale).length,
       accounts: enriched,
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Internal server error', message: error.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// GET /admin/orgs/ops-status
+// Integration/feature readiness (SMS/email mode, master switch — secret-free)
+// plus cron health, in one place. Internal-only. Answers "is everything
+// configured and running?" without poking at Twilio/Graph/Render by hand.
+// ---------------------------------------------------------------------------
+router.get('/ops-status', async (_req: AuthRequest, res) => {
+  try {
+    const integration = integrationStatus({
+      twilioConfigured: !!config.twilio,
+      smsDryRun: config.smsDryRun,
+      graphConfigured: !!config.microsoftGraph,
+      emailDryRun: config.emailDryRun,
+      reportEmailFrom: config.reportEmailFrom,
+      weeklyDriverSmsEnabled: config.weeklyDriverSmsEnabled,
+    });
+    const cronHealth = evaluateCronHealth(await gatherCronHealthChecks(), new Date());
+    res.json({
+      timestamp: new Date().toISOString(),
+      integration,
+      cronHealth,
+      overdueCount: cronHealth.filter((c) => c.overdue).length,
     });
   } catch (error: any) {
     res.status(500).json({ error: 'Internal server error', message: error.message });
