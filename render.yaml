@@ -7,6 +7,10 @@ services:
     plan: free
     buildCommand: cd apps/api && pnpm install && pnpm prisma:app:generate && pnpm prisma:repair:generate && pnpm build
     startCommand: cd apps/api && pnpm start
+    # Apply pending Prisma migrations after build, before the new version goes
+    # live. Render does NOT run migrations on deploy otherwise, so schema changes
+    # would ship with code that references columns the DB doesn't have yet.
+    preDeployCommand: cd apps/api && pnpm prisma:app:migrate:deploy
     healthCheckPath: /health
     autoDeploy: true
     branch: main
