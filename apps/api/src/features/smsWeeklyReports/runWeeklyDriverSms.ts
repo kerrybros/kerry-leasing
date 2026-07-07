@@ -122,7 +122,11 @@ export async function runWeeklyDriverSms(
           recordCount: result.driversTotal,
           newCount: result.driversSent,
           updatedCount: 0,
-          unchangedCount: result.driversSkipped + result.driversNoPhone + result.driversOptedOut,
+          unchangedCount:
+            result.driversSkipped +
+            result.driversNoPhone +
+            result.driversOptedOut +
+            result.driversNoConsent,
           errorCount: result.driversFailed,
           skipped: false,
         },

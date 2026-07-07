@@ -17,7 +17,7 @@ import { sendEmail } from '../../integrations/email/client.js';
 import { buildWeeklyReports, type DriverWeeklyReport } from './weeklyReportBuilder.js';
 import { formatSmsBody } from './smsBodyFormatter.js';
 import { formatEmailBody } from './emailBodyFormatter.js';
-import { DriverSmsStatus } from '../../generated/app-client/index.js';
+import { DriverSmsStatus, DriverSmsConsentStatus } from '../../generated/app-client/index.js';
 
 const TOKEN_TTL_DAYS = 30;
 
@@ -48,6 +48,7 @@ export interface SendOrgResult {
   driversFailed: number;
   driversNoPhone: number;
   driversOptedOut: number;
+  driversNoConsent: number;  // SMS suppressed: no verified opt-in on file (A2P 10DLC)
   reports: Array<{
     driverContactId: string;
     displayName: string;
@@ -126,6 +127,7 @@ export async function sendOrgWeeklyReports(
       driversFailed: 0,
       driversNoPhone: 0,
       driversOptedOut: 0,
+      driversNoConsent: 0,
       reports: [],
       error: `buildWeeklyReports failed: ${err.message ?? err}`,
     };
@@ -138,7 +140,7 @@ export async function sendOrgWeeklyReports(
   });
   const channels = resolveChannels(cfg?.channels);
 
-  const counters = { sent: 0, skipped: 0, failed: 0, noPhone: 0, optedOut: 0 };
+  const counters = { sent: 0, skipped: 0, failed: 0, noPhone: 0, optedOut: 0, noConsent: 0 };
   const out: SendOrgResult['reports'] = [];
 
   const reportsToProcess = options.onlyDriverContactId
@@ -177,6 +179,7 @@ export async function sendOrgWeeklyReports(
     driversFailed: counters.failed,
     driversNoPhone: counters.noPhone,
     driversOptedOut: counters.optedOut,
+    driversNoConsent: counters.noConsent,
     reports: out,
   };
 
@@ -197,6 +200,12 @@ export async function sendOrgWeeklyReports(
     } else if (channelOptedOut) {
       status = DriverSmsStatus.OPTED_OUT;
       counters.optedOut++;
+    } else if (!isEmail && report.smsConsentStatus !== DriverSmsConsentStatus.CONFIRMED) {
+      // A2P 10DLC: never send an SMS to a driver who hasn't affirmatively opted in.
+      // These contacts must reply YES to the double opt-in confirmation first.
+      status = DriverSmsStatus.NO_CONSENT;
+      skipReason = 'no-sms-consent';
+      counters.noConsent++;
     } else if (!recipient) {
       status = isEmail ? DriverSmsStatus.NO_EMAIL : DriverSmsStatus.NO_PHONE;
       counters.noPhone++;

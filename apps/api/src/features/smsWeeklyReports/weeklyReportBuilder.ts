@@ -10,7 +10,7 @@
 
 import { TelematicsService, type ScorecardDriver } from '../../services/telematicsService.js';
 import { getAppPrisma } from '../../lib/prisma.js';
-import { DriverContactSource } from '../../generated/app-client/index.js';
+import { DriverContactSource, DriverSmsConsentStatus } from '../../generated/app-client/index.js';
 import { getLastWeekRange, getTrailing4WeekRanges, type WeekRange } from './dateWindow.js';
 import { loadExcludedMotiveDriverIds } from '../drivers/excludedDrivers.js';
 import { readCredentials } from '../../lib/credentials.js';
@@ -45,6 +45,7 @@ export interface DriverWeeklyReport {
   enrolled: boolean;
   optedOut: boolean;
   emailOptedOut: boolean;
+  smsConsentStatus: DriverSmsConsentStatus;  // only CONFIRMED contacts get a weekly SMS (A2P 10DLC)
   noActivity: boolean;
 
   // Current week
@@ -211,6 +212,7 @@ export async function buildWeeklyReports(orgId: string, now: Date = new Date()):
       enrolled: true,
       optedOut: true,
       emailOptedOut: true,
+      smsConsentStatus: true,
     },
   });
   const byNorm = new Map(contacts.map((c) => [c.normalizedName, c]));
@@ -269,6 +271,7 @@ export async function buildWeeklyReports(orgId: string, now: Date = new Date()):
           enrolled: true,
           optedOut: true,
           emailOptedOut: true,
+          smsConsentStatus: true,
         },
       });
       byNorm.set(created.normalizedName, created);
@@ -348,6 +351,7 @@ export async function buildWeeklyReports(orgId: string, now: Date = new Date()):
       enrolled: contact?.enrolled ?? false,
       optedOut: contact?.optedOut ?? false,
       emailOptedOut: contact?.emailOptedOut ?? false,
+      smsConsentStatus: contact?.smsConsentStatus ?? DriverSmsConsentStatus.PENDING,
       noActivity,
       current: row,
       motiveScore: currentMotiveScore(row.driverId),

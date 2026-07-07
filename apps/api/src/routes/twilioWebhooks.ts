@@ -16,19 +16,32 @@ import { getAppPrisma } from '../lib/prisma.js';
 import { validateInboundSignature } from '../integrations/twilio/client.js';
 import {
   DriverSmsStatus,
+  DriverSmsConsentStatus,
   TwilioInboundEventType,
 } from '../generated/app-client/index.js';
+import { OPT_IN_METHOD } from '../features/smsConsent/optInMessage.js';
 
 const router = Router();
 
 // Twilio posts as form-urlencoded. Local parser so the rest of the API stays JSON-only.
 router.use(urlencoded({ extended: false }));
 
-const STOP_KEYWORDS = new Set(['STOP', 'STOPALL', 'UNSUBSCRIBE', 'CANCEL', 'END', 'QUIT', 'OPTOUT']);
-const START_KEYWORDS = new Set(['START', 'YES', 'UNSTOP', 'OPTIN']);
+const STOP_KEYWORDS = new Set(['STOP', 'STOPALL', 'UNSUBSCRIBE', 'CANCEL', 'END', 'QUIT', 'OPTOUT', 'REVOKE']);
+const START_KEYWORDS = new Set([
+  'START', 'YES', 'Y', 'YEAH', 'YEP', 'YUP', 'SURE', 'OK', 'OKAY', 'UNSTOP', 'OPTIN',
+]);
 
 function normalizeBody(b: unknown): string {
   return typeof b === 'string' ? b.trim().toUpperCase() : '';
+}
+
+// Drivers reply casually ("Y", "yes please", "yes 👍"), so match intent rather than an
+// exact string: test the punctuation-stripped body AND its leading word against the set.
+// Opt-out takes precedence via the isStop-first branch below.
+function matchesKeyword(body: string, keywords: Set<string>): boolean {
+  const compact = body.replace(/[^A-Z0-9]/g, ''); // "OPT-IN" -> "OPTIN", "STOP ALL" -> "STOPALL"
+  const firstWord = (body.match(/[A-Z0-9]+/) ?? [''])[0]; // "YES PLEASE" -> "YES"
+  return keywords.has(compact) || keywords.has(firstWord);
 }
 
 function fullUrl(req: Request): string {
@@ -51,8 +64,8 @@ router.post('/inbound', async (req: Request, res: Response) => {
   const messageSid = params.MessageSid ?? params.SmsMessageSid ?? null;
   const body = normalizeBody(params.Body);
 
-  const isStop = STOP_KEYWORDS.has(body);
-  const isStart = START_KEYWORDS.has(body);
+  const isStop = matchesKeyword(body, STOP_KEYWORDS);
+  const isStart = matchesKeyword(body, START_KEYWORDS);
   const eventType: TwilioInboundEventType = isStart
     ? TwilioInboundEventType.INBOUND_START
     : TwilioInboundEventType.INBOUND_STOP;
@@ -61,15 +74,38 @@ router.post('/inbound', async (req: Request, res: Response) => {
   if ((isStop || isStart) && fromPhone) {
     const contact = await prisma.driverContact.findFirst({
       where: { phoneE164: fromPhone },
-      select: { id: true },
+      select: { id: true, smsConsentStatus: true },
     });
     if (contact) {
       matchedDriverContactId = contact.id;
+
+      // Build the update. STOP mirrors the carrier opt-out; START/YES both clears
+      // the opt-out AND — for the double opt-in — is the driver's affirmative
+      // consent, so we record it as CONFIRMED (once) with the reply as proof.
+      const rawBody = typeof params.Body === 'string' ? params.Body : null;
+      let data: Record<string, unknown>;
+      if (isStop) {
+        data = { optedOut: true, optedOutAt: new Date() };
+        // A STOP before the driver ever confirmed = they declined to opt in.
+        if (contact.smsConsentStatus === DriverSmsConsentStatus.PENDING) {
+          data.smsConsentStatus = DriverSmsConsentStatus.DECLINED;
+        }
+      } else {
+        data = { optedOut: false, optedOutAt: null };
+        // First affirmative YES records verifiable consent. Don't overwrite an
+        // earlier confirmation timestamp on a later re-opt-in.
+        if (contact.smsConsentStatus !== DriverSmsConsentStatus.CONFIRMED) {
+          data.smsConsentStatus = DriverSmsConsentStatus.CONFIRMED;
+          data.smsConsentConfirmedAt = new Date();
+          data.smsConsentReplySid = messageSid;
+          data.smsConsentReplyBody = rawBody;
+          data.smsConsentMethod = OPT_IN_METHOD;
+        }
+      }
+
       await prisma.driverContact.update({
         where: { id: contact.id },
-        data: isStop
-          ? { optedOut: true, optedOutAt: new Date() }
-          : { optedOut: false, optedOutAt: null },
+        data,
       });
     }
   }
