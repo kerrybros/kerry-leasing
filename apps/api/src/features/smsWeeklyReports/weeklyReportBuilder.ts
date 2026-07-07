@@ -367,12 +367,16 @@ export async function buildWeeklyReports(orgId: string, now: Date = new Date()):
     };
   });
 
-  // Re-rank within the reachable population — drivers with no phone or who
-  // opted out are removed from the rank denominator entirely. Excluded
-  // (enrolled=false) drivers KEEP their rank so admin sees where they'd
-  // have placed if re-enabled. Result: every visible driver in the
-  // preview gets a contiguous 1..N rank with no gaps.
-  const reachable = reports.filter((r) => !r.optedOut && r.phoneE164 != null);
+  // Re-rank within the reachable population — a driver is "reachable" if they can
+  // receive the report on ANY channel: an SMS-reachable phone (has number, not
+  // opted out) OR an email-reachable address (has email, not email-opted-out).
+  // This originally checked phone only, which left email-only drivers unranked
+  // (rank 0 → "0 of N" in their weekly email). Excluded (enrolled=false) drivers
+  // KEEP their rank so admin sees where they'd have placed if re-enabled. Result:
+  // every driver who receives a report gets a contiguous 1..N rank with no gaps.
+  const reachable = reports.filter(
+    (r) => (!r.optedOut && r.phoneE164 != null) || (!r.emailOptedOut && r.email != null),
+  );
   reachable.sort((a, b) => b.current.score - a.current.score);
   const totalReachable = reachable.length;
   reachable.forEach((r, i) => {
