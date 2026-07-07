@@ -42,9 +42,5 @@ jobs:
       - name: Typecheck (api)
         run: pnpm --filter @kerry-leasing/api exec tsc --noEmit
 
-      - name: Lint (web)
-        run: pnpm --filter @kerry-leasing/web run lint
-
-      # TODO: add API lint once apps/api has its own eslint config (it currently
-      # inherits the root next/core-web-vitals config, which errors on the
-      # missing pages/ dir). Then add: pnpm --filter @kerry-leasing/api run lint
+      - name: Lint (api + web + shared)
+        run: pnpm lint
