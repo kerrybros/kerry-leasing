@@ -1,27 +1,51 @@
-# Render deployment configuration
+# Render deployment configuration — Kerry Leasing
+#
+# IMPORTANT: these services are managed MANUALLY in the Render dashboard, not via
+# Blueprint auto-sync. This file is documentation, kept in step with reality by
+# hand — editing it does NOT change the running services. Reconciled against the
+# live Render account on 2026-07-07.
+#
+# Conventions that vary by service (matching what's actually deployed):
+#   - The web service uses rootDir: apps/api, so its commands have no `cd` prefix.
+#   - The Motive/Samsara crons run from the repo root via root package.json
+#     scripts (pnpm sync-motive / sync-samsara).
+#   - The weekly-SMS and whiparound crons run from the repo root but `cd apps/api`
+#     in their commands.
+# Secrets and environment-specific values use `sync: false` (set in the dashboard).
+
 services:
+  # ---------------------------------------------------------------------------
+  # API (Express) — serves the portal backend, cron HTTP endpoints, and the
+  # Twilio webhooks. Frontend (Vercel) points NEXT_PUBLIC_API_URL here.
+  # URL: https://kerry-leasing.onrender.com
+  # ---------------------------------------------------------------------------
   - type: web
-    name: kerry-leasing-api
+    name: kerry-leasing
     runtime: node
-    region: oregon
-    plan: free
-    buildCommand: cd apps/api && pnpm install && pnpm prisma:app:generate && pnpm prisma:repair:generate && pnpm build
-    startCommand: cd apps/api && pnpm start
-    # Apply pending Prisma migrations after build, before the new version goes
-    # live. Render does NOT run migrations on deploy otherwise, so schema changes
-    # would ship with code that references columns the DB doesn't have yet.
-    preDeployCommand: cd apps/api && pnpm prisma:app:migrate:deploy
-    healthCheckPath: /health
-    autoDeploy: true
+    region: virginia
+    plan: standard
     branch: main
+    rootDir: apps/api
+    autoDeploy: true
+    buildCommand: pnpm install && pnpm prisma:app:generate && pnpm prisma:repair:generate && pnpm build
+    startCommand: pnpm start
+    # Apply pending Prisma migrations after build, before the new version goes
+    # live. Without this, a merged migration ships with code referencing columns
+    # the DB doesn't have yet (this bit us on 2026-07-07).
+    preDeployCommand: pnpm prisma:app:migrate:deploy
+    healthCheckPath: /health
     envVars:
       - key: NODE_ENV
         value: production
       - key: PORT
         value: 4000
+      - key: APP_DATABASE_URL
+        sync: false
       - key: REPAIR_DATABASE_URL
         sync: false
-      - key: APP_DATABASE_URL
+      - key: REPAIR_SHOP_ORG_ID
+        sync: false
+      - key: CREDENTIALS_ENCRYPTION_KEY
         sync: false
       - key: CLERK_SECRET_KEY
         sync: false
@@ -31,70 +55,11 @@ services:
         sync: false
       - key: CRON_SECRET
         sync: false
-      # Twilio: required by the webhook handlers (/webhooks/twilio/*) for
-      # inbound-signature verification. Without these, validateInboundSignature
-      # accepts unsigned/forged requests in prod. Values set in Render dashboard.
-      - key: TWILIO_ACCOUNT_SID
+      - key: REDIS_URL
         sync: false
-      - key: TWILIO_AUTH_TOKEN
+      - key: NEXT_PUBLIC_API_URL
         sync: false
-      - key: TWILIO_MESSAGING_SERVICE_SID
-        sync: false
-      - key: TWILIO_STATUS_CALLBACK_URL
-        sync: false
-      # Weekly driver report email — sender mailbox. Sent via the MICROSOFT_GRAPH_*
-      # app creds already configured on this service (daily-service workbook).
-      - key: REPORT_EMAIL_FROM
-        sync: false
-
-  - type: cron
-    name: kerry-whiparound-sync
-    runtime: node
-    region: oregon
-    plan: starter
-    schedule: "0 12,14,17,20,23 * * *"  # EST business hours: 7am, 9am, 12pm, 3pm, 6pm (UTC-5; runs ~1h early during EDT)
-    buildCommand: cd apps/api && pnpm install && pnpm prisma:app:generate && pnpm prisma:repair:generate && pnpm build
-    startCommand: cd apps/api && node dist/scripts/run-whiparound-daily.js
-    envVars:
-      - key: NODE_ENV
-        value: production
-      - key: APP_DATABASE_URL
-        sync: false
-      - key: CREDENTIALS_ENCRYPTION_KEY
-        sync: false
-
-  - type: cron
-    name: kerry-weekly-driver-sms
-    runtime: node
-    region: oregon
-    plan: starter
-    schedule: "0 10 * * 1"  # Mondays 5am ET (EST) / 6am ET (EDT) — fixed UTC so DST drifts ±1h
-    # Single weekly cron entry → no per-hour filtering. All enabled customers
-    # fire when this runs. To support multiple send hours later, add additional
-    # cron entries with --target-hour=N matching the desired sendHourEt.
-    buildCommand: cd apps/api && pnpm install && pnpm prisma:app:generate && pnpm prisma:repair:generate && pnpm build
-    startCommand: cd apps/api && node dist/scripts/run-weekly-driver-sms.js
-    envVars:
-      - key: NODE_ENV
-        value: production
-      - key: APP_DATABASE_URL
-        sync: false
-      - key: CREDENTIALS_ENCRYPTION_KEY
-        sync: false
-      - key: TWILIO_ACCOUNT_SID
-        sync: false
-      - key: TWILIO_AUTH_TOKEN
-        sync: false
-      - key: TWILIO_MESSAGING_SERVICE_SID
-        sync: false
-      - key: TWILIO_STATUS_CALLBACK_URL
-        sync: false
-      - key: REPORT_PUBLIC_BASE_URL
-        sync: false
-      - key: EIA_API_KEY
-        sync: false
-      # Email channel (weekly driver reports). This cron is a separate Render
-      # service, so it needs its own copy of the Graph app creds + sender mailbox.
+      # Microsoft Graph app creds (daily-service workbook + weekly report email)
       - key: MICROSOFT_GRAPH_TENANT_ID
         sync: false
       - key: MICROSOFT_GRAPH_CLIENT_ID
@@ -105,15 +70,132 @@ services:
         sync: false
       - key: MICROSOFT_GRAPH_SITE_PATH
         sync: false
+      - key: MICROSOFT_GRAPH_DAILY_SERVICE_ITEM_ID
+        sync: false
+      # Weekly driver report — email sender + master on-switch (powers "Send now")
       - key: REPORT_EMAIL_FROM
         sync: false
+      - key: WEEKLY_DRIVER_SMS_ENABLED
+        sync: false
+      # Twilio (SMS) is NOT set here yet — inbound webhook signature verification
+      # needs TWILIO_ACCOUNT_SID + TWILIO_AUTH_TOKEN once the A2P campaign is live.
 
+  # ---------------------------------------------------------------------------
+  # Motive daily telematics sync — repo root, root package.json script.
+  # ---------------------------------------------------------------------------
+  - type: cron
+    name: kerry-leasing-motive
+    runtime: node
+    region: virginia
+    plan: starter
+    branch: main
+    rootDir: ""
+    schedule: "0 11 * * *"  # daily 11:00 UTC
+    buildCommand: pnpm install --frozen-lockfile; pnpm run build
+    startCommand: pnpm sync-motive
+    envVars:
+      - key: APP_DATABASE_URL
+        sync: false
+      - key: CREDENTIALS_ENCRYPTION_KEY
+        sync: false
+      - key: CRON_SECRET
+        sync: false
+
+  # ---------------------------------------------------------------------------
+  # Samsara daily telematics sync — repo root, root package.json script.
+  # ---------------------------------------------------------------------------
+  - type: cron
+    name: kerry-leasing-samsara
+    runtime: node
+    region: virginia
+    plan: starter
+    branch: main
+    rootDir: ""
+    schedule: "0 11 * * *"  # daily 11:00 UTC
+    buildCommand: pnpm install && pnpm run build
+    startCommand: pnpm sync-samsara
+    envVars:
+      - key: APP_DATABASE_URL
+        sync: false
+      - key: CREDENTIALS_ENCRYPTION_KEY
+        sync: false
+      - key: CRON_SECRET
+        sync: false
+
+  # ---------------------------------------------------------------------------
+  # Whiparound inspection sync — EST business hours.
+  # NOTE: the live service name is "whiparound-snyc" (typo preserved to match
+  # Render; renaming in Render recreates the service).
+  # ---------------------------------------------------------------------------
+  - type: cron
+    name: whiparound-snyc
+    runtime: node
+    region: virginia
+    plan: starter
+    branch: main
+    rootDir: ""
+    schedule: "0 12,14,17,20,23 * * *"  # ~7a/9a/12p/3p/6p ET
+    buildCommand: cd apps/api && pnpm install && pnpm prisma:app:generate && pnpm prisma:repair:generate && pnpm build
+    startCommand: cd apps/api && node dist/scripts/run-whiparound-daily.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: APP_DATABASE_URL
+        sync: false
+      - key: CREDENTIALS_ENCRYPTION_KEY
+        sync: false
+
+  # ---------------------------------------------------------------------------
+  # Weekly driver scorecard — SMS + Email. Mondays. Requires the master switch
+  # WEEKLY_DRIVER_SMS_ENABLED=true or it no-ops.
+  # ---------------------------------------------------------------------------
+  - type: cron
+    name: kerry-weekly-driver-sms
+    runtime: node
+    region: virginia
+    plan: starter
+    branch: main
+    rootDir: ""
+    schedule: "0 10 * * 1"  # Mondays 10:00 UTC (~6a ET EDT / 5a EST)
+    buildCommand: cd apps/api && pnpm install && pnpm prisma:app:generate && pnpm prisma:repair:generate && pnpm build
+    startCommand: cd apps/api && node dist/scripts/run-weekly-driver-sms.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: APP_DATABASE_URL
+        sync: false
+      - key: CREDENTIALS_ENCRYPTION_KEY
+        sync: false
+      - key: WEEKLY_DRIVER_SMS_ENABLED  # must be "true" or the run skips all orgs
+        sync: false
+      - key: REPORT_EMAIL_FROM
+        sync: false
+      - key: MICROSOFT_GRAPH_TENANT_ID
+        sync: false
+      - key: MICROSOFT_GRAPH_CLIENT_ID
+        sync: false
+      - key: MICROSOFT_GRAPH_CLIENT_SECRET
+        sync: false
+      - key: MICROSOFT_GRAPH_SITE_HOSTNAME
+        sync: false
+      - key: MICROSOFT_GRAPH_SITE_PATH
+        sync: false
+      # REPORT_PUBLIC_BASE_URL falls back to https://www.kerryleasing.com in code.
+      # Twilio SMS vars needed here too once A2P is live (TWILIO_ACCOUNT_SID,
+      # TWILIO_AUTH_TOKEN, TWILIO_MESSAGING_SERVICE_SID, TWILIO_STATUS_CALLBACK_URL).
+
+  # ---------------------------------------------------------------------------
+  # EIA Midwest retail diesel price → system_config. Feeds idle fuel-cost in the
+  # driver scorecards. Recreated 2026-07-07 (was missing; price had been frozen).
+  # ---------------------------------------------------------------------------
   - type: cron
     name: kerry-eia-diesel-price
     runtime: node
-    region: oregon
+    region: virginia
     plan: starter
-    schedule: "30 11 * * *"  # Daily ~11:30 UTC — EIA Midwest retail diesel → system_config (weekly data; daily job picks up new rows)
+    branch: main
+    rootDir: ""
+    schedule: "30 11 * * *"  # daily 11:30 UTC (EIA publishes weekly)
     buildCommand: cd apps/api && pnpm install && pnpm prisma:app:generate && pnpm prisma:repair:generate && pnpm build
     startCommand: cd apps/api && node dist/scripts/run-refresh-fuel-price.js
     envVars:
