@@ -13,6 +13,7 @@ import { getAppPrisma } from '../../lib/prisma.js';
 import { DriverContactSource, DriverSmsConsentStatus } from '../../generated/app-client/index.js';
 import { getLastWeekRange, getTrailing4WeekRanges, type WeekRange } from './dateWindow.js';
 import { loadExcludedMotiveDriverIds } from '../drivers/excludedDrivers.js';
+import { isReportReachable } from './reportPolicy.js';
 import { readCredentials } from '../../lib/credentials.js';
 import { MotiveClient } from '../../telematics/motive/client.js';
 
@@ -374,9 +375,7 @@ export async function buildWeeklyReports(orgId: string, now: Date = new Date()):
   // (rank 0 → "0 of N" in their weekly email). Excluded (enrolled=false) drivers
   // KEEP their rank so admin sees where they'd have placed if re-enabled. Result:
   // every driver who receives a report gets a contiguous 1..N rank with no gaps.
-  const reachable = reports.filter(
-    (r) => (!r.optedOut && r.phoneE164 != null) || (!r.emailOptedOut && r.email != null),
-  );
+  const reachable = reports.filter(isReportReachable);
   reachable.sort((a, b) => b.current.score - a.current.score);
   const totalReachable = reachable.length;
   reachable.forEach((r, i) => {

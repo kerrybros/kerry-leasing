@@ -53,6 +53,8 @@
   },
   "devDependencies": {
     "@types/compression": "^1.8.1",
+    "@typescript-eslint/eslint-plugin": "^7",
+    "@typescript-eslint/parser": "^7",
     "tsx": "^4.7.0",
     "vitest": "^1.0.0"
   }

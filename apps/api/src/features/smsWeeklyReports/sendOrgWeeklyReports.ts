@@ -17,7 +17,8 @@ import { sendEmail } from '../../integrations/email/client.js';
 import { buildWeeklyReports, type DriverWeeklyReport } from './weeklyReportBuilder.js';
 import { formatSmsBody } from './smsBodyFormatter.js';
 import { formatEmailBody } from './emailBodyFormatter.js';
-import { DriverSmsStatus, DriverSmsConsentStatus } from '../../generated/app-client/index.js';
+import { decideChannelStatus } from './reportPolicy.js';
+import { DriverSmsStatus } from '../../generated/app-client/index.js';
 
 const TOKEN_TTL_DAYS = 30;
 
@@ -192,29 +193,17 @@ export async function sendOrgWeeklyReports(
     const recipient = isEmail ? report.email : report.phoneE164;
     const channelOptedOut = isEmail ? report.emailOptedOut : report.optedOut;
 
-    let status: DriverSmsStatus;
-    let skipReason: string | null = null;
-    if (!report.enrolled) {
-      status = DriverSmsStatus.SKIPPED;
-      skipReason = 'not-enrolled';
-    } else if (channelOptedOut) {
-      status = DriverSmsStatus.OPTED_OUT;
-      counters.optedOut++;
-    } else if (!isEmail && report.smsConsentStatus !== DriverSmsConsentStatus.CONFIRMED) {
-      // A2P 10DLC: never send an SMS to a driver who hasn't affirmatively opted in.
-      // These contacts must reply YES to the double opt-in confirmation first.
-      status = DriverSmsStatus.NO_CONSENT;
-      skipReason = 'no-sms-consent';
-      counters.noConsent++;
-    } else if (!recipient) {
-      status = isEmail ? DriverSmsStatus.NO_EMAIL : DriverSmsStatus.NO_PHONE;
-      counters.noPhone++;
-    } else if (options.dryRun) {
-      status = DriverSmsStatus.SKIPPED;
-      skipReason = 'dry-run';
-    } else {
-      status = DriverSmsStatus.QUEUED;
-    }
+    const { status, skipReason } = decideChannelStatus({
+      enrolled: report.enrolled,
+      channelOptedOut,
+      isEmail,
+      smsConsentStatus: report.smsConsentStatus,
+      hasRecipient: recipient != null,
+      dryRun: options.dryRun === true,
+    });
+    if (status === DriverSmsStatus.OPTED_OUT) counters.optedOut++;
+    else if (status === DriverSmsStatus.NO_CONSENT) counters.noConsent++;
+    else if (status === DriverSmsStatus.NO_PHONE || status === DriverSmsStatus.NO_EMAIL) counters.noPhone++;
 
     const token = newToken();
     const kpiSnapshot = buildKpiSnapshot(report);
