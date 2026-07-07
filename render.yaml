@@ -205,3 +205,34 @@ services:
         sync: false
       - key: EIA_API_KEY
         sync: false
+
+  # ---------------------------------------------------------------------------
+  # Cron-health watchdog — emails an alert (via Graph) when any scheduled job
+  # hasn't succeeded within its window. The safety net for silent cron death.
+  # Added 2026-07-07. Set CRON_ALERT_EMAIL to a monitored inbox.
+  # ---------------------------------------------------------------------------
+  - type: cron
+    name: kerry-cron-health
+    runtime: node
+    region: virginia
+    plan: starter
+    branch: main
+    rootDir: ""
+    schedule: "0 13 * * *"  # daily 13:00 UTC — after the 11:00 telematics syncs
+    buildCommand: cd apps/api && pnpm install && pnpm prisma:app:generate && pnpm prisma:repair:generate && pnpm build
+    startCommand: cd apps/api && node dist/scripts/run-cron-health-check.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: APP_DATABASE_URL
+        sync: false
+      - key: REPORT_EMAIL_FROM
+        sync: false
+      - key: CRON_ALERT_EMAIL
+        sync: false
+      - key: MICROSOFT_GRAPH_TENANT_ID
+        sync: false
+      - key: MICROSOFT_GRAPH_CLIENT_ID
+        sync: false
+      - key: MICROSOFT_GRAPH_CLIENT_SECRET
+        sync: false
