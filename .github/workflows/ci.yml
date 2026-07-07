@@ -1,0 +1,50 @@
+name: CI
+
+# Runs the existing test suites + typecheck on every PR and on pushes to main.
+# Before this, tests existed (Vitest) but nothing ran them, so they rotted
+# silently. This makes them enforced.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: lint · typecheck · test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Prisma clients are generated artifacts (not committed); the API's tests
+      # and typecheck import them. Generate is offline — no DB needed.
+      - name: Generate Prisma clients
+        run: pnpm --filter @kerry-leasing/api run prisma:generate
+
+      - name: Test (api + web)
+        run: pnpm test
+
+      - name: Typecheck (api)
+        run: pnpm --filter @kerry-leasing/api exec tsc --noEmit
+
+      - name: Lint (web)
+        run: pnpm --filter @kerry-leasing/web run lint
+
+      # TODO: add API lint once apps/api has its own eslint config (it currently
+      # inherits the root next/core-web-vitals config, which errors on the
+      # missing pages/ dir). Then add: pnpm --filter @kerry-leasing/api run lint

@@ -40,8 +40,11 @@ describe('keys — query key factories', () => {
     ]);
   });
 
-  it('repairs includes orgId', () => {
-    expect(keys.repairs(orgId)).toEqual(['repairs', orgId]);
+  it('repairs includes orgId + optional date params', () => {
+    expect(keys.repairs(orgId)).toEqual(['repairs', orgId, undefined, undefined]);
+    expect(keys.repairs(orgId, '2024-01-01', '2024-12-31')).toEqual([
+      'repairs', orgId, '2024-01-01', '2024-12-31',
+    ]);
   });
 
   it('unitDetail includes orgId and vin', () => {
