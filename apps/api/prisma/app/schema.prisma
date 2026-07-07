@@ -1034,6 +1034,7 @@ enum DriverSmsStatus {
   OPTED_OUT
   NO_PHONE
   NO_EMAIL
+  NO_CONSENT   // driver has no verified SMS opt-in on file — send suppressed for A2P compliance
   SKIPPED
 }
 
@@ -1041,6 +1042,15 @@ enum TwilioInboundEventType {
   INBOUND_STOP
   INBOUND_START
   STATUS_CALLBACK
+}
+
+// SMS opt-in state for a driver contact. Distinct from optedOut (which mirrors a
+// carrier-level STOP after enrollment). A2P 10DLC requires a verifiable, affirmative
+// opt-in BEFORE any weekly message is sent; only CONFIRMED contacts are messaged.
+enum DriverSmsConsentStatus {
+  PENDING    // rostered; awaiting the driver's YES reply (confirmation may or may not have been sent)
+  CONFIRMED  // driver replied YES to the double opt-in — verifiable consent on record
+  DECLINED   // driver replied STOP before confirming, or otherwise refused
 }
 
 // Per-org SMS weekly-report feature config. Off by default; set enabled=true per pilot.
@@ -1077,6 +1087,18 @@ model DriverContact {
   emailOptedOut       Boolean             @default(false) @map("email_opted_out")
   emailOptedOutAt     DateTime?           @map("email_opted_out_at")
   lastTwilioError     String?             @map("last_twilio_error")
+
+  // SMS double opt-in / consent audit trail (A2P 10DLC). A weekly SMS is only
+  // sent when smsConsentStatus == CONFIRMED. The confirmation SID + reply SID/body
+  // are retained as proof of the driver's affirmative opt-in.
+  smsConsentStatus         DriverSmsConsentStatus @default(PENDING) @map("sms_consent_status")
+  smsConsentRequestedAt    DateTime?              @map("sms_consent_requested_at")    // when the "reply YES" confirmation was sent
+  smsConsentConfirmedAt    DateTime?              @map("sms_consent_confirmed_at")    // when the driver replied YES
+  smsConsentMethod         String?                @map("sms_consent_method")          // e.g. DOUBLE_OPT_IN_SMS
+  smsConsentConfirmationSid String?               @map("sms_consent_confirmation_sid") // outbound confirmation MessageSid
+  smsConsentReplySid       String?                @map("sms_consent_reply_sid")       // inbound YES MessageSid
+  smsConsentReplyBody      String?                @map("sms_consent_reply_body")      // raw inbound reply text
+
   createdAt           DateTime            @default(now()) @map("created_at")
   updatedAt           DateTime            @updatedAt @map("updated_at")
 

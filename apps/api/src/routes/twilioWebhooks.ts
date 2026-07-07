@@ -16,8 +16,10 @@ import { getAppPrisma } from '../lib/prisma.js';
 import { validateInboundSignature } from '../integrations/twilio/client.js';
 import {
   DriverSmsStatus,
+  DriverSmsConsentStatus,
   TwilioInboundEventType,
 } from '../generated/app-client/index.js';
+import { OPT_IN_METHOD } from '../features/smsConsent/optInMessage.js';
 
 const router = Router();
 
@@ -61,15 +63,38 @@ router.post('/inbound', async (req: Request, res: Response) => {
   if ((isStop || isStart) && fromPhone) {
     const contact = await prisma.driverContact.findFirst({
       where: { phoneE164: fromPhone },
-      select: { id: true },
+      select: { id: true, smsConsentStatus: true },
     });
     if (contact) {
       matchedDriverContactId = contact.id;
+
+      // Build the update. STOP mirrors the carrier opt-out; START/YES both clears
+      // the opt-out AND — for the double opt-in — is the driver's affirmative
+      // consent, so we record it as CONFIRMED (once) with the reply as proof.
+      const rawBody = typeof params.Body === 'string' ? params.Body : null;
+      let data: Record<string, unknown>;
+      if (isStop) {
+        data = { optedOut: true, optedOutAt: new Date() };
+        // A STOP before the driver ever confirmed = they declined to opt in.
+        if (contact.smsConsentStatus === DriverSmsConsentStatus.PENDING) {
+          data.smsConsentStatus = DriverSmsConsentStatus.DECLINED;
+        }
+      } else {
+        data = { optedOut: false, optedOutAt: null };
+        // First affirmative YES records verifiable consent. Don't overwrite an
+        // earlier confirmation timestamp on a later re-opt-in.
+        if (contact.smsConsentStatus !== DriverSmsConsentStatus.CONFIRMED) {
+          data.smsConsentStatus = DriverSmsConsentStatus.CONFIRMED;
+          data.smsConsentConfirmedAt = new Date();
+          data.smsConsentReplySid = messageSid;
+          data.smsConsentReplyBody = rawBody;
+          data.smsConsentMethod = OPT_IN_METHOD;
+        }
+      }
+
       await prisma.driverContact.update({
         where: { id: contact.id },
-        data: isStop
-          ? { optedOut: true, optedOutAt: new Date() }
-          : { optedOut: false, optedOutAt: null },
+        data,
       });
     }
   }

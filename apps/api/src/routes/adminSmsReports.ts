@@ -20,6 +20,8 @@ import { loadExcludedMotiveDriverIds } from '../features/drivers/excludedDrivers
 import { formatSmsBody } from '../features/smsWeeklyReports/smsBodyFormatter.js';
 import { runWeeklyDriverSms } from '../features/smsWeeklyReports/runWeeklyDriverSms.js';
 import { resolveChannels } from '../features/smsWeeklyReports/sendOrgWeeklyReports.js';
+import { sendOptInConfirmations } from '../features/smsConsent/sendOptInConfirmations.js';
+import { formatOptInConfirmation } from '../features/smsConsent/optInMessage.js';
 
 const router = Router();
 
@@ -392,6 +394,39 @@ router.post('/send-test', async (req: AuthRequest, res: Response) => {
     twilioSid: sendResult.sid,
     twilioStatus: sendResult.status,
     error: sendResult.errorMessage,
+  });
+});
+
+/**
+ * POST /admin/sms-reports/send-opt-in
+ * Body: { dryRun?: boolean, resend?: boolean, driverContactId?: string }
+ *
+ * Sends the one-time "reply YES" double opt-in confirmation to rostered drivers
+ * who don't yet have a verified opt-in (smsConsentStatus = PENDING). Drivers are
+ * NOT enrolled by this call — enrollment happens only when they reply YES, which
+ * the Twilio inbound webhook records as CONFIRMED. This is the affirmative,
+ * verifiable opt-in the A2P 10DLC campaign describes.
+ */
+const SendOptInSchema = z.object({
+  dryRun: z.boolean().optional(),
+  resend: z.boolean().optional(),
+  driverContactId: z.string().optional(),
+});
+router.post('/send-opt-in', async (req: AuthRequest, res: Response) => {
+  const orgId = req.auth!.orgId!;
+  const parsed = SendOptInSchema.safeParse(req.body ?? {});
+  if (!parsed.success) return res.status(400).json({ error: 'Bad Request', issues: parsed.error.issues });
+
+  const result = await sendOptInConfirmations(orgId, {
+    dryRun: parsed.data.dryRun,
+    resend: parsed.data.resend,
+    onlyDriverContactId: parsed.data.driverContactId,
+  });
+
+  res.json({
+    result,
+    messagePreview: formatOptInConfirmation(),
+    dryRun: parsed.data.dryRun === true || config.smsDryRun,
   });
 });
 
