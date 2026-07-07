@@ -47,6 +47,9 @@ interface DriverRow {
   lastSentAt: string | null;
   lastStatus: string | null;
   lastError: string | null;
+  smsConsentStatus: 'PENDING' | 'CONFIRMED' | 'DECLINED';
+  smsConsentRequestedAt: string | null;
+  smsConsentConfirmedAt: string | null;
 }
 
 interface HistoryRow {
@@ -100,6 +103,10 @@ export default function AdminSmsReportsPage() {
   // Trigger now state
   const [triggering, setTriggering] = useState(false);
   const [triggerResult, setTriggerResult] = useState<string | null>(null);
+
+  // Double opt-in confirmation state ('ALL' while a bulk send is in flight, else a driver id)
+  const [optInBusyId, setOptInBusyId] = useState<string | null>(null);
+  const [optInResult, setOptInResult] = useState<{ ok: boolean; text: string } | null>(null);
 
   const loadConfig = async () => {
     if (!organization?.id) return;
@@ -261,6 +268,37 @@ export default function AdminSmsReportsPage() {
       setTriggerResult(`Error: ${e.message ?? e}`);
     } finally {
       setTriggering(false);
+    }
+  };
+
+  // ----- Double opt-in confirmations -----
+  const sendOptIn = async (opts: { driverContactId?: string; resend?: boolean } = {}) => {
+    setOptInBusyId(opts.driverContactId ?? 'ALL');
+    setOptInResult(null);
+    try {
+      const api = await getApi();
+      const res = await api.post<{
+        result: { candidates: number; sent: number; failed: number; skippedNoPhone: number; alreadyConfirmed: number };
+        dryRun: boolean;
+      }>('/admin/sms-reports/send-opt-in', {
+        driverContactId: opts.driverContactId,
+        resend: opts.resend,
+      });
+      const r = res.result;
+      const verb = res.dryRun ? 'Dry-run — no texts sent' : 'Sent';
+      setOptInResult({
+        ok: true,
+        text:
+          `${verb}: ${r.sent} confirmation${r.sent === 1 ? '' : 's'} to ${r.candidates} pending driver${r.candidates === 1 ? '' : 's'}` +
+          (r.skippedNoPhone ? `, ${r.skippedNoPhone} skipped (no phone)` : '') +
+          (r.failed ? `, ${r.failed} failed` : '') +
+          '.',
+      });
+      loadDrivers();
+    } catch (e: any) {
+      setOptInResult({ ok: false, text: `Error: ${e.message ?? e}` });
+    } finally {
+      setOptInBusyId(null);
     }
   };
 
@@ -451,6 +489,30 @@ export default function AdminSmsReportsPage() {
               ))}
             </div>
 
+            <div className="flex flex-wrap items-center gap-3 rounded-md border bg-muted/40 p-3">
+              <div className="flex-1 min-w-[240px] space-y-0.5">
+                <div className="text-sm font-medium">Double opt-in confirmations</div>
+                <p className="text-xs text-muted-foreground">
+                  A2P 10DLC requires each driver to reply YES before any weekly SMS goes out. This texts the
+                  one-time confirmation to every enrolled, not-yet-asked driver who has a phone; they flip to
+                  &ldquo;Confirmed&rdquo; when they reply.{' '}
+                  {dryRunFlag && <span className="text-amber-600">Dry-run is on — no real texts will send.</span>}
+                </p>
+                <div className="text-xs text-muted-foreground">
+                  {drivers.filter((d) => d.smsConsentStatus === 'CONFIRMED').length} confirmed ·{' '}
+                  {drivers.filter((d) => d.smsConsentStatus === 'PENDING' && d.smsConsentRequestedAt).length} awaiting ·{' '}
+                  {drivers.filter((d) => d.smsConsentStatus === 'PENDING' && !d.smsConsentRequestedAt).length} not asked ·{' '}
+                  {drivers.filter((d) => d.smsConsentStatus === 'DECLINED').length} declined
+                </div>
+              </div>
+              <Button variant="outline" onClick={() => sendOptIn()} disabled={optInBusyId !== null}>
+                {optInBusyId === 'ALL' ? 'Sending…' : 'Send opt-in to all not-asked'}
+              </Button>
+            </div>
+            {optInResult && (
+              <div className={`text-sm ${optInResult.ok ? 'text-green-700' : 'text-destructive'}`}>{optInResult.text}</div>
+            )}
+
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="text-left text-muted-foreground border-b">
@@ -464,17 +526,18 @@ export default function AdminSmsReportsPage() {
                     <th className="py-2 pr-3">Source</th>
                     <th className="py-2 pr-3">Enrolled</th>
                     <th className="py-2 pr-3">Opt-out</th>
+                    <th className="py-2 pr-3">Consent</th>
                     <th className="py-2 pr-3">Last send</th>
                     <th className="py-2 pr-3">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {loadingDrivers && (
-                    <tr><td colSpan={11}><Skeleton className="h-8 my-2" /></td></tr>
+                    <tr><td colSpan={12}><Skeleton className="h-8 my-2" /></td></tr>
                   )}
                   {!loadingDrivers && drivers.length === 0 && (
                     <tr>
-                      <td colSpan={11} className="py-4 text-muted-foreground">
+                      <td colSpan={12} className="py-4 text-muted-foreground">
                         No drivers yet. They&apos;ll appear after the first Motive sync, Whiparound sync, or via the manual add form above.
                       </td>
                     </tr>
@@ -535,6 +598,27 @@ export default function AdminSmsReportsPage() {
                       </td>
                       <td className="py-2 pr-3">
                         {d.optedOut ? <Badge variant="destructive">Opted out</Badge> : <span className="text-muted-foreground">—</span>}
+                      </td>
+                      <td className="py-2 pr-3 text-xs whitespace-nowrap">
+                        {d.smsConsentStatus === 'CONFIRMED' ? (
+                          <Badge title={d.smsConsentConfirmedAt ? `Confirmed ${new Date(d.smsConsentConfirmedAt).toLocaleString()}` : undefined}>Confirmed</Badge>
+                        ) : d.smsConsentStatus === 'DECLINED' ? (
+                          <Badge variant="destructive">Declined</Badge>
+                        ) : d.smsConsentRequestedAt ? (
+                          <Badge variant="secondary" title={`Asked ${new Date(d.smsConsentRequestedAt).toLocaleString()}`}>Awaiting reply</Badge>
+                        ) : (
+                          <Badge variant="outline">Not asked</Badge>
+                        )}
+                        {d.smsConsentStatus === 'PENDING' && !d.optedOut && (
+                          <button
+                            onClick={() => sendOptIn({ driverContactId: d.id, resend: !!d.smsConsentRequestedAt })}
+                            disabled={!d.phoneE164 || optInBusyId !== null}
+                            className="ml-2 underline text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:no-underline"
+                            title={!d.phoneE164 ? 'No phone number on file' : d.smsConsentRequestedAt ? 'Re-send the opt-in confirmation' : 'Send the opt-in confirmation'}
+                          >
+                            {optInBusyId === d.id ? '…' : d.smsConsentRequestedAt ? 'resend' : 'send opt-in'}
+                          </button>
+                        )}
                       </td>
                       <td className="py-2 pr-3 text-xs">
                         {d.lastSentAt ? (

@@ -15,6 +15,7 @@
  */
 
 import { getAppPrisma } from '../../lib/prisma.js';
+import { config } from '../../config.js';
 import { sendSms } from '../../integrations/twilio/client.js';
 import { DriverSmsConsentStatus } from '../../generated/app-client/index.js';
 import { formatOptInConfirmation, OPT_IN_METHOD } from './optInMessage.js';
@@ -29,6 +30,8 @@ export interface SendOptInOptions {
 
 export interface SendOptInResult {
   clerkOrgId: string;
+  /** True when nothing was actually texted — either --dry-run or global TWILIO_DRY_RUN. */
+  dryRun: boolean;
   candidates: number;   // contacts eligible for a confirmation
   sent: number;         // confirmations actually dispatched (or dry-run counted)
   failed: number;
@@ -50,6 +53,11 @@ export async function sendOptInConfirmations(
 ): Promise<SendOptInResult> {
   const prisma = getAppPrisma();
 
+  // Fold the global SMS dry-run into the effective flag. Without this, running the
+  // opt-in blast while TWILIO_DRY_RUN is on would no-op the actual text yet still
+  // stamp smsConsentRequestedAt (blocking a later real re-send) and report "sent".
+  const dryRun = options.dryRun || config.smsDryRun;
+
   const contacts = await prisma.driverContact.findMany({
     where: {
       clerkOrgId,
@@ -66,6 +74,7 @@ export async function sendOptInConfirmations(
 
   const result: SendOptInResult = {
     clerkOrgId,
+    dryRun,
     candidates: contacts.length,
     sent: 0,
     failed: 0,
@@ -89,7 +98,7 @@ export async function sendOptInConfirmations(
       continue;
     }
 
-    if (options.dryRun) {
+    if (dryRun) {
       result.sent++;
       result.contacts.push({
         driverContactId: c.id,

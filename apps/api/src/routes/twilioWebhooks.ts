@@ -26,11 +26,22 @@ const router = Router();
 // Twilio posts as form-urlencoded. Local parser so the rest of the API stays JSON-only.
 router.use(urlencoded({ extended: false }));
 
-const STOP_KEYWORDS = new Set(['STOP', 'STOPALL', 'UNSUBSCRIBE', 'CANCEL', 'END', 'QUIT', 'OPTOUT']);
-const START_KEYWORDS = new Set(['START', 'YES', 'UNSTOP', 'OPTIN']);
+const STOP_KEYWORDS = new Set(['STOP', 'STOPALL', 'UNSUBSCRIBE', 'CANCEL', 'END', 'QUIT', 'OPTOUT', 'REVOKE']);
+const START_KEYWORDS = new Set([
+  'START', 'YES', 'Y', 'YEAH', 'YEP', 'YUP', 'SURE', 'OK', 'OKAY', 'UNSTOP', 'OPTIN',
+]);
 
 function normalizeBody(b: unknown): string {
   return typeof b === 'string' ? b.trim().toUpperCase() : '';
+}
+
+// Drivers reply casually ("Y", "yes please", "yes 👍"), so match intent rather than an
+// exact string: test the punctuation-stripped body AND its leading word against the set.
+// Opt-out takes precedence via the isStop-first branch below.
+function matchesKeyword(body: string, keywords: Set<string>): boolean {
+  const compact = body.replace(/[^A-Z0-9]/g, ''); // "OPT-IN" -> "OPTIN", "STOP ALL" -> "STOPALL"
+  const firstWord = (body.match(/[A-Z0-9]+/) ?? [''])[0]; // "YES PLEASE" -> "YES"
+  return keywords.has(compact) || keywords.has(firstWord);
 }
 
 function fullUrl(req: Request): string {
@@ -53,8 +64,8 @@ router.post('/inbound', async (req: Request, res: Response) => {
   const messageSid = params.MessageSid ?? params.SmsMessageSid ?? null;
   const body = normalizeBody(params.Body);
 
-  const isStop = STOP_KEYWORDS.has(body);
-  const isStart = START_KEYWORDS.has(body);
+  const isStop = matchesKeyword(body, STOP_KEYWORDS);
+  const isStart = matchesKeyword(body, START_KEYWORDS);
   const eventType: TwilioInboundEventType = isStart
     ? TwilioInboundEventType.INBOUND_START
     : TwilioInboundEventType.INBOUND_STOP;
