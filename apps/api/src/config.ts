@@ -62,6 +62,9 @@ export const config = {
   // The Graph app registration must be granted the Mail.Send application
   // permission, and this mailbox must exist in the tenant.
   reportEmailFrom: process.env.REPORT_EMAIL_FROM ?? null,
+  // Where cron-health alerts are sent. Defaults to the report sender mailbox;
+  // set CRON_ALERT_EMAIL to a monitored inbox (e.g. ops) to actually get paged.
+  cronAlertEmail: process.env.CRON_ALERT_EMAIL ?? process.env.REPORT_EMAIL_FROM ?? null,
   // When true, the email pipeline writes DriverWeeklyReportSent rows but never
   // calls Graph. Auto-true when no from-address is set OR Graph isn't configured
   // — mirrors smsDryRun so the feature can ship before the mailbox is live.
