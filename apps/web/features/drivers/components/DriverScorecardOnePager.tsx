@@ -57,20 +57,40 @@ interface Props {
   isTest?: boolean;
 }
 
-function ymdToShortLabel(weekStart: string): string {
-  const [y, m, d] = weekStart.split('-').map(Number);
-  const start = new Date(Date.UTC(y, m - 1, d));
-  const end = new Date(start.getTime() + 6 * 24 * 60 * 60 * 1000);
-  const fmt = (dt: Date) =>
-    dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
-  return `${fmt(start)} – ${fmt(end)}`;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function fmtUTCDate(dt: Date): string {
+  return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+}
+function ymdToDate(ymd: string): Date {
+  const [y, m, d] = ymd.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d));
+}
+
+/** The Mon–Sun week the report covers (idle %, idle fuel, MPG all use this). */
+function weekRangeLabel(weekStart: string): string {
+  const start = ymdToDate(weekStart);
+  const end = new Date(start.getTime() + 6 * DAY_MS);
+  return `${fmtUTCDate(start)} – ${fmtUTCDate(end)}`;
+}
+
+/**
+ * Motive's safety score is a ROLLING 4-week (28-day) window, updated weekly — it
+ * is NOT the report week's score. Show the 28 days ending at the report week's
+ * end so the number isn't mistaken for a single-week figure.
+ */
+function safetyWindowLabel(weekStart: string): string {
+  const weekEnd = new Date(ymdToDate(weekStart).getTime() + 6 * DAY_MS);
+  const windowStart = new Date(weekEnd.getTime() - 27 * DAY_MS);
+  return `${fmtUTCDate(windowStart)} – ${fmtUTCDate(weekEnd)}`;
 }
 
 type DeltaSpec = { diff: number; unit: string; higherIsBetter: boolean; digits: number };
 
 export function DriverScorecardOnePager({ weekStart, snapshot, sentAt, isTest }: Props) {
   const s = snapshot;
-  const range = ymdToShortLabel(weekStart);
+  const range = weekRangeLabel(weekStart);
+  const safetyRange = safetyWindowLabel(weekStart);
   const greetingName = s.firstName ?? s.displayName ?? 'there';
   const safety = s.motiveScore;            // Motive's own rolling-4-week score
   const idleFuel = s.current.idleFuelGal;
@@ -119,6 +139,7 @@ export function DriverScorecardOnePager({ weekStart, snapshot, sentAt, isTest }:
         <div className="space-y-4">
           <MetricCard
             label="Your safety score"
+            sublabel={`Motive rolling 4-week score · ${safetyRange}`}
             value={safety != null ? String(safety) : '—'}
             rank={s.safetyRank}
             total={s.safetyTotal ?? s.totalDrivers}
@@ -126,6 +147,7 @@ export function DriverScorecardOnePager({ weekStart, snapshot, sentAt, isTest }:
           />
           <MetricCard
             label="Your idle percentage"
+            sublabel={`Last week · ${range}`}
             value={`${(s.current.idlePct ?? 0).toFixed(1)}%`}
             rank={s.idleRank}
             total={s.totalDrivers}
@@ -133,6 +155,7 @@ export function DriverScorecardOnePager({ weekStart, snapshot, sentAt, isTest }:
           />
           <MetricCard
             label="Your idle fuel"
+            sublabel={`Last week · ${range}`}
             value={idleFuel != null ? `${idleFuel.toFixed(1)} gal` : '—'}
             delta={fuelDelta}
           />
@@ -150,12 +173,14 @@ export function DriverScorecardOnePager({ weekStart, snapshot, sentAt, isTest }:
 
 function MetricCard({
   label,
+  sublabel,
   value,
   rank,
   total,
   delta,
 }: {
   label: string;
+  sublabel?: string;
   value: string;
   rank?: number | null;
   total?: number;
@@ -165,6 +190,7 @@ function MetricCard({
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-sm">
       <p className="text-xs uppercase tracking-wider text-slate-500">{label}</p>
+      {sublabel && <p className="text-[11px] text-slate-400 mt-0.5">{sublabel}</p>}
       <p className="text-5xl font-bold leading-none mt-2">{value}</p>
       {hasRank && (
         <p className="text-sm text-slate-600 mt-3">
