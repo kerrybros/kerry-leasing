@@ -1,16 +1,31 @@
 /**
  * Cron-health watchdog. Checks that each scheduled job has succeeded within its
- * expected window and emails an alert (via Graph) if any are overdue. Meant to
- * run as its own daily Render cron — the safety net that would have caught the
- * weekly-SMS cron dying for 51 days and the EIA cron dying for ~3 months.
+ * expected window and emails an alert (via Graph) if any are overdue.
+ *
+ * CONFIG-FREE by design: like the other cron entry scripts, it reads only its own
+ * env directly and does NOT import ../config (which validates the full app's
+ * required vars, e.g. CLERK_SECRET_KEY, at module load — vars this watchdog cron
+ * neither has nor needs).
  *
  * Env: APP_DATABASE_URL, MICROSOFT_GRAPH_*, REPORT_EMAIL_FROM, CRON_ALERT_EMAIL.
  */
 import { getAppPrisma } from '../lib/prisma.js';
-import { config } from '../config.js';
-import { sendMail } from '../integrations/microsoft/graphClient.js';
+import { sendMail, type GraphClientConfig } from '../integrations/microsoft/graphClient.js';
 import { evaluateCronHealth, formatCronHealthAlert } from '../features/cronHealth/cronHealth.js';
 import { gatherCronHealthChecks } from '../features/cronHealth/cronHealthData.js';
+
+const graphConfig: GraphClientConfig | null = process.env.MICROSOFT_GRAPH_TENANT_ID
+  ? {
+      tenantId: process.env.MICROSOFT_GRAPH_TENANT_ID,
+      clientId: process.env.MICROSOFT_GRAPH_CLIENT_ID ?? '',
+      clientSecret: process.env.MICROSOFT_GRAPH_CLIENT_SECRET ?? '',
+      // sendMail doesn't use these, but the type requires them.
+      siteHostname: process.env.MICROSOFT_GRAPH_SITE_HOSTNAME ?? '',
+      sitePath: process.env.MICROSOFT_GRAPH_SITE_PATH ?? '',
+    }
+  : null;
+const reportEmailFrom = process.env.REPORT_EMAIL_FROM ?? null;
+const cronAlertEmail = process.env.CRON_ALERT_EMAIL ?? reportEmailFrom;
 
 async function main() {
   const prisma = getAppPrisma();
@@ -31,7 +46,7 @@ async function main() {
     return;
   }
 
-  if (!config.microsoftGraph || !config.reportEmailFrom || !config.cronAlertEmail) {
+  if (!graphConfig || !reportEmailFrom || !cronAlertEmail) {
     console.warn(
       '[cronHealth] jobs overdue but email is not configured ' +
         '(need MICROSOFT_GRAPH_*, REPORT_EMAIL_FROM, CRON_ALERT_EMAIL) — skipping alert email.',
@@ -42,14 +57,14 @@ async function main() {
   }
 
   try {
-    await sendMail(config.microsoftGraph, {
-      from: config.reportEmailFrom,
-      to: config.cronAlertEmail,
+    await sendMail(graphConfig, {
+      from: reportEmailFrom,
+      to: cronAlertEmail,
       subject: alert.subject,
       text: alert.text,
       html: alert.html,
     });
-    console.log(`[cronHealth] alert emailed to ${config.cronAlertEmail}`);
+    console.log(`[cronHealth] alert emailed to ${cronAlertEmail}`);
   } catch (e) {
     console.error('[cronHealth] failed to send alert email:', e);
     process.exitCode = 1;
