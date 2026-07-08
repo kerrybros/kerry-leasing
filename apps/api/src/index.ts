@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import compression from 'compression';
 import rateLimit from 'express-rate-limit';
-import { config } from './config.js';
+import { config, validateServerConfig } from './config.js';
 import routes from './routes/index.js';
 import { disconnectRepairDb, isRepairDbAvailable } from './db/repairRepo.js';
 import { disconnectAppDb, isAppDbAvailable } from './db/appRepo.js';
@@ -78,6 +78,11 @@ const port = config.port;
 
 async function startServer() {
   try {
+    // Validate the env the server needs. Moved out of config.ts module-load so
+    // importing `config` from a script/cron/test never throws (a cron without
+    // CLERK_SECRET_KEY used to crash just by importing config).
+    validateServerConfig();
+
     console.log('\n🔒 Running repair database safety checks...\n');
     
     // CRITICAL: Assert repair database is configured safely
