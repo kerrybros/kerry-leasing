@@ -147,7 +147,7 @@ export function DriverScorecardOnePager({ weekStart, snapshot, sentAt, isTest }:
           />
           <MetricCard
             label="Your idle percentage"
-            sublabel={`This week · ${range}`}
+            sublabel={`Last week · ${range}`}
             value={`${(s.current.idlePct ?? 0).toFixed(1)}%`}
             rank={s.idleRank}
             total={s.totalDrivers}
@@ -155,7 +155,7 @@ export function DriverScorecardOnePager({ weekStart, snapshot, sentAt, isTest }:
           />
           <MetricCard
             label="Your idle fuel"
-            sublabel={`This week · ${range}`}
+            sublabel={`Last week · ${range}`}
             value={idleFuel != null ? `${idleFuel.toFixed(1)} gal` : '—'}
             delta={fuelDelta}
           />
