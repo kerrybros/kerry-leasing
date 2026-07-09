@@ -33,10 +33,14 @@ async function main() {
 
   const results = evaluateCronHealth(await gatherCronHealthChecks(), now);
   for (const r of results) {
-    console.log(
-      `[cronHealth] ${r.overdue ? 'OVERDUE' : 'ok     '} ${r.label} — ` +
-        `${r.ageHours == null ? 'never run' : Math.round(r.ageHours) + 'h ago'}`,
-    );
+    const tag = r.status === 'overdue' ? 'OVERDUE' : r.status === 'idle' ? 'idle   ' : 'ok     ';
+    const detail =
+      r.status === 'idle'
+        ? (r.note ?? 'not live')
+        : r.ageHours == null
+          ? 'never run'
+          : Math.round(r.ageHours) + 'h ago';
+    console.log(`[cronHealth] ${tag} ${r.label} — ${detail}`);
   }
 
   const alert = formatCronHealthAlert(results, now);
