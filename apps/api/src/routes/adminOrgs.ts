@@ -729,6 +729,7 @@ router.get('/ops-status', async (_req: AuthRequest, res) => {
       integration,
       cronHealth,
       overdueCount: cronHealth.filter((c) => c.overdue).length,
+      idleCount: cronHealth.filter((c) => c.status === 'idle').length,
     });
   } catch (error: any) {
     res.status(500).json({ error: 'Internal server error', message: error.message });

@@ -15,10 +15,24 @@ export interface CronHealthCheck {
   lastSuccessAt: Date | null;
   /** Overdue once the last success is older than this many hours. */
   maxAgeHours: number;
+  /**
+   * Whether this job is actually live yet. A job that hasn't been turned on —
+   * feature flag off, or no deliverable recipients — is reported as `idle` and
+   * NEVER alarms: "nothing sent" is a status, not a failure. Freshness alerting
+   * only kicks in once it goes live. Defaults to true (the daily syncs are
+   * always live). Only the weekly driver report currently has a pre-live phase.
+   */
+  live?: boolean;
+  /** Optional human note shown alongside the status, e.g. "no report delivered yet". */
+  note?: string;
 }
+
+export type CronHealthStatus = 'ok' | 'overdue' | 'idle';
 
 export interface CronHealthResult extends CronHealthCheck {
   ageHours: number | null;
+  status: CronHealthStatus;
+  /** Convenience alias of `status === 'overdue'` — the only state that alarms. */
   overdue: boolean;
 }
 
@@ -28,13 +42,20 @@ export function evaluateCronHealth(checks: CronHealthCheck[], now: Date): CronHe
   return checks.map((c) => {
     const ageHours =
       c.lastSuccessAt == null ? null : (now.getTime() - c.lastSuccessAt.getTime()) / MS_PER_HOUR;
-    // Never-run (null) counts as overdue — that's exactly the "cron never fired" case.
-    const overdue = ageHours == null || ageHours > c.maxAgeHours;
-    return { ...c, ageHours, overdue };
+    // A not-yet-live job is `idle` and never alarms. Otherwise a stale (or
+    // never-run) success beyond the window is `overdue`; anything fresher is ok.
+    const status: CronHealthStatus =
+      c.live === false
+        ? 'idle'
+        : ageHours == null || ageHours > c.maxAgeHours
+          ? 'overdue'
+          : 'ok';
+    return { ...c, ageHours, status, overdue: status === 'overdue' };
   });
 }
 
 function describe(r: CronHealthResult): string {
+  if (r.status === 'idle') return `${r.label}: not live yet${r.note ? ` — ${r.note}` : ''}`;
   if (r.ageHours == null) return `${r.label}: NEVER RUN (expected within ${r.maxAgeHours}h)`;
   return `${r.label}: last success ${Math.round(r.ageHours)}h ago (limit ${r.maxAgeHours}h)`;
 }
@@ -47,12 +68,15 @@ export interface CronAlert {
 
 /**
  * Renders an alert email for the overdue jobs. Returns null when nothing is
- * overdue (caller should send nothing — no news is good news).
+ * overdue (caller should send nothing — no news is good news). A job that is
+ * merely `idle` (not live yet) never counts toward the alert; it's only listed
+ * for context, in gray, when some OTHER job is genuinely overdue.
  */
 export function formatCronHealthAlert(results: CronHealthResult[], now: Date): CronAlert | null {
   const overdue = results.filter((r) => r.overdue);
   if (overdue.length === 0) return null;
 
+  const others = results.filter((r) => !r.overdue);
   const subject = `⚠️ Kerry Leasing: ${overdue.length} cron job${overdue.length === 1 ? '' : 's'} overdue`;
   const asOf = now.toISOString();
 
@@ -60,21 +84,19 @@ export function formatCronHealthAlert(results: CronHealthResult[], now: Date): C
     `${overdue.length} cron job(s) have not succeeded within their expected window ` +
     `(as of ${asOf}):\n\n` +
     overdue.map((r) => `• ${describe(r)}`).join('\n') +
-    `\n\nHealthy jobs:\n` +
-    results
-      .filter((r) => !r.overdue)
-      .map((r) => `• ${describe(r)}`)
-      .join('\n');
+    (others.length ? `\n\nOther jobs:\n` + others.map((r) => `• ${describe(r)}`).join('\n') : '');
 
-  const row = (r: CronHealthResult, color: string) =>
-    `<tr><td style="padding:6px 12px;border-bottom:1px solid #eee;color:${color}">${describe(r)}</td></tr>`;
+  const colorFor = (r: CronHealthResult) =>
+    r.status === 'overdue' ? '#b91c1c' : r.status === 'idle' ? '#6b7280' : '#16a34a';
+  const row = (r: CronHealthResult) =>
+    `<tr><td style="padding:6px 12px;border-bottom:1px solid #eee;color:${colorFor(r)}">${describe(r)}</td></tr>`;
   const html =
     `<div style="font-family:Arial,sans-serif;max-width:640px">` +
     `<h2 style="color:#b91c1c">⚠️ ${overdue.length} cron job(s) overdue</h2>` +
-    `<p style="color:#666">As of ${asOf}. A job is "overdue" if it hasn't succeeded within its expected window.</p>` +
+    `<p style="color:#666">As of ${asOf}. A job is "overdue" if it hasn't succeeded within its expected window. Jobs that aren't live yet are shown in gray and don't alarm.</p>` +
     `<table style="border-collapse:collapse;width:100%">` +
-    overdue.map((r) => row(r, '#b91c1c')).join('') +
-    results.filter((r) => !r.overdue).map((r) => row(r, '#16a34a')).join('') +
+    overdue.map(row).join('') +
+    others.map(row).join('') +
     `</table></div>`;
 
   return { subject, text, html };
