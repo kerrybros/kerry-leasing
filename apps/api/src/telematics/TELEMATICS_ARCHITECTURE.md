@@ -88,7 +88,7 @@ Cron (2-4 AM UTC)  POST /cron/sync-samsara
                 └─► syncSamsaraIdlingEvents       ─► samsara_idling_events
 
 Verify passes:
-  Motive:  yesterday + twoDaysAgo (48h data lag)
+  Motive:  yesterday + every day from 2 through 7 days ago (MOTIVE_LOOKBACK_DAYS; late-arriving events)
   Samsara: yesterday + twoDaysAgo + threeDaysAgo (72h data lag)
 ```
 
@@ -161,9 +161,10 @@ These rules apply to every sync module across all providers:
 
 2. **Sequential org processing.** Orgs are processed one at a time inside `syncDaily()`. Org N does not begin until Org N-1 is fully complete (including verify pass).
 
-3. **Verify pass.** Each daily sync run processes two dates:
+3. **Verify pass.** Each daily sync run processes a primary date plus a lookback window:
    - Primary: `yesterday` (best-effort, may not be finalized)
-   - Verify: `twoDaysAgo` for Motive (48h lag), `threeDaysAgo` for Samsara (72h lag)
+   - Verify (Motive): every day from 2 through `MOTIVE_LOOKBACK_DAYS` (default 7) days ago. Motive keeps adding idle events and revising rollups for several days after a calendar day ends, so a single verify day misses anything that arrives after it. Each verify pass re-fetches the full day list and inserts new ids; see `motive/lookback.ts`.
+   - Verify (Samsara): `twoDaysAgo` and `threeDaysAgo` (72h lag)
 
 4. **Fuel units enforced.** Motive requests must set `X-Metric-Units: false`. Log a warning and skip unit conversion if `metric_units: true` is returned on any record.
 
