@@ -4,10 +4,11 @@
  * Pulls historical data day-by-day for a given org and date range.
  * Idempotent — safe to re-run any date range. All writes are upserts.
  *
- * 72-hour verify window: dates within 2 calendar days of today are treated
- * as "fresh" (verify: true) so already-stored records are force-refreshed.
- * Dates older than 2 days have finalized data on Motive servers — upserts
- * will still detect and write any differences.
+ * Verify window: dates inside the daily cron's lookback window (see
+ * lookback.ts, default 7 days) are treated as "fresh" (verify: true) so
+ * already-stored records get their lastVerifiedAt bumped. Older dates are
+ * synced without verify, but upserts still insert any ids Motive added
+ * since the last pull and write any changed rollups.
  *
  * Usage (CLI):
  *   pnpm exec tsx src/telematics/motive/backdate.ts \
@@ -22,10 +23,12 @@ import { fileURLToPath } from 'url';
 import { appPrisma } from '../../lib/prisma.js';
 import { syncMotiveOrgForDate } from './syncService.js';
 import { getDateRange } from './types.js';
+import { resolveMotiveLookbackDays } from './lookback.js';
 import { readCredentials } from '../../lib/credentials.js';
 import type { SyncResult } from './types.js';
 
-const MOTIVE_VERIFY_DAYS = 2; // Motive daily cron re-syncs 2 days back
+// Same window the Motive daily cron re-verifies (MOTIVE_LOOKBACK_DAYS, default 7).
+const MOTIVE_VERIFY_DAYS = resolveMotiveLookbackDays();
 
 interface BackdateOptions {
   clerkOrgId: string;

@@ -105,14 +105,27 @@ export async function syncIdleEvents(
           });
           result.newCount++;
         } else {
-          // Check if data changed (compare key fields; include start/end for retroactive corrections)
+          // Check if data changed. Compare measurements (start/end, fuel) for
+          // retroactive corrections AND attribution (driver, vehicle). Motive
+          // often stores an idle event with driver: null and assigns the driver
+          // days later; without the driver fields here a lookback pass reports
+          // "unchanged" and the event never gets attributed (seen for
+          // 2026-07-16, driver 5494617: three events stayed driverless).
           const hasChanged =
             existing.startTime !== recordData.startTime ||
             existing.endTime !== recordData.endTime ||
             existing.vehFuelStart !== recordData.vehFuelStart ||
             existing.vehFuelEnd !== recordData.vehFuelEnd ||
             (existing as any).idleFuel !== recordData.idleFuel ||
-            existing.endType !== recordData.endType;
+            existing.endType !== recordData.endType ||
+            existing.driverId !== recordData.driverId ||
+            existing.driverFirstName !== recordData.driverFirstName ||
+            existing.driverLastName !== recordData.driverLastName ||
+            existing.driverUsername !== recordData.driverUsername ||
+            existing.driverEmail !== recordData.driverEmail ||
+            existing.vehicleId !== recordData.vehicleId ||
+            existing.vehicleNumber !== recordData.vehicleNumber ||
+            existing.vin !== recordData.vin;
 
           if (hasChanged) {
             // Update with incremented version

@@ -1,7 +1,8 @@
 /**
  * DAILY CRON JOB FOR MOTIVE SYNC
  * Telematics only — app DB only, no repair data read or written.
- * Syncs yesterday (full day) + verifies 2 days ago for all active Motive orgs.
+ * Syncs yesterday (full day) + re-verifies the lookback window (2 through
+ * MOTIVE_LOOKBACK_DAYS days ago, default 7) for all active Motive orgs.
  * Schedule: e.g. 6 AM EST daily (0 11 * * * in UTC, or use your scheduler).
  *
  * Usage:

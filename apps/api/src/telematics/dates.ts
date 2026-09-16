@@ -87,54 +87,48 @@ export function getESTDayBounds(date: string): { startTime: string; endTime: str
 }
 
 /**
- * Return the current calendar date in Eastern Time as YYYY-MM-DD.
+ * Return the calendar date in Eastern Time as YYYY-MM-DD for the given instant.
  * Uses Intl.DateTimeFormat to resolve the correct Eastern date regardless of
  * server timezone, including across DST transitions.
  */
-function getEasternDate(): string {
+function getEasternDate(now: Date = new Date()): string {
   const formatter = new Intl.DateTimeFormat('en-CA', {
     timeZone: EST_TZ,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
   });
-  return formatter.format(new Date());
+  return formatter.format(now);
+}
+
+/**
+ * Return the Eastern calendar date N days before the given instant, as YYYY-MM-DD.
+ * Day arithmetic is done on UTC date parts so DST never produces a gap or a
+ * duplicate day. `daysAgo` of 0 is today (Eastern), 1 is yesterday, and so on.
+ */
+export function getDaysAgoEastern(daysAgo: number, now: Date = new Date()): string {
+  const [y, m, d] = getEasternDate(now).split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d - daysAgo));
+  const yy = dt.getUTCFullYear();
+  const mm = String(dt.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(dt.getUTCDate()).padStart(2, '0');
+  return `${yy}-${mm}-${dd}`;
 }
 
 export function getYesterday(): string {
-  const [y, m, d] = getEasternDate().split('-').map(Number);
-  const dt = new Date(Date.UTC(y, m - 1, d - 1));
-  const yy = dt.getUTCFullYear();
-  const mm = String(dt.getUTCMonth() + 1).padStart(2, '0');
-  const dd = String(dt.getUTCDate()).padStart(2, '0');
-  return `${yy}-${mm}-${dd}`;
+  return getDaysAgoEastern(1);
 }
 
 export function getTwoDaysAgo(): string {
-  const [y, m, d] = getEasternDate().split('-').map(Number);
-  const dt = new Date(Date.UTC(y, m - 1, d - 2));
-  const yy = dt.getUTCFullYear();
-  const mm = String(dt.getUTCMonth() + 1).padStart(2, '0');
-  const dd = String(dt.getUTCDate()).padStart(2, '0');
-  return `${yy}-${mm}-${dd}`;
+  return getDaysAgoEastern(2);
 }
 
 export function getThreeDaysAgo(): string {
-  const [y, m, d] = getEasternDate().split('-').map(Number);
-  const dt = new Date(Date.UTC(y, m - 1, d - 3));
-  const yy = dt.getUTCFullYear();
-  const mm = String(dt.getUTCMonth() + 1).padStart(2, '0');
-  const dd = String(dt.getUTCDate()).padStart(2, '0');
-  return `${yy}-${mm}-${dd}`;
+  return getDaysAgoEastern(3);
 }
 
 export function getFourDaysAgo(): string {
-  const [y, m, d] = getEasternDate().split('-').map(Number);
-  const dt = new Date(Date.UTC(y, m - 1, d - 4));
-  const yy = dt.getUTCFullYear();
-  const mm = String(dt.getUTCMonth() + 1).padStart(2, '0');
-  const dd = String(dt.getUTCDate()).padStart(2, '0');
-  return `${yy}-${mm}-${dd}`;
+  return getDaysAgoEastern(4);
 }
 
 /**

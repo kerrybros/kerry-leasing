@@ -17,7 +17,8 @@ import { syncDriverPerformanceEvents } from './sync/syncDriverPerformanceEvents.
 import { syncMotiveSpeeding } from './sync/syncMotiveSpeeding.js';
 import { syncMotiveUsers } from './sync/syncMotiveUsers.js';
 import { reconcileMotiveVehicleFromDrivingPeriods } from './sync/reconcileMotiveVehicleFromDrivingPeriods.js';
-import { getYesterday, getFourDaysAgo, SyncResult } from './types.js';
+import { SyncResult } from './types.js';
+import { planMotiveDailyPasses } from './lookback.js';
 import { readCredentials } from '../../lib/credentials.js';
 import { TelematicsAuthError } from '../errors.js';
 
@@ -255,7 +256,12 @@ export async function syncMotiveOrgForDate(
 }
 
 /**
- * Daily sync: Sync yesterday + verify 2 days ago for all orgs.
+ * Daily sync: sync yesterday (primary) and re-verify every day in the lookback
+ * window (2 through N days ago, N from MOTIVE_LOOKBACK_DAYS, default 7) for
+ * all orgs. Each verify pass re-fetches the full day from Motive, so events
+ * that arrived after an earlier run are inserted and rollups are re-pulled.
+ * See lookback.ts for the reasoning.
+ *
  * Does NOT backfill historical dates. For full-term driver miles/MPG (driving periods),
  * run the backdate script: pnpm backdate -- --org=<clerkOrgId> --start=YYYY-MM-DD --end=YYYY-MM-DD
  */
@@ -267,12 +273,16 @@ export async function syncMotiveDaily(): Promise<{
   duration: number;
 }> {
   const startTime = Date.now();
-  const yesterday = getYesterday();
-  const fourDaysAgo = getFourDaysAgo();
+  const passes = planMotiveDailyPasses();
+  const primaryPass = passes[0];
+  const verifyPasses = passes.slice(1);
 
   console.log(`\n🚀 MOTIVE DAILY SYNC STARTED`);
-  console.log(`  Primary sync date: ${yesterday}`);
-  console.log(`  Verification date: ${fourDaysAgo}`);
+  console.log(`  Primary sync date: ${primaryPass.date}`);
+  console.log(
+    `  Verification dates (${verifyPasses.length}): ` +
+      `${verifyPasses[0]?.date ?? 'none'} back to ${verifyPasses[verifyPasses.length - 1]?.date ?? 'none'}`
+  );
   console.log(`  Timestamp: ${new Date().toISOString()}\n`);
 
   // Get all orgs with Motive configured
@@ -298,8 +308,8 @@ export async function syncMotiveDaily(): Promise<{
       const yesterdayResult = await syncMotiveOrgForDate(
         account.clerkOrgId,
         apiKey,
-        yesterday,
-        false
+        primaryPass.date,
+        primaryPass.verify
       );
       results.push(yesterdayResult);
 
@@ -309,14 +319,17 @@ export async function syncMotiveDaily(): Promise<{
         errorCount++;
       }
 
-      // 2. Verify 4 days ago (lookback — catches ELD finalization lag)
-      const verificationResult = await syncMotiveOrgForDate(
-        account.clerkOrgId,
-        apiKey,
-        fourDaysAgo,
-        true
-      );
-      results.push(verificationResult);
+      // 2. Lookback window: re-sync each older day with verify=true. This is
+      // what catches late-arriving idle events and finalized rollups.
+      for (const pass of verifyPasses) {
+        const verificationResult = await syncMotiveOrgForDate(
+          account.clerkOrgId,
+          apiKey,
+          pass.date,
+          pass.verify
+        );
+        results.push(verificationResult);
+      }
 
       // Update provider account (clear error and restore ACTIVE so org recovers after transient failures)
       await appPrisma.telematicsProviderAccount.update({

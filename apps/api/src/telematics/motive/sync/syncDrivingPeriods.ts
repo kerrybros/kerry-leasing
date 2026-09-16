@@ -92,7 +92,9 @@ export async function syncDrivingPeriods(
           });
           result.newCount++;
         } else {
-          // Check if data changed (compare key fields; include start/end and distance for retroactive corrections)
+          // Check if data changed (compare key fields; include start/end and distance for
+          // retroactive corrections, and driver/vehicle so a late driver assignment on a
+          // lookback pass is written instead of reported as unchanged).
           const hasChanged =
             existing.startTime !== recordData.startTime ||
             existing.endTime !== recordData.endTime ||
@@ -101,7 +103,9 @@ export async function syncDrivingPeriods(
             existing.startKilometers !== recordData.startKilometers ||
             existing.endKilometers !== recordData.endKilometers ||
             existing.distance !== recordData.distance ||
-            existing.destination !== recordData.destination;
+            existing.destination !== recordData.destination ||
+            existing.driverId !== recordData.driverId ||
+            existing.vehicleId !== recordData.vehicleId;
 
           if (hasChanged) {
             // Update with incremented version
