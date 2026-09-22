@@ -12,6 +12,7 @@ import { syncWhiparoundDaily } from '../integrations/whiparound/syncService.js';
 import { refreshDieselPrice } from '../lib/eiaFuelPrice.js';
 import { getAppPrisma } from '../lib/prisma.js';
 import { cacheDelPattern } from '../lib/redis.js';
+import { ingestMotiveReportMailbox } from '../features/motiveReport/ingestMailbox.js';
 import { recordTelematicsCronRun } from '../lib/telematicsCronRun.js';
 import { CronJobType } from '../generated/app-client/index.js';
 import { runWeeklyDriverSms } from '../features/smsWeeklyReports/runWeeklyDriverSms.js';
@@ -165,6 +166,66 @@ router.post('/send-weekly-driver-sms', async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     console.error('Weekly driver SMS cron error:', error);
+    res.status(500).json({ error: 'Internal server error', message: error.message });
+  }
+});
+
+/**
+ * POST /cron/ingest-motive-reports
+ * Pulls Motive's scheduled "Driver Fuel Performance" CSV emails from the shared
+ * mailbox (MOTIVE_REPORT_MAILBOX) via Graph and stores them. Idempotent on
+ * message id; safe to call any time. ?dryRun=1 parses without writing.
+ */
+router.post('/ingest-motive-reports', async (req: Request, res: Response) => {
+  if (!verifyCronSecret(req, res)) return;
+  try {
+    console.log(`\n✅ Authorized ingest-motive-reports cron from ${req.ip}`);
+    const dryRun = req.query.dryRun === '1' || req.query.dryRun === 'true';
+    const s = await ingestMotiveReportMailbox({ dryRun });
+    if (!dryRun && !s.skippedReason) {
+      await recordTelematicsCronRun(CronJobType.MOTIVE_REPORT_INGEST, {
+        totalOrgs: s.scanned,
+        successCount: s.ingested + s.duplicates,
+        errorCount: s.failed + s.unrouted + s.unverified,
+        duration: s.duration,
+        results: s.emails.map((e) => ({
+          clerkOrgId: e.clerkOrgId ?? 'unrouted',
+          success: e.status === 'ingested' || e.status === 'duplicate',
+          // unverified files are stored but count as a failure so cron-health surfaces them
+          date: e.window?.start ?? e.receivedAt.slice(0, 10),
+          verify: false,
+          duration: 0,
+          error: e.error,
+          results: [{
+            endpoint: 'driver_fuel_performance_csv',
+            date: e.window?.start ?? '',
+            recordCount: e.rowCount,
+            newCount: e.status === 'ingested' ? e.rowCount : 0,
+            updatedCount: 0,
+            unchangedCount: e.status === 'duplicate' ? e.rowCount : 0,
+            errorCount: e.status === 'ingested' || e.status === 'duplicate' ? 0 : 1,
+          }],
+        })),
+      });
+    }
+    const ok = s.failed === 0 && s.unverified === 0 && !s.skippedReason;
+    res.status(s.skippedReason ? 503 : ok ? 200 : 207).json({
+      success: ok,
+      dryRun,
+      skippedReason: s.skippedReason ?? null,
+      mailbox: s.mailbox,
+      scanned: s.scanned,
+      ingested: s.ingested,
+      duplicates: s.duplicates,
+      unverified: s.unverified,
+      unrouted: s.unrouted,
+      failed: s.failed,
+      emails: s.emails,
+      durationMs: s.duration,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error: any) {
+    console.error('Motive report ingest cron error:', error);
     res.status(500).json({ error: 'Internal server error', message: error.message });
   }
 });

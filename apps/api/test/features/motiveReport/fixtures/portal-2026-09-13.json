@@ -1,0 +1,168 @@
+[
+ {
+  "id": 6221290,
+  "name": "Mohammed Morshed",
+  "driver_company_id": "",
+  "groups": [],
+  "vehicles": [
+   {
+    "number": "112",
+    "average_fuel_economy": 2.7089257,
+    "moving_fuel_economy": 3.6055524,
+    "total_distance": 2,
+    "total_fuel": 0.7383,
+    "carbon_emissions": 1.985488041,
+    "vehicle_utilization": 0.47524753,
+    "driving_time_hours": 0.0672,
+    "driving_fuel_consumed": 0.5547,
+    "idling_time_hours": 0.0742,
+    "idling_fuel_consumed": 0.1836,
+    "over_rpm_percent": 10.333259403705597,
+    "average_driving_speed": 29.761906,
+    "fuel_cost": 1.163793644545769,
+    "cruise_distance_percent": 0,
+    "cruise_time_percent": 0,
+    "hard_braking": 0,
+    "hard_acceleration": 0,
+    "hard_cornering": 0
+   }
+  ]
+ },
+ {
+  "id": 5497151,
+  "name": "Tre Jeknavorian",
+  "driver_company_id": "",
+  "groups": [],
+  "vehicles": [
+   {
+    "number": "115",
+    "average_fuel_economy": 1.6051767,
+    "moving_fuel_economy": 2.1096256,
+    "total_distance": 45,
+    "total_fuel": 28.034298,
+    "carbon_emissions": 75.39180196100001,
+    "vehicle_utilization": 0.4466195,
+    "driving_time_hours": 2.5142,
+    "driving_fuel_consumed": 21.3308,
+    "idling_time_hours": 3.1152,
+    "idling_fuel_consumed": 6.7035,
+    "over_rpm_percent": 5.07209338247776,
+    "average_driving_speed": 17.898338,
+    "fuel_cost": 44.190898238235754,
+    "cruise_distance_percent": 0,
+    "cruise_time_percent": 0,
+    "hard_braking": 0,
+    "hard_acceleration": 0,
+    "hard_cornering": 0
+   }
+  ]
+ },
+ {
+  "id": 5497119,
+  "name": "Chris Gross",
+  "driver_company_id": "",
+  "groups": [],
+  "vehicles": [
+   {
+    "number": "111",
+    "average_fuel_economy": 1.9794141,
+    "moving_fuel_economy": 2.5430193,
+    "total_distance": 3,
+    "total_fuel": 1.5156,
+    "carbon_emissions": 4.075857612,
+    "vehicle_utilization": 0.7564563,
+    "driving_time_hours": 0.2314,
+    "driving_fuel_consumed": 1.1797,
+    "idling_time_hours": 0.0745,
+    "idling_fuel_consumed": 0.3359,
+    "over_rpm_percent": 0.23861713707447052,
+    "average_driving_speed": 12.964563,
+    "fuel_cost": 2.3890635888846914,
+    "cruise_distance_percent": 0,
+    "cruise_time_percent": 0,
+    "hard_braking": 0,
+    "hard_acceleration": 0,
+    "hard_cornering": 0
+   },
+   {
+    "number": "112",
+    "average_fuel_economy": 1.0778573,
+    "moving_fuel_economy": 1.6049647,
+    "total_distance": 6,
+    "total_fuel": 5.5666,
+    "carbon_emissions": 14.970090382,
+    "vehicle_utilization": 0.49727196,
+    "driving_time_hours": 0.5195,
+    "driving_fuel_consumed": 3.7384,
+    "idling_time_hours": 0.5252,
+    "idling_fuel_consumed": 1.8282,
+    "over_rpm_percent": 1.496338751167059,
+    "average_driving_speed": 11.549566,
+    "fuel_cost": 8.774717190476064,
+    "cruise_distance_percent": 0,
+    "cruise_time_percent": 0,
+    "hard_braking": 0,
+    "hard_acceleration": 0,
+    "hard_cornering": 0
+   }
+  ]
+ },
+ {
+  "id": 5494566,
+  "name": "Mark Krol",
+  "driver_company_id": "",
+  "groups": [],
+  "vehicles": [
+   {
+    "number": "112",
+    "average_fuel_economy": 1.2569788,
+    "moving_fuel_economy": 1.7918069,
+    "total_distance": 24,
+    "total_fuel": 19.093401,
+    "carbon_emissions": 51.347307818,
+    "vehicle_utilization": 0.60365665,
+    "driving_time_hours": 2.1626,
+    "driving_fuel_consumed": 13.3943,
+    "idling_time_hours": 1.4199,
+    "idling_fuel_consumed": 5.6991,
+    "over_rpm_percent": 2.222595363855362,
+    "average_driving_speed": 11.097753,
+    "fuel_cost": 30.097220063348484,
+    "cruise_distance_percent": 0,
+    "cruise_time_percent": 0,
+    "hard_braking": 0,
+    "hard_acceleration": 0,
+    "hard_cornering": 0
+   }
+  ]
+ },
+ {
+  "id": 5494409,
+  "name": "Jeff Hillock",
+  "driver_company_id": "",
+  "groups": [],
+  "vehicles": [
+   {
+    "number": "115",
+    "average_fuel_economy": 1.1720753,
+    "moving_fuel_economy": 2.0577896,
+    "total_distance": 24,
+    "total_fuel": 20.476501,
+    "carbon_emissions": 55.066837155,
+    "vehicle_utilization": 0.3782245,
+    "driving_time_hours": 1.8137,
+    "driving_fuel_consumed": 11.663,
+    "idling_time_hours": 2.9816,
+    "idling_fuel_consumed": 8.8135,
+    "over_rpm_percent": 3.6004841327667236,
+    "average_driving_speed": 13.232618,
+    "fuel_cost": 32.27742186447439,
+    "cruise_distance_percent": 0,
+    "cruise_time_percent": 0,
+    "hard_braking": 0,
+    "hard_acceleration": 0,
+    "hard_cornering": 0
+   }
+  ]
+ }
+]

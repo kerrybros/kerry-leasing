@@ -207,6 +207,70 @@ services:
         sync: false
 
   # ---------------------------------------------------------------------------
+  # Motive scheduled-report intake. Motive support (case 11057761) confirmed the
+  # v2/driver_utilization API and the dashboard "Driver Fuel Performance" report
+  # use different calculation models and the REPORT is the source of truth for
+  # driving/idle time. The report is scheduled inside Motive (daily, 12:00 AM
+  # ET, CSV) to a shared mailbox; this job pulls it via Graph Mail.Read (scoped
+  # by an Exchange ApplicationAccessPolicy to the "KL API Mail Access" group)
+  # and the scorecard prefers those rows. Added 2026-09-14.
+  # ---------------------------------------------------------------------------
+  - type: cron
+    name: kerry-motive-report-ingest
+    runtime: node
+    region: virginia
+    plan: starter
+    branch: main
+    rootDir: ""
+    schedule: "30 5 * * *"  # daily 05:30 UTC = 01:30 ET, after Motive's 12:00 AM ET report email
+    buildCommand: cd apps/api && pnpm install && pnpm prisma:app:generate && pnpm prisma:repair:generate && pnpm build
+    startCommand: cd apps/api && node dist/scripts/run-motive-report-ingest.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: APP_DATABASE_URL
+        sync: false
+      - key: MOTIVE_REPORT_MAILBOX
+        value: motive-reports@kerrybros.com
+      - key: MICROSOFT_GRAPH_TENANT_ID
+        sync: false
+      - key: MICROSOFT_GRAPH_CLIENT_ID
+        sync: false
+      - key: MICROSOFT_GRAPH_CLIENT_SECRET
+        sync: false
+      - key: MICROSOFT_GRAPH_SITE_HOSTNAME
+        sync: false
+      - key: MICROSOFT_GRAPH_SITE_PATH
+        sync: false
+
+  # ---------------------------------------------------------------------------
+  # Motive PORTAL PULL (primary intake once proven). Logs into the Fleet
+  # Dashboard as each org's dedicated portal user (credentials live in the org's
+  # encrypted credentials blob, set via set-motive-portal-login.ts) and re-pulls
+  # Driver Fuel Performance for the last 14 days, last 2 weeks and current/prior
+  # month, every night. Re-pulling captures Motive's late additions to a day.
+  # Headless Chromium ships with the build (@sparticuz/chromium), no extra
+  # service. Added 2026-09-18.
+  # ---------------------------------------------------------------------------
+  - type: cron
+    name: kerry-motive-portal-pull
+    runtime: node
+    region: virginia
+    plan: starter
+    branch: main
+    rootDir: ""
+    schedule: "0 7 * * *"  # daily 07:00 UTC = 03:00 ET, after the API sync and Motive's batch
+    buildCommand: cd apps/api && pnpm install && pnpm prisma:app:generate && pnpm prisma:repair:generate && pnpm build
+    startCommand: cd apps/api && node dist/scripts/run-motive-portal-pull.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: APP_DATABASE_URL
+        sync: false
+      - key: CREDENTIALS_ENCRYPTION_KEY
+        sync: false
+
+  # ---------------------------------------------------------------------------
   # Cron-health watchdog — emails an alert (via Graph) when any scheduled job
   # hasn't succeeded within its window. The safety net for silent cron death.
   # Added 2026-07-07. Set CRON_ALERT_EMAIL to a monitored inbox.

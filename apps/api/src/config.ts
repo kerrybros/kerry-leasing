@@ -62,6 +62,10 @@ export const config = {
   // The Graph app registration must be granted the Mail.Send application
   // permission, and this mailbox must exist in the tenant.
   reportEmailFrom: process.env.REPORT_EMAIL_FROM ?? null,
+  // Shared mailbox that receives Motive's scheduled "Driver Fuel Performance"
+  // CSV emails (e.g. motive-reports@kerrybros.com). Read via Graph Mail.Read,
+  // scoped by an Exchange ApplicationAccessPolicy. Null disables the intake job.
+  motiveReportMailbox: process.env.MOTIVE_REPORT_MAILBOX ?? null,
   // Where cron-health alerts are sent. Defaults to the report sender mailbox;
   // set CRON_ALERT_EMAIL to a monitored inbox (e.g. ops) to actually get paged.
   cronAlertEmail: process.env.CRON_ALERT_EMAIL ?? process.env.REPORT_EMAIL_FROM ?? null,

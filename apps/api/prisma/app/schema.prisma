@@ -98,6 +98,10 @@ model TelematicsProviderAccount {
   lastBackdateReport Json?                   @map("last_backdate_report")
   backdateStatus     BackdateStatus?         @map("backdate_status")
   backdateStartedAt  DateTime?               @map("backdate_started_at")
+  // Company name exactly as it appears in Motive's scheduled-report emails
+  // ("...scheduled by <user> from <COMPANY> is ready"). Routes an inbound
+  // report email in the shared mailbox to this org. Motive only.
+  motiveReportCompanyName String?             @map("motive_report_company_name")
   createdAt       DateTime                   @default(now()) @map("created_at")
   updatedAt       DateTime                   @updatedAt @map("updated_at")
 
@@ -127,6 +131,7 @@ enum CronJobType {
   SAMSARA_DAILY
   MOTIVE_DAILY
   SMS_WEEKLY_DRIVER_REPORT
+  MOTIVE_REPORT_INGEST
 }
 
 // SAMSARA Idling Events (source table: one row per event, no aggregation)
@@ -880,6 +885,113 @@ model MotiveSpeedingEvent {
 
 // System Config (key-value store for app-wide settings)
 // Used for: diesel_price_per_gallon (EIA weekly fetch), feature flags, etc.
+// ---------------------------------------------------------------------------
+// MOTIVE DASHBOARD REPORT INTAKE
+// Motive confirmed (case 11057761) that v2/driver_utilization and the Fleet
+// Dashboard "Driver Fuel Performance" report use different calculation models
+// and that the REPORT is the source of truth. The report is scheduled inside
+// Motive and emailed as a CSV to a shared mailbox; we ingest it here and the
+// scorecard's idle + MPG legs read these rows in preference to the API tables.
+// Rows are WINDOW-based (inclusive YYYY-MM-DD start/end), so daily scheduled
+// files, weekly/monthly manual exports and ad-hoc ranges all share one table.
+// ---------------------------------------------------------------------------
+
+enum MotiveReportSource {
+  SCHEDULED_EMAIL
+  MANUAL_IMPORT
+  PORTAL_PULL
+}
+
+enum MotiveReportGranularity {
+  DAY
+  WEEK
+  MONTH
+  CUSTOM
+}
+
+// ACCEPTED rows feed the scorecard. UNVERIFIED files are kept for audit but
+// never tile a range: an empty scheduled file on a day the API shows driving,
+// or a label that does not end on its delivery date, means Motive's batch or
+// scheduler behaved unexpectedly and a human should look before it scores.
+enum MotiveReportIngestStatus {
+  ACCEPTED
+  UNVERIFIED
+}
+
+// One row per ingested file (email attachment or manual CSV). Keeps the raw CSV
+// for audit so any scorecard number can be traced back to the exact export.
+model MotiveReportIngest {
+  id             String                  @id @default(cuid())
+  clerkOrgId     String                  @map("clerk_org_id")
+  source         MotiveReportSource
+  // Idempotency key: email internetMessageId, or "file:<name>" for manual imports.
+  sourceRef      String                  @unique @map("source_ref")
+  reportName     String?                 @map("report_name")
+  subject        String?
+  attachmentName String?                 @map("attachment_name")
+  receivedAt     DateTime?               @map("received_at")
+  windowStart    String                  @map("window_start") // YYYY-MM-DD inclusive
+  windowEnd      String                  @map("window_end")   // YYYY-MM-DD inclusive
+  granularity    MotiveReportGranularity
+  status         MotiveReportIngestStatus @default(ACCEPTED)
+  statusReason   String?                 @map("status_reason")
+  // Window exactly as Motive labeled it (before the delivery-date trim), for audit.
+  labelStart     String?                 @map("label_start")
+  labelEnd       String?                 @map("label_end")
+  rowCount       Int                     @map("row_count")
+  rawCsv         String                  @map("raw_csv")
+  createdAt      DateTime                @default(now()) @map("created_at")
+
+  rows MotiveReportDriverFuelPerformance[]
+
+  @@index([clerkOrgId, windowStart, windowEnd])
+  @@index([clerkOrgId, status])
+  @@map("motive_report_ingests")
+}
+
+// One row per (driver, vehicle) line in a Driver Fuel Performance export.
+// Column names mirror the CSV headers; times are MINUTES as exported (the API
+// tables store seconds, so convert at the read site, not here).
+model MotiveReportDriverFuelPerformance {
+  id                   String             @id @default(cuid())
+  clerkOrgId           String             @map("clerk_org_id")
+  ingestId             String             @map("ingest_id")
+  ingest               MotiveReportIngest @relation(fields: [ingestId], references: [id], onDelete: Cascade)
+  windowStart          String             @map("window_start")
+  windowEnd            String             @map("window_end")
+  driverName           String             @map("driver_name")
+  driverNormalizedName String             @map("driver_normalized_name") // lowercase, collapsed whitespace
+  motiveDriverId       Int?               @map("motive_driver_id")       // resolved by name at ingest; null if unmatched
+  driverCompanyId      String?            @map("driver_company_id")      // "Driver ID" column (blank unless set in Motive)
+  groupName            String?            @map("group_name")
+  vehicleName          String             @map("vehicle_name")
+  avgMpg               Float?             @map("avg_mpg")
+  movingMpg            Float?             @map("moving_mpg")
+  totalDistanceMi      Float?             @map("total_distance_mi")
+  totalFuelGal         Float?             @map("total_fuel_gal")
+  carbonLbs            Float?             @map("carbon_lbs")
+  utilizationPct       Float?             @map("utilization_pct")
+  drivingTimeMin       Float?             @map("driving_time_min")
+  drivingFuelGal       Float?             @map("driving_fuel_gal")
+  idlingTimeMin        Float?             @map("idling_time_min")
+  idledFuelGal         Float?             @map("idled_fuel_gal")
+  overRpmPct           Float?             @map("over_rpm_pct")
+  avgSpeedMph          Float?             @map("avg_speed_mph")
+  fuelCostUsd          Float?             @map("fuel_cost_usd")
+  cruiseDistancePct    Float?             @map("cruise_distance_pct")
+  cruiseTimePct        Float?             @map("cruise_time_pct")
+  hardBrakingPer1kMi   Float?             @map("hard_braking_per_1k_mi")
+  hardAccelPer1kMi     Float?             @map("hard_accel_per_1k_mi")
+  hardCorneringPer1kMi Float?             @map("hard_cornering_per_1k_mi")
+  rawRow               Json               @map("raw_row")
+  createdAt            DateTime           @default(now()) @map("created_at")
+
+  @@unique([clerkOrgId, windowStart, windowEnd, driverNormalizedName, vehicleName], name: "reportRowKey")
+  @@index([clerkOrgId, windowStart, windowEnd])
+  @@index([clerkOrgId, motiveDriverId])
+  @@map("motive_report_driver_fuel_performance")
+}
+
 model SystemConfig {
   id        String   @id @default(cuid())
   key       String   @unique

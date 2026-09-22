@@ -19,7 +19,7 @@ async function lastSuccessAt(job: CronJobType): Promise<Date | null> {
 
 export async function gatherCronHealthChecks(): Promise<CronHealthCheck[]> {
   const prisma = getAppPrisma();
-  const [motive, samsara, weekly, diesel, weeklyDelivered] = await Promise.all([
+  const [motive, samsara, weekly, diesel, weeklyDelivered, reportIngest, reportEverIngested] = await Promise.all([
     lastSuccessAt(CronJobType.MOTIVE_DAILY),
     lastSuccessAt(CronJobType.SAMSARA_DAILY),
     lastSuccessAt(CronJobType.SMS_WEEKLY_DRIVER_REPORT),
@@ -34,6 +34,13 @@ export async function gatherCronHealthChecks(): Promise<CronHealthCheck[]> {
     prisma.customerSmsReportConfig.findFirst({
       where: { enabled: true, lastSentAt: { not: null } },
       select: { lastSentAt: true },
+    }),
+    lastSuccessAt(CronJobType.MOTIVE_REPORT_INGEST),
+    // The Motive report intake is "live" once any scheduled-email file has been
+    // stored; before that (mailbox not yet wired) a missing run is expected.
+    prisma.motiveReportIngest.findFirst({
+      where: { source: 'SCHEDULED_EMAIL' },
+      select: { id: true },
     }),
   ]);
 
@@ -50,5 +57,12 @@ export async function gatherCronHealthChecks(): Promise<CronHealthCheck[]> {
       note: weeklyLive ? undefined : 'not live — no report delivered yet',
     },
     { label: 'EIA diesel price', lastSuccessAt: diesel?.updatedAt ?? null, maxAgeHours: 48 },
+    {
+      label: 'Motive report intake (mailbox)',
+      lastSuccessAt: reportIngest,
+      maxAgeHours: 26,
+      live: reportEverIngested != null,
+      note: reportEverIngested ? undefined : 'not live: no scheduled report email ingested yet',
+    },
   ];
 }

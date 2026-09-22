@@ -49,3 +49,15 @@ apps/api/src/scripts/admin/config-export/*.json
 
 # Turbo
 .turbo
+
+# Local scratch: Motive report exports carry driver names, never commit
+tmp/
+
+# Local agent settings. Has held database URLs with credentials, never commit.
+.claude/
+
+# Generated customer deliverables and analysis. Contain driver names, phone
+# numbers and message bodies, so they stay local.
+corrections/
+output/
+reports/

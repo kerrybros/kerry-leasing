@@ -15,6 +15,7 @@ import { TelematicsProvider } from '../telematics/types.js';
 import { cacheGetOrSet } from '../lib/redis.js';
 import { config } from '../config.js';
 import { SAFETY_EVENT_WEIGHTS, weightedEventTotal, safetyScoreFromRate, type NormalizedSafetyEvent } from './safetyScore.js';
+import { resolveReportCoverage, latestReportIngestToken, type ReportCoverage } from '../features/motiveReport/reportCoverage.js';
 import { mapSamsaraBehavior } from '../telematics/samsara/behaviorLabelMap.js';
 
 const CACHE_TTL_SECS = 7200; // 2 hours — nightly sync invalidates anyway
@@ -86,7 +87,8 @@ export class TelematicsService {
     endDate: string
   ): Promise<NormalizedDriverResponse> {
     const env = config.nodeEnv === 'production' ? 'prod' : 'dev';
-    const key = `${env}:telematics:driver:${orgId}:${startDate}:${endDate}`;
+    const reportToken = await latestReportIngestToken(orgId);
+    const key = `${env}:telematics:driver:${orgId}:${startDate}:${endDate}:r${reportToken}`;
     return cacheGetOrSet(key, CACHE_TTL_SECS, () =>
       this._fetchDriverUtilization(orgId, startDate, endDate)
     );
@@ -200,6 +202,15 @@ export class TelematicsService {
   ): Promise<NormalizedDriverRecord[]> {
     const appPrisma = getAppPrisma();
 
+    // Report-first (see _fetchDriverScorecard): when the range is tiled by
+    // DAILY report files, emit one record per driver per day from the report
+    // so the drivers page agrees with the scorecard. Weekly/monthly windows
+    // cannot be split into days, so those ranges stay on the API rows.
+    const coverage = await resolveReportCoverage(orgId, startDate, endDate);
+    if (coverage && coverage.windows.every((w) => w.windowStart === w.windowEnd)) {
+      return this.getMotiveDriverUtilizationFromReport(orgId, coverage);
+    }
+
     const rows = await appPrisma.motiveDriverUtilization.findMany({
       where: {
         clerkOrgId: orgId,
@@ -257,6 +268,55 @@ export class TelematicsService {
       idleFuel: r.idleFuel ?? null,
       totalDistance: distMap.get(`${r.driverId}:${r.date}`) ?? null,
     }));
+  }
+
+  /** Per-driver-per-day records built from daily report rows (summed across vehicles). */
+  private async getMotiveDriverUtilizationFromReport(
+    orgId: string,
+    coverage: ReportCoverage
+  ): Promise<NormalizedDriverRecord[]> {
+    const appPrisma = getAppPrisma();
+    const rows = await appPrisma.motiveReportDriverFuelPerformance.findMany({
+      where: {
+        clerkOrgId: orgId,
+        OR: coverage.windows.map((w) => ({ windowStart: w.windowStart, windowEnd: w.windowEnd })),
+      },
+      select: {
+        motiveDriverId: true, driverName: true, driverNormalizedName: true, windowStart: true,
+        totalDistanceMi: true, drivingTimeMin: true, idlingTimeMin: true, drivingFuelGal: true, idledFuelGal: true,
+      },
+    });
+    const byKey = new Map<string, NormalizedDriverRecord>();
+    for (const r of rows) {
+      const driverId = r.motiveDriverId ?? syntheticDriverId(r.driverNormalizedName);
+      const key = `${driverId}:${r.windowStart}`;
+      const [first, ...rest] = r.driverName.trim().split(/\s+/);
+      const ex = byKey.get(key) ?? {
+        driverId,
+        driverFirstName: first ?? null,
+        driverLastName: rest.length ? rest.join(' ') : null,
+        date: r.windowStart,
+        utilization: null,
+        drivingTime: 0,
+        idleTime: 0,
+        drivingFuel: 0,
+        idleFuel: 0,
+        totalDistance: 0,
+      };
+      ex.drivingTime! += (r.drivingTimeMin ?? 0) * 60;
+      ex.idleTime! += (r.idlingTimeMin ?? 0) * 60;
+      ex.drivingFuel! += r.drivingFuelGal ?? 0;
+      ex.idleFuel! += r.idledFuelGal ?? 0;
+      ex.totalDistance! += r.totalDistanceMi ?? 0;
+      byKey.set(key, ex);
+    }
+    const out = [...byKey.values()];
+    for (const rec of out) {
+      const engineOn = (rec.drivingTime ?? 0) + (rec.idleTime ?? 0);
+      rec.utilization = engineOn > 0 ? ((rec.drivingTime ?? 0) / engineOn) * 100 : null;
+    }
+    out.sort((a, b) => (a.date === b.date ? a.driverId - b.driverId : b.date.localeCompare(a.date)));
+    return out;
   }
 
   // ---------------------------------------------------------------------------
@@ -344,7 +404,10 @@ export class TelematicsService {
     // up to CACHE_TTL_SECS.
     const provider = await this.resolveProvider(orgId);
     const env = config.nodeEnv === 'production' ? 'prod' : 'dev';
-    const key = `${env}:telematics:scorecard:${provider ?? 'none'}:${orgId}:${startDate}:${endDate}`;
+    // A freshly ingested Motive report must not serve a stale API-based card
+    // for up to CACHE_TTL_SECS, so the latest ingest timestamp is in the key.
+    const reportToken = provider === TelematicsProvider.MOTIVE ? await latestReportIngestToken(orgId) : 'na';
+    const key = `${env}:telematics:scorecard:${provider ?? 'none'}:${orgId}:${startDate}:${endDate}:r${reportToken}`;
     return cacheGetOrSet(key, CACHE_TTL_SECS, () =>
       this._fetchDriverScorecard(orgId, startDate, endDate)
     );
@@ -431,37 +494,94 @@ export class TelematicsService {
 
     const appPrisma = getAppPrisma();
 
-    // 1. Driver utilization records for the period
-    const driverRows = await appPrisma.motiveDriverUtilization.findMany({
-      where: { clerkOrgId: orgId, date: { gte: startDate, lte: endDate } },
-      select: {
-        driverId: true,
-        driverFirstName: true,
-        driverLastName: true,
-        date: true,
-        utilization: true,
-        drivingTime: true,
-        idleTime: true,
-        drivingFuel: true,
-        idleFuel: true,
-      },
-    });
+    type DriverAgg = {
+      driverName: string; totalMiles: number; totalFuel: number;
+      totalIdleTime: number; totalDrivingTime: number; totalIdleFuel: number;
+    };
+    let agg: Map<number, DriverAgg>;
+    let fleetAvgMpg: number;
+    let source: ScorecardSource;
 
-    if (driverRows.length === 0) {
-      return { data: [], provider: 'MOTIVE', fleetAvgMpg: 0, period: { startDate, endDate } };
+    // 0. Prefer Motive's dashboard "Driver Fuel Performance" export when the
+    // whole range is covered by ingested report windows. Motive confirmed
+    // (case 11057761) the v2/driver_utilization API and the dashboard report
+    // use different calculation models and that the REPORT is the source of
+    // truth: the API under-counts low-speed (yard) driving time, inflating
+    // idle% on switchers by 15-25 pts. Report rows feed the idle + MPG legs
+    // (and the per-mile denominator of the safety leg); never blended with API
+    // rows inside one range. See features/motiveReport.
+    const coverage = await resolveReportCoverage(orgId, startDate, endDate);
+    if (coverage) {
+      const r = await this.aggregateMotiveReport(orgId, coverage);
+      agg = r.agg;
+      fleetAvgMpg = r.fleetAvgMpg;
+      source = 'MOTIVE_REPORT';
+    } else {
+      source = 'MOTIVE_API';
+      // 1. Driver utilization records for the period
+      const driverRows = await appPrisma.motiveDriverUtilization.findMany({
+        where: { clerkOrgId: orgId, date: { gte: startDate, lte: endDate } },
+        select: {
+          driverId: true,
+          driverFirstName: true,
+          driverLastName: true,
+          date: true,
+          utilization: true,
+          drivingTime: true,
+          idleTime: true,
+          drivingFuel: true,
+          idleFuel: true,
+        },
+      });
+
+      if (driverRows.length === 0) {
+        return { data: [], provider: 'MOTIVE', source, fleetAvgMpg: 0, period: { startDate, endDate } };
+      }
+
+      // 2. Mileage from driving periods (authoritative distance source for Motive)
+      const dates = [...new Set(driverRows.map((r: any) => r.date as string))];
+      const periods = await appPrisma.motiveDrivingPeriod.findMany({
+        where: { clerkOrgId: orgId, date: { in: dates }, driverId: { not: null } },
+        select: { driverId: true, date: true, distance: true },
+      });
+      const distMap = new Map<string, number>();
+      for (const p of periods) {
+        if (p.driverId == null || !p.distance) continue;
+        const key = `${p.driverId}:${p.date}`;
+        distMap.set(key, (distMap.get(key) ?? 0) + (parseFloat(p.distance) || 0));
+      }
+
+      // 4. Fleet-average MPG from vehicle utilization
+      const vehicleRows = await appPrisma.motiveVehicleUtilization.findMany({
+        where: { clerkOrgId: orgId, date: { gte: startDate, lte: endDate } },
+        select: { totalDistance: true, totalFuel: true },
+      });
+      let fleetMiles = 0, fleetFuel = 0;
+      for (const v of vehicleRows) {
+        fleetMiles += (v.totalDistance as number | null) ?? 0;
+        fleetFuel += (v.totalFuel as number | null) ?? 0;
+      }
+      fleetAvgMpg = fleetFuel > 0 ? fleetMiles / fleetFuel : 0;
+
+      // 5. Aggregate per driver
+      agg = new Map<number, DriverAgg>();
+      for (const r of driverRows as any[]) {
+        if (!r.driverId) continue;
+        const ex = agg.get(r.driverId) ?? {
+          driverName: `${r.driverFirstName ?? ''} ${r.driverLastName ?? ''}`.trim() || `Driver ${r.driverId}`,
+          totalMiles: 0, totalFuel: 0, totalIdleTime: 0, totalDrivingTime: 0, totalIdleFuel: 0,
+        };
+        ex.totalMiles += distMap.get(`${r.driverId}:${r.date}`) ?? 0;
+        ex.totalFuel += (r.drivingFuel ?? 0) + (r.idleFuel ?? 0);
+        ex.totalIdleTime += r.idleTime ?? 0;
+        ex.totalDrivingTime += r.drivingTime ?? 0;
+        ex.totalIdleFuel += r.idleFuel ?? 0;
+        agg.set(r.driverId, ex);
+      }
     }
 
-    // 2. Mileage from driving periods (authoritative distance source for Motive)
-    const dates = [...new Set(driverRows.map((r: any) => r.date as string))];
-    const periods = await appPrisma.motiveDrivingPeriod.findMany({
-      where: { clerkOrgId: orgId, date: { in: dates }, driverId: { not: null } },
-      select: { driverId: true, date: true, distance: true },
-    });
-    const distMap = new Map<string, number>();
-    for (const p of periods) {
-      if (p.driverId == null || !p.distance) continue;
-      const key = `${p.driverId}:${p.date}`;
-      distMap.set(key, (distMap.get(key) ?? 0) + (parseFloat(p.distance) || 0));
+    if (agg.size === 0) {
+      return { data: [], provider: 'MOTIVE', source, fleetAvgMpg: 0, period: { startDate, endDate } };
     }
 
     // 3. Unified safety-event stream for the period (perf events + valid
@@ -481,39 +601,8 @@ export class TelematicsService {
       hardBreakdownMap.set(e.driverId, bd);
     }
 
-    // 4. Fleet-average MPG from vehicle utilization
-    const vehicleRows = await appPrisma.motiveVehicleUtilization.findMany({
-      where: { clerkOrgId: orgId, date: { gte: startDate, lte: endDate } },
-      select: { totalDistance: true, totalFuel: true },
-    });
-    let fleetMiles = 0, fleetFuel = 0;
-    for (const v of vehicleRows) {
-      fleetMiles += (v.totalDistance as number | null) ?? 0;
-      fleetFuel += (v.totalFuel as number | null) ?? 0;
-    }
-    const fleetAvgMpg = fleetFuel > 0 ? fleetMiles / fleetFuel : 0;
 
-    // 5. Aggregate per driver
-    const agg = new Map<number, {
-      driverName: string; totalMiles: number; totalFuel: number;
-      totalIdleTime: number; totalDrivingTime: number; totalIdleFuel: number;
-    }>();
-
-    for (const r of driverRows as any[]) {
-      if (!r.driverId) continue;
-      const ex = agg.get(r.driverId) ?? {
-        driverName: `${r.driverFirstName ?? ''} ${r.driverLastName ?? ''}`.trim() || `Driver ${r.driverId}`,
-        totalMiles: 0, totalFuel: 0, totalIdleTime: 0, totalDrivingTime: 0, totalIdleFuel: 0,
-      };
-      ex.totalMiles += distMap.get(`${r.driverId}:${r.date}`) ?? 0;
-      ex.totalFuel += (r.drivingFuel ?? 0) + (r.idleFuel ?? 0);
-      ex.totalIdleTime += r.idleTime ?? 0;
-      ex.totalDrivingTime += r.drivingTime ?? 0;
-      ex.totalIdleFuel += r.idleFuel ?? 0;
-      agg.set(r.driverId, ex);
-    }
-
-    // 6. Compute scores — 3 levers, cost-led: Idle 0.40 / MPG 0.35 / Safety 0.25.
+    // 6. Compute scores: 3 levers, cost-led. Idle 0.40 / MPG 0.35 / Safety 0.25.
     // Utilization dropped; old "fuel economy" was a duplicate idle metric (folded
     // into Idle). Safety is per-mile, Motive-weighted (safetyScore.ts).
     const MAX_IDLE_PCT = 50;
@@ -573,7 +662,55 @@ export class TelematicsService {
     scored.sort((a, b) => b.score - a.score);
     scored.forEach((d, i) => { (d as any).rank = i + 1; });
 
-    return { data: scored, provider: 'MOTIVE', fleetAvgMpg: Math.round(fleetAvgMpg * 100) / 100, period: { startDate, endDate } };
+    return {
+      data: scored,
+      provider: 'MOTIVE',
+      source,
+      reportWindows: coverage?.windows ?? undefined,
+      fleetAvgMpg: Math.round(fleetAvgMpg * 100) / 100,
+      period: { startDate, endDate },
+    };
+  }
+
+  /**
+   * Aggregate per-driver totals from ingested Motive report rows for the tiled
+   * windows. Times in the report are MINUTES; the scorer expects SECONDS (API
+   * convention), so convert here. Drivers whose name did not resolve to a
+   * motiveDriverId get a stable negative synthetic id so they still appear on
+   * the card (the ingest log lists them for follow-up).
+   */
+  private async aggregateMotiveReport(
+    orgId: string,
+    coverage: ReportCoverage
+  ): Promise<{ agg: Map<number, { driverName: string; totalMiles: number; totalFuel: number; totalIdleTime: number; totalDrivingTime: number; totalIdleFuel: number }>; fleetAvgMpg: number }> {
+    const appPrisma = getAppPrisma();
+    const rows = await appPrisma.motiveReportDriverFuelPerformance.findMany({
+      where: {
+        clerkOrgId: orgId,
+        OR: coverage.windows.map((w) => ({ windowStart: w.windowStart, windowEnd: w.windowEnd })),
+      },
+      select: {
+        motiveDriverId: true, driverName: true, driverNormalizedName: true,
+        totalDistanceMi: true, totalFuelGal: true, idlingTimeMin: true, drivingTimeMin: true, idledFuelGal: true,
+      },
+    });
+    const agg = new Map<number, { driverName: string; totalMiles: number; totalFuel: number; totalIdleTime: number; totalDrivingTime: number; totalIdleFuel: number }>();
+    let fleetMiles = 0, fleetFuel = 0;
+    for (const r of rows) {
+      const id = r.motiveDriverId ?? syntheticDriverId(r.driverNormalizedName);
+      const ex = agg.get(id) ?? {
+        driverName: r.driverName, totalMiles: 0, totalFuel: 0, totalIdleTime: 0, totalDrivingTime: 0, totalIdleFuel: 0,
+      };
+      ex.totalMiles += r.totalDistanceMi ?? 0;
+      ex.totalFuel += r.totalFuelGal ?? 0;
+      ex.totalIdleTime += (r.idlingTimeMin ?? 0) * 60;
+      ex.totalDrivingTime += (r.drivingTimeMin ?? 0) * 60;
+      ex.totalIdleFuel += r.idledFuelGal ?? 0;
+      agg.set(id, ex);
+      fleetMiles += r.totalDistanceMi ?? 0;
+      fleetFuel += r.totalFuelGal ?? 0;
+    }
+    return { agg, fleetAvgMpg: fleetFuel > 0 ? fleetMiles / fleetFuel : 0 };
   }
 
   /**
@@ -715,7 +852,7 @@ export class TelematicsService {
     });
 
     if (driverRows.length === 0) {
-      return { data: [], provider: 'SAMSARA', fleetAvgMpg: 0, period: { startDate, endDate } };
+      return { data: [], provider: 'SAMSARA', source: 'SAMSARA_API', fleetAvgMpg: 0, period: { startDate, endDate } };
     }
 
     // 2. Driver name lookup (fall back to whatever's on the fuel-energy row)
@@ -848,7 +985,7 @@ export class TelematicsService {
     scored.sort((a, b) => b.score - a.score);
     scored.forEach((d, i) => { (d as any).rank = i + 1; });
 
-    return { data: scored, provider: 'SAMSARA', fleetAvgMpg: Math.round(fleetAvgMpg * 100) / 100, period: { startDate, endDate } };
+    return { data: scored, provider: 'SAMSARA', source: 'SAMSARA_API', fleetAvgMpg: Math.round(fleetAvgMpg * 100) / 100, period: { startDate, endDate } };
   }
 }
 
@@ -875,9 +1012,29 @@ export interface ScorecardDriver {
   subScores: { idle: number; mpg: number; safety: number };
 }
 
+/**
+ * Where the idle/MPG figures came from. MOTIVE_REPORT = Motive's dashboard
+ * "Driver Fuel Performance" export (source of truth per Motive support);
+ * MOTIVE_API = v2/driver_utilization fallback when no report covers the range.
+ */
+export type ScorecardSource = 'MOTIVE_REPORT' | 'MOTIVE_API' | 'SAMSARA_API';
+
 export interface DriverScorecardResponse {
   data: ScorecardDriver[];
   provider: string | null;
+  source?: ScorecardSource;
+  /** The ingested report windows that tiled the period (MOTIVE_REPORT only). */
+  reportWindows?: Array<{ windowStart: string; windowEnd: string }>;
   fleetAvgMpg: number;
   period: { startDate: string; endDate: string };
+}
+
+/** Stable negative id for a report driver whose name did not match a Motive user. */
+export function syntheticDriverId(normalizedName: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < normalizedName.length; i++) {
+    h ^= normalizedName.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return -((h % 2_000_000_000) + 1);
 }

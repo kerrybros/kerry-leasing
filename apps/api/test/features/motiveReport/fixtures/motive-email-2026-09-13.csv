@@ -1,0 +1,7 @@
+Driver,Driver ID,Group,Vehicle,Avg. MPG,Moving MPG,Total Distance (mi),Total Fuel (gal),Est. Carbon Emissions (lbs),Utilization (%),Driving Time (mins),Driving Fuel (gal),Idling Time (mins),Idled Fuel (gal),Over RPM (%),Avg. Speed (mph),Fuel Cost (USD),Cruise Distance (%),Cruise Time (%),Hard Braking (events/1K mi),Hard Acceleration (events/1K mi),Hard Cornering (events/1K mi)
+Mohammed Morshed,"","",112,6.37,8.48,1.24,0.2,4.38,47.52,4.03,0.15,4.45,0.05,10.33,18.49,$1.16,0.0,0.0,0.0,0.0,0.0
+Tre Jeknavorian,"","",115,3.78,4.96,27.96,7.41,166.21,44.66,150.85,5.64,186.91,1.77,5.07,11.12,$44.19,0.0,0.0,0.0,0.0,0.0
+Chris Gross,"","",111,4.66,5.98,1.86,0.4,8.99,75.65,13.88,0.31,4.47,0.09,0.24,8.06,$2.39,0.0,0.0,0.0,0.0,0.0
+Chris Gross,"","",112,2.54,3.78,3.73,1.47,33.0,49.73,31.17,0.99,31.51,0.48,1.5,7.18,$8.77,0.0,0.0,0.0,0.0,0.0
+Mark Krol,"","",112,2.96,4.21,14.91,5.04,113.2,60.37,129.76,3.54,85.19,1.51,2.22,6.9,$30.10,0.0,0.0,0.0,0.0,0.0
+Jeff Hillock,"","",115,2.76,4.84,14.91,5.41,121.4,37.82,108.82,3.08,178.9,2.33,3.6,8.22,$32.28,0.0,0.0,0.0,0.0,0.0
