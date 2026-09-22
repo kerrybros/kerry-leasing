@@ -474,3 +474,100 @@ export async function listDriveItems(
     driveWebUrl: drive.webUrl,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Mailbox reads (Mail.Read application permission, scoped by an Exchange
+// ApplicationAccessPolicy to the mailboxes in the "KL API Mail Access" group).
+// Used by the Motive scheduled-report intake. Read-only: we never mark
+// messages read or move them; processed state lives in our own DB.
+// ---------------------------------------------------------------------------
+
+export interface MailMessageSummary {
+  id: string;
+  internetMessageId: string | null;
+  subject: string;
+  from: string | null;
+  receivedDateTime: string;
+  hasAttachments: boolean;
+  bodyPreview: string;
+}
+
+export interface MailAttachment {
+  id: string;
+  name: string;
+  contentType: string | null;
+  size: number;
+  /** Base64 content. Present for fileAttachment; absent for item/reference attachments. */
+  contentBytes?: string;
+}
+
+interface GraphMessageRaw {
+  id: string;
+  internetMessageId?: string;
+  subject?: string;
+  from?: { emailAddress?: { address?: string } };
+  receivedDateTime: string;
+  hasAttachments?: boolean;
+  bodyPreview?: string;
+}
+
+/**
+ * Newest-first messages in a mailbox, optionally only those received after
+ * `sinceIso` and/or from one sender. Follows @odata.nextLink up to `maxPages`.
+ */
+export async function listMailMessages(
+  cfg: GraphClientConfig,
+  mailbox: string,
+  opts: { sinceIso?: string; fromAddress?: string; top?: number; maxPages?: number } = {}
+): Promise<MailMessageSummary[]> {
+  const token = await getAccessToken(cfg.tenantId, cfg.clientId, cfg.clientSecret);
+  const filters: string[] = [];
+  if (opts.sinceIso) filters.push(`receivedDateTime ge ${opts.sinceIso}`);
+  if (opts.fromAddress) filters.push(`from/emailAddress/address eq '${opts.fromAddress.replace(/'/g, "''")}'`);
+  const params = new URLSearchParams({
+    $top: String(opts.top ?? 50),
+    $orderby: 'receivedDateTime desc',
+    $select: 'id,internetMessageId,subject,from,receivedDateTime,hasAttachments,bodyPreview',
+  });
+  if (filters.length) params.set('$filter', filters.join(' and '));
+
+  let url: string | undefined =
+    `${GRAPH_BASE}/users/${encodeURIComponent(mailbox)}/messages?${params.toString()}`;
+  const out: MailMessageSummary[] = [];
+  let pages = 0;
+  while (url && pages < (opts.maxPages ?? 5)) {
+    const page: GraphListResponse<GraphMessageRaw> = await graphFetch<GraphListResponse<GraphMessageRaw>>(url, token);
+    for (const m of page.value) {
+      out.push({
+        id: m.id,
+        internetMessageId: m.internetMessageId ?? null,
+        subject: m.subject ?? '',
+        from: m.from?.emailAddress?.address ?? null,
+        receivedDateTime: m.receivedDateTime,
+        hasAttachments: m.hasAttachments ?? false,
+        bodyPreview: m.bodyPreview ?? '',
+      });
+    }
+    url = page['@odata.nextLink'];
+    pages++;
+  }
+  return out;
+}
+
+/** All attachments on a message, with content (base64) for file attachments. */
+export async function getMailAttachments(
+  cfg: GraphClientConfig,
+  mailbox: string,
+  messageId: string
+): Promise<MailAttachment[]> {
+  const token = await getAccessToken(cfg.tenantId, cfg.clientId, cfg.clientSecret);
+  const url = `${GRAPH_BASE}/users/${encodeURIComponent(mailbox)}/messages/${encodeURIComponent(messageId)}/attachments`;
+  const page = await graphFetch<GraphListResponse<MailAttachment & { '@odata.type'?: string }>>(url, token);
+  return page.value.map((a) => ({
+    id: a.id,
+    name: a.name,
+    contentType: a.contentType ?? null,
+    size: a.size,
+    contentBytes: a.contentBytes,
+  }));
+}

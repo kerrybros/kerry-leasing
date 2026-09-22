@@ -83,7 +83,7 @@ function unsubscribeUrl(token: string): string {
   return `${config.reportPublicBaseUrl.replace(/\/$/, '')}/u/${token}`;
 }
 
-function buildKpiSnapshot(report: DriverWeeklyReport): object {
+export function buildKpiSnapshot(report: DriverWeeklyReport): object {
   return {
     displayName: report.displayName,
     firstName: report.firstName,
