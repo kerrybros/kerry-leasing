@@ -249,8 +249,8 @@ services:
   # encrypted credentials blob, set via set-motive-portal-login.ts) and re-pulls
   # Driver Fuel Performance for the last 14 days, last 2 weeks and current/prior
   # month, every night. Re-pulling captures Motive's late additions to a day.
-  # Headless Chromium ships with the build (@sparticuz/chromium), no extra
-  # service. Added 2026-09-18.
+  # The login is plain HTTP against the dashboard's own form, no browser, so
+  # this runs fine on a starter instance. Added 2026-09-18.
   # ---------------------------------------------------------------------------
   - type: cron
     name: kerry-motive-portal-pull
@@ -259,9 +259,12 @@ services:
     plan: starter
     branch: main
     rootDir: ""
-    schedule: "0 7 * * *"  # daily 07:00 UTC = 03:00 ET, after the API sync and Motive's batch
-    buildCommand: cd apps/api && pnpm install && pnpm prisma:app:generate && pnpm prisma:repair:generate && pnpm build
-    startCommand: cd apps/api && node dist/scripts/run-motive-portal-pull.js
+    schedule: "0 13 * * *"  # daily 13:00 UTC = 09:00 ET. Motive's nightly batch publishes
+                            # yesterday between 04:00 and 08:00 ET (measured over four nights).
+    # --prod=false because NODE_ENV=production otherwise makes pnpm skip
+    # devDependencies, and the build tools live there.
+    buildCommand: pnpm install --frozen-lockfile --prod=false; pnpm run build
+    startCommand: pnpm --filter @kerry-leasing/api pull-motive-portal
     envVars:
       - key: NODE_ENV
         value: production
