@@ -9,18 +9,24 @@
  * window again later picks up those late arrivals; every pull upserts the
  * window's rows and keeps the raw file as an audit record.
  *
- * Session: a headless Chromium logs in as the org's dedicated portal user
- * (credentials in the org's encrypted credentials blob: portalEmail /
- * portalPassword), the `auth_token` cookie is read, the browser is closed,
- * and the report is fetched with plain HTTP using the X-Web-User-Auth header
- * (as the dashboard does). Nothing is cached between runs.
+ * Session: the org's dedicated portal user signs in over plain HTTP against the
+ * same Rails login form the dashboard uses (credentials live in the org's
+ * encrypted credentials blob as portalEmail / portalPassword). The resulting
+ * `auth_token` cookie is then sent as X-Web-User-Auth, exactly as the dashboard
+ * does. Nothing is cached between runs.
+ *
+ * This deliberately does NOT drive a browser. A headless Chromium worked on a
+ * laptop but hung silently on Render's 512 MB cron instance, and it added a
+ * ~100 MB dependency to every service's build. The login is three requests, so
+ * the browser bought nothing. If Motive ever puts a JavaScript challenge in
+ * front of this form, the fallback is a hosted browser session, not a local
+ * Chromium.
  *
  * Risk, stated once: this is Motive's internal web API, not the documented
  * public API. It can change without notice; the strict CSV parser and the
  * driver-presence check turn any such change into a loud failure, not bad data.
  */
 
-import puppeteer, { type Browser } from 'puppeteer-core';
 import { getAppPrisma } from '../../lib/prisma.js';
 import { readCredentials } from '../../lib/credentials.js';
 import { MotiveReportIngestStatus, MotiveReportSource, TelematicsProvider, TelematicsProviderStatus } from '../../generated/app-client/index.js';
@@ -29,69 +35,108 @@ import { parseDriverFuelPerformanceCsv } from './parseDriverFuelPerformanceCsv.j
 import { classifyWindow, addDays, ymdInEastern } from './reportWindow.js';
 import { storeReport } from './reportStore.js';
 
-const LOGIN_URL = 'https://app.gomotive.com/';
+const LOGIN_PAGE = 'https://account.gomotive.com/log-in';
+const RETURN_URL = 'https://app.gomotive.com/';
 const REPORT_URL = 'https://api.keeptruckin.com/api/w3/reports/driver_fuel_performance';
-const LOGIN_TIMEOUT_MS = 90_000;
+const LOGIN_TIMEOUT_MS = 45_000;
+const MAX_REDIRECTS = 6;
+/** Sent on the login requests so the form behaves as it does for a real browser. */
+const BROWSER_UA =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
 // ---------------------------------------------------------------------------
-// Browser launch: serverless Chromium on Linux (Render), local Chrome elsewhere
+// Login (plain HTTP against the dashboard's own Rails form)
 // ---------------------------------------------------------------------------
 
-async function launchBrowser(): Promise<Browser> {
-  const explicit = process.env.MOTIVE_PORTAL_CHROME_PATH;
-  if (process.platform === 'linux' && !explicit) {
-    const chromium = (await import('@sparticuz/chromium')).default;
-    return puppeteer.launch({
-      args: chromium.args,
-      executablePath: await chromium.executablePath(),
-      headless: true,
-    });
+/** Minimal cookie jar: name to value, which is all this two-hop flow needs. */
+class CookieJar {
+  private jar = new Map<string, string>();
+  absorb(headers: Headers): void {
+    const set = (headers as unknown as { getSetCookie?: () => string[] }).getSetCookie?.() ?? [];
+    for (const raw of set) {
+      const pair = String(raw).split(';', 1)[0];
+      const eq = pair.indexOf('=');
+      if (eq > 0) this.jar.set(pair.slice(0, eq).trim(), pair.slice(eq + 1).trim());
+    }
   }
-  const executablePath =
-    explicit ??
-    (process.platform === 'darwin'
-      ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
-      : 'google-chrome');
-  return puppeteer.launch({ executablePath, headless: true, args: ['--no-sandbox'] });
+  header(): string {
+    return [...this.jar].map(([k, v]) => `${k}=${v}`).join('; ');
+  }
+  get(name: string): string | undefined {
+    return this.jar.get(name);
+  }
 }
 
-/** Log in and return the session token the dashboard sends as X-Web-User-Auth. */
+function extractCsrfToken(html: string): string | null {
+  return (
+    html.match(/name="authenticity_token"[^>]*value="([^"]+)"/)?.[1] ??
+    html.match(/value="([^"]+)"[^>]*name="authenticity_token"/)?.[1] ??
+    null
+  );
+}
+
+/** Sign in and return the session token the dashboard sends as X-Web-User-Auth. */
 export async function portalLogin(email: string, password: string): Promise<string> {
-  const browser = await launchBrowser();
-  try {
-    const page = await browser.newPage();
-    await page.setViewport({ width: 1280, height: 900 });
-    await page.goto(LOGIN_URL, { waitUntil: 'networkidle2', timeout: LOGIN_TIMEOUT_MS });
+  const jar = new CookieJar();
+  const signal = AbortSignal.timeout(LOGIN_TIMEOUT_MS);
+  const loginUrl = `${LOGIN_PAGE}?return_url=${encodeURIComponent(RETURN_URL)}`;
 
-    // Login form (account.gomotive.com/log-in, probed 2026-09-18): a plain Rails
-    // form with #user_email, #user_password and #sign-in-button. The page also
-    // carries hidden privacy-modal email inputs, so target by id, never by type.
-    const emailSel = '#user_email';
-    const passSel = '#user_password';
-    const submitSel = '#sign-in-button';
-    await page.waitForSelector(emailSel, { timeout: LOGIN_TIMEOUT_MS });
-    await page.type(emailSel, email, { delay: 15 });
-    await page.type(passSel, password, { delay: 15 });
-    await Promise.all([
-      page.waitForNavigation({ waitUntil: 'networkidle2', timeout: LOGIN_TIMEOUT_MS }).catch(() => undefined),
-      page.click(submitSel),
-    ]);
-
-    // Wait until the app has set its session cookie (may take a redirect or two).
-    const deadline = Date.now() + LOGIN_TIMEOUT_MS;
-    while (Date.now() < deadline) {
-      const cookies = await page.cookies('https://app.gomotive.com/');
-      const tok = cookies.find((c) => c.name === 'auth_token')?.value;
-      if (tok) return decodeURIComponent(tok);
-      const url = page.url();
-      if (/alert=|error|invalid/i.test(url)) break;
-      await new Promise((r) => setTimeout(r, 1000));
-    }
-    const bodyText = String(await page.evaluate('document.body ? document.body.innerText : ""')).slice(0, 300).replace(/\s+/g, ' ');
-    throw new Error(`Motive portal login did not produce a session (url=${page.url()}; page says: "${bodyText}")`);
-  } finally {
-    await browser.close().catch(() => undefined);
+  const page = await fetch(loginUrl, { redirect: 'manual', headers: { 'User-Agent': BROWSER_UA }, signal });
+  jar.absorb(page.headers);
+  if (!page.ok) throw new Error(`Motive login page returned HTTP ${page.status}`);
+  const html = await page.text();
+  const csrf = extractCsrfToken(html);
+  if (!csrf) {
+    throw new Error('Motive login page carried no authenticity_token. The sign-in form has changed.');
   }
+
+  const body = new URLSearchParams({
+    utf8: '\u2713',
+    authenticity_token: csrf,
+    'user[email]': email,
+    'user[password]': password,
+    return_url: RETURN_URL,
+    ref: '',
+  });
+
+  let url = `${LOGIN_PAGE}?ref=sign-up`;
+  let resp = await fetch(url, {
+    method: 'POST',
+    redirect: 'manual',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Cookie: jar.header(),
+      'User-Agent': BROWSER_UA,
+      Referer: loginUrl,
+    },
+    body: body.toString(),
+    signal,
+  });
+  jar.absorb(resp.headers);
+
+  // A rejected sign-in re-renders the form (200) instead of redirecting away.
+  if (resp.status === 200) {
+    const text = await resp.text();
+    const reason = /invalid|incorrect|does not match/i.test(text)
+      ? 'credentials were rejected'
+      : 'the form was re-rendered without redirecting';
+    throw new Error(`Motive login failed: ${reason}.`);
+  }
+
+  for (let hop = 0; hop < MAX_REDIRECTS && resp.status >= 300 && resp.status < 400; hop++) {
+    const location = resp.headers.get('location');
+    if (!location) break;
+    url = new URL(location, url).toString();
+    resp = await fetch(url, { redirect: 'manual', headers: { Cookie: jar.header(), 'User-Agent': BROWSER_UA }, signal });
+    jar.absorb(resp.headers);
+    if (jar.get('auth_token')) break;
+  }
+
+  const token = jar.get('auth_token');
+  if (!token) {
+    throw new Error(`Motive login produced no session cookie (last URL ${url}, status ${resp.status}).`);
+  }
+  return decodeURIComponent(token);
 }
 
 // ---------------------------------------------------------------------------
