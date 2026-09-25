@@ -43,6 +43,10 @@ export interface DriverSyncStepResult {
   errorCount: number;
   skipped: boolean;
   skipReason?: string;
+  /** Numbers moved from a departed driver to the active one holding them now. */
+  phoneReassignments?: Array<{ phoneLast4: string; from: string; to: string }>;
+  /** Numbers two current-looking drivers both claim. These need a human. */
+  phoneConflicts?: Array<{ phoneLast4: string; heldBy: string; wanted: string }>;
 }
 
 function normalizeName(name: string): string {
@@ -122,8 +126,14 @@ export async function syncWhiparoundDrivers(
   // first master sync completes.
   const masterRows = await prisma.motiveDriverMaster.findMany({
     where: { clerkOrgId },
-    select: { motiveDriverId: true, firstName: true, lastName: true, email: true },
+    select: { motiveDriverId: true, firstName: true, lastName: true, email: true, status: true },
   });
+  // Motive's employment status per driver, used to settle phone-number
+  // collisions: a number belongs to whoever is still driving.
+  const motiveStatusById = new Map<number, string>();
+  for (const m of masterRows) motiveStatusById.set(m.motiveDriverId, (m.status ?? '').toLowerCase());
+  const isActiveInMotive = (motiveDriverId: number | null | undefined): boolean =>
+    motiveDriverId != null && motiveStatusById.get(motiveDriverId) === 'active';
   const utilFallbackRows = await prisma.motiveDriverUtilization.findMany({
     where: { clerkOrgId, driverId: { not: null } },
     select: { driverId: true, driverFirstName: true, driverLastName: true, driverEmail: true },
@@ -165,6 +175,11 @@ export async function syncWhiparoundDrivers(
   let updatedCount = 0;
   let unchangedCount = 0;
   let errorCount = 0;
+  // Phone numbers moved from a departed driver to the active one, and numbers
+  // two current-looking drivers both claim. The second kind needs a human, so
+  // it travels back in the sync result rather than dying in a log line.
+  const phoneReassignments: Array<{ phoneLast4: string; from: string; to: string }> = [];
+  const phoneConflicts: Array<{ phoneLast4: string; heldBy: string; wanted: string }> = [];
 
   for (const d of rawDrivers) {
     const skip = shouldSkip(d);
@@ -220,12 +235,47 @@ export async function syncWhiparoundDrivers(
             // and email — admin can resolve the duplicate phone afterwards.
             if (innerErr.code === 'P2002' && Array.isArray(innerErr.meta?.target) &&
                 (innerErr.meta.target as string[]).includes('phone_e164')) {
-              const { phoneE164: _drop, ...patchWithoutPhone } = patch;
-              await prisma.driverContact.update({ where: { id: existing.id }, data: patchWithoutPhone });
-              console.warn(
-                `[Whiparound syncDrivers] phone conflict for wpId=${wpId} ${displayName} — ` +
-                `applied other fields, left phone for admin merge`,
-              );
+              // Another contact in this org already holds this number.
+              //
+              // The usual cause is a departed driver whose Whiparound record was
+              // never cleaned up, still carrying a number the company has since
+              // reissued to someone new. Motive settles it: it drops the phone
+              // from a driver who leaves and puts it on the active one. So when
+              // the current holder is NOT active in Motive and the incoming
+              // driver IS, the number has moved and we move it too.
+              //
+              // Anything else (both active, neither known) is a real ambiguity
+              // that a human has to resolve, so the phone is left alone and the
+              // conflict is reported rather than guessed at.
+              const holder = await prisma.driverContact.findFirst({
+                where: { clerkOrgId, phoneE164: phoneE164! },
+                select: { id: true, displayName: true, motiveDriverId: true },
+              });
+              const incomingMotiveId = (patch.motiveDriverId as number | undefined) ?? existing.motiveDriverId;
+              const reassign =
+                holder != null &&
+                holder.id !== existing.id &&
+                !isActiveInMotive(holder.motiveDriverId) &&
+                isActiveInMotive(incomingMotiveId);
+
+              if (reassign) {
+                await prisma.driverContact.update({ where: { id: holder!.id }, data: { phoneE164: null } });
+                await prisma.driverContact.update({ where: { id: existing.id }, data: patch });
+                phoneReassignments.push({ phoneLast4: phoneE164!.slice(-4), from: holder!.displayName, to: displayName });
+                console.log(
+                  `[Whiparound syncDrivers] phone ...${phoneE164!.slice(-4)} moved from ${holder!.displayName} ` +
+                  `(inactive in Motive) to ${displayName} (active)`,
+                );
+              } else {
+                const { phoneE164: _drop, ...patchWithoutPhone } = patch;
+                await prisma.driverContact.update({ where: { id: existing.id }, data: patchWithoutPhone });
+                phoneConflicts.push({ phoneLast4: phoneE164!.slice(-4), heldBy: holder?.displayName ?? 'unknown', wanted: displayName });
+                console.warn(
+                  `[Whiparound syncDrivers] phone conflict for wpId=${wpId} ${displayName}: ` +
+                  `...${phoneE164!.slice(-4)} is held by ${holder?.displayName ?? 'another contact'} and both look current. ` +
+                  `Applied other fields; a human needs to resolve this one.`,
+                );
+              }
               updatedCount++;
             } else {
               throw innerErr;
@@ -299,6 +349,21 @@ export async function syncWhiparoundDrivers(
     console.warn(`[Whiparound dedup] failed for ${clerkOrgId}: ${err.message}`);
   }
 
+  // Whiparound returns drivers in its own order, so a number can look contested
+  // when an earlier, departed claimant is processed before the active driver who
+  // actually holds it now. Once the number has been reassigned, the earlier
+  // complaint is answered; reporting it would send someone chasing a resolved
+  // problem.
+  const reassignedNumbers = new Set(phoneReassignments.map((r) => r.phoneLast4));
+  const unresolvedConflicts = phoneConflicts.filter((c) => !reassignedNumbers.has(c.phoneLast4));
+
+  if (phoneReassignments.length > 0) {
+    console.log(`[Whiparound syncDrivers] reassigned ${phoneReassignments.length} recycled phone number(s)`);
+  }
+  if (unresolvedConflicts.length > 0) {
+    console.warn(`[Whiparound syncDrivers] ${unresolvedConflicts.length} phone conflict(s) need a human decision`);
+  }
+
   return {
     endpoint: 'drivers',
     date: today,
@@ -308,5 +373,7 @@ export async function syncWhiparoundDrivers(
     unchangedCount,
     errorCount,
     skipped: false,
+    phoneReassignments,
+    phoneConflicts: unresolvedConflicts,
   };
 }
