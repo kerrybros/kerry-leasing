@@ -9,6 +9,7 @@
  */
 
 import { TelematicsService, type ScorecardDriver } from '../../services/telematicsService.js';
+import { normalizePhone } from '../drivers/phone.js';
 import { getAppPrisma } from '../../lib/prisma.js';
 import { DriverContactSource, DriverSmsConsentStatus } from '../../generated/app-client/index.js';
 import { getLastWeekRange, getTrailing4WeekRanges, type WeekRange } from './dateWindow.js';
@@ -231,6 +232,18 @@ export async function buildWeeklyReports(orgId: string, now: Date = new Date()):
     if (r.driverId != null) emailByMotiveId.set(r.driverId, r.driverEmail?.trim().toLowerCase() || null);
   }
 
+  // Motive also carries a phone on its user roster. Whiparound remains the
+  // authoritative source and fills these in on its own sync, but a driver who
+  // is not in Whiparound (or has no mobile there) would otherwise sit with no
+  // phone forever and be skipped by every weekly send. Used only when creating
+  // a contact; never overwrites a number already on an existing contact.
+  const masterRows = await prisma.motiveDriverMaster.findMany({
+    where: { clerkOrgId: orgId },
+    select: { motiveDriverId: true, phone: true },
+  });
+  const phoneByMotiveId = new Map<number, string | null>();
+  for (const m of masterRows) phoneByMotiveId.set(m.motiveDriverId, normalizePhone(m.phone));
+
   // Reconcile: insert any Motive driver names missing from DriverContact
   const unmatchedDriverNames: string[] = [];
   for (const row of current.data) {
@@ -257,6 +270,7 @@ export async function buildWeeklyReports(orgId: string, now: Date = new Date()):
           displayName: row.driverName,
           normalizedName: normalizeName(row.driverName),
           email: emailByMotiveId.get(row.driverId) ?? null,
+          phoneE164: phoneByMotiveId.get(row.driverId) ?? null,
           motiveDriverId: row.driverId,
           source: DriverContactSource.MOTIVE_AUTO,
           enrolled: true,
