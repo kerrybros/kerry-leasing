@@ -36,12 +36,11 @@ export async function gatherCronHealthChecks(): Promise<CronHealthCheck[]> {
       select: { lastSentAt: true },
     }),
     lastSuccessAt(CronJobType.MOTIVE_REPORT_INGEST),
-    // The Motive report intake is "live" once any scheduled-email file has been
-    // stored; before that (mailbox not yet wired) a missing run is expected.
-    prisma.motiveReportIngest.findFirst({
-      where: { source: 'SCHEDULED_EMAIL' },
-      select: { id: true },
-    }),
+    // Live once ANY report file has been stored, by whichever route. This used
+    // to look only for SCHEDULED_EMAIL, which meant the job stayed permanently
+    // "idle" after we moved to the portal pull: it would never have alerted if
+    // the pull died, and a dead pull is what starves the weekly scorecard.
+    prisma.motiveReportIngest.findFirst({ select: { id: true } }),
   ]);
 
   const weeklyLive = weeklyDelivered != null;
@@ -58,11 +57,11 @@ export async function gatherCronHealthChecks(): Promise<CronHealthCheck[]> {
     },
     { label: 'EIA diesel price', lastSuccessAt: diesel?.updatedAt ?? null, maxAgeHours: 48 },
     {
-      label: 'Motive report intake (mailbox)',
+      label: 'Motive report intake',
       lastSuccessAt: reportIngest,
       maxAgeHours: 26,
       live: reportEverIngested != null,
-      note: reportEverIngested ? undefined : 'not live: no scheduled report email ingested yet',
+      note: reportEverIngested ? undefined : 'not live: no report file ingested yet',
     },
   ];
 }
