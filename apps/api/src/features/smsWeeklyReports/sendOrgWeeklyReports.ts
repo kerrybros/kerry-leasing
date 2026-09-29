@@ -18,6 +18,7 @@ import { buildWeeklyReports, type DriverWeeklyReport } from './weeklyReportBuild
 import { formatSmsBody } from './smsBodyFormatter.js';
 import { formatEmailBody } from './emailBodyFormatter.js';
 import { decideChannelStatus } from './reportPolicy.js';
+import { assertReportBackedOrThrow } from './requireReportSource.js';
 import { DriverSmsStatus } from '../../generated/app-client/index.js';
 
 const TOKEN_TTL_DAYS = 30;
@@ -114,6 +115,12 @@ export async function sendOrgWeeklyReports(
   let built: Awaited<ReturnType<typeof buildWeeklyReports>>;
   try {
     built = await buildWeeklyReports(clerkOrgId, options.now);
+    // Once an org is on Motive's dashboard report, every week on the card has
+    // to come from it. A week that quietly falls back to the API puts a
+    // 20-to-30 point idle error next to three correct weeks and makes the
+    // trend and the four week average read backwards for yard drivers. Better
+    // to send nothing and shout than to send that.
+    await assertReportBackedOrThrow(clerkOrgId, built.weekSources);
   } catch (err: any) {
     return {
       clerkOrgId,

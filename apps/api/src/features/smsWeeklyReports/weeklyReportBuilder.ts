@@ -86,6 +86,12 @@ export interface BuildWeeklyReportsResult {
   fleetAvgMpg: number;
   reports: DriverWeeklyReport[];
   unmatchedDriverNames: string[];   // Motive driver names with no DriverContact row at start
+  /**
+   * Where each of the four weeks on the card came from, oldest first. The card
+   * shows a four week trend and a four week average, so a single week on a
+   * different source makes the comparison meaningless. The send path checks this.
+   */
+  weekSources: Array<{ weekStart: string; weekEnd: string; source: string | null }>;
 }
 
 const telematics = new TelematicsService();
@@ -131,6 +137,13 @@ export async function buildWeeklyReports(orgId: string, now: Date = new Date()):
   const trendWeeks = excluded.size > 0
     ? trendWeeksRaw.map(w => (w ? { ...w, data: w.data.filter(d => !excluded.has(d.driverId)) } : w))
     : trendWeeksRaw;
+
+  const weekSources = [
+    { weekStart: trailing[0].startDate, weekEnd: trailing[0].endDate, source: (trendWeeksRaw[0] as any)?.source ?? null },
+    { weekStart: trailing[1].startDate, weekEnd: trailing[1].endDate, source: (trendWeeksRaw[1] as any)?.source ?? null },
+    { weekStart: trailing[2].startDate, weekEnd: trailing[2].endDate, source: (trendWeeksRaw[2] as any)?.source ?? null },
+    { weekStart: trailing[3].startDate, weekEnd: trailing[3].endDate, source: (currentRaw as any)?.source ?? null },
+  ];
 
   // trailing weeks oldest→newest, with the newest being `current`
   const trendOldestToNewest: { week: WeekRange; rows: ScorecardDriver[] }[] = [
@@ -434,5 +447,6 @@ export async function buildWeeklyReports(orgId: string, now: Date = new Date()):
     fleetAvgMpg: current.fleetAvgMpg,
     reports,
     unmatchedDriverNames,
+    weekSources,
   };
 }

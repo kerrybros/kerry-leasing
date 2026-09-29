@@ -170,7 +170,10 @@ export interface PullWindow { windowStart: string; windowEnd: string }
 /**
  * Windows to (re)pull on a given run day, all ending on or before yesterday:
  *  - each of the last `dailyLookback` days individually (drivers page + Sunday tile)
- *  - the last `weeks` completed Monday..Sunday weeks (scorecard + weekly report)
+ *  - the last `weeks` completed Monday..Sunday weeks (scorecard + weekly report).
+ *    The weekly driver report shows a FOUR week trend, so this must stay above
+ *    four or the oldest week silently falls back to the API and one card mixes
+ *    both sources, which is the exact thing Motive told us not to do.
  *  - the prior calendar month and the current month to date (month-end report)
  * Re-pulling the same windows nightly is what captures Motive's late additions.
  */
@@ -186,7 +189,7 @@ export function planPullWindows(todayEt: string, opts: { dailyLookback?: number;
   const [y, m, d] = yesterday.split('-').map(Number);
   const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay(); // 0=Sun
   let sunday = addDays(yesterday, -dow);
-  for (let i = 0; i < (opts.weeks ?? 2); i++) {
+  for (let i = 0; i < (opts.weeks ?? 6); i++) {
     out.push({ windowStart: addDays(sunday, -6), windowEnd: sunday });
     sunday = addDays(sunday, -7);
   }
