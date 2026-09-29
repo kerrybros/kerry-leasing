@@ -232,23 +232,49 @@ export interface PortalPullSummary {
 }
 
 /**
- * Presence check: every driver our API sync saw with engine time in the window
- * should appear in the report. Missing drivers mean Motive's batch has not
- * caught up yet; the window is stored UNVERIFIED and re-pulled next run.
+ * Presence check: every driver our API sync saw meaningfully working in the
+ * window should appear in the report. Missing drivers mean Motive's batch has
+ * not caught up yet; the window is stored UNVERIFIED and re-pulled next run.
+ *
+ * MIN_ACTIVITY_SECONDS exists because Motive's report has its own floor and
+ * omits near-zero days, which would otherwise mark a perfectly good window
+ * UNVERIFIED for ever. Measured over 21 trusted days / 561 driver-days: every
+ * driver at or above 137s of engine time was present, none were missing, and
+ * the only two absentees across 90 days sat at 105s and 106s. The true cutoff
+ * is somewhere in that gap, so 120s (two minutes) is the round number inside
+ * it. The asymmetry is deliberate: being too strict drops a whole date range
+ * back to the API, while being too lax at this size can only ever overlook a
+ * driver contributing under two minutes to a week's totals.
  */
+export const MIN_ACTIVITY_SECONDS = 120;
+
+export function driversBelowActivityFloor(
+  rows: Array<{ driverId: number | null; driverFirstName: string | null; driverLastName: string | null; drivingTime: number | null; idleTime: number | null }>,
+  reportNames: Set<string>
+): { active: number; missing: string[] } {
+  // Sum per driver across the window: a weekly window must judge the driver on
+  // the whole week, not on whichever single day happened to be read first.
+  const totals = new Map<number, { name: string; seconds: number }>();
+  for (const r of rows) {
+    if (r.driverId == null) continue;
+    const name = `${r.driverFirstName ?? ''} ${r.driverLastName ?? ''}`.trim().toLowerCase().replace(/\s+/g, ' ');
+    if (!name) continue;
+    const ex = totals.get(r.driverId) ?? { name, seconds: 0 };
+    ex.seconds += (r.drivingTime ?? 0) + (r.idleTime ?? 0);
+    totals.set(r.driverId, ex);
+  }
+  const working = [...totals.values()].filter((t) => t.seconds >= MIN_ACTIVITY_SECONDS);
+  const missing = working.filter((t) => !reportNames.has(t.name)).map((t) => t.name);
+  return { active: working.length, missing: missing.sort() };
+}
+
 async function driversMissingFromReport(clerkOrgId: string, w: PullWindow, reportNames: Set<string>): Promise<{ active: number; missing: string[] }> {
   const prisma = getAppPrisma();
   const rows = await prisma.motiveDriverUtilization.findMany({
     where: { clerkOrgId, date: { gte: w.windowStart, lte: w.windowEnd }, OR: [{ drivingTime: { gt: 0 } }, { idleTime: { gt: 0 } }] },
-    select: { driverFirstName: true, driverLastName: true },
-    distinct: ['driverId'],
+    select: { driverId: true, driverFirstName: true, driverLastName: true, drivingTime: true, idleTime: true },
   });
-  const missing: string[] = [];
-  for (const r of rows) {
-    const name = `${r.driverFirstName ?? ''} ${r.driverLastName ?? ''}`.trim().toLowerCase().replace(/\s+/g, ' ');
-    if (name && !reportNames.has(name)) missing.push(name);
-  }
-  return { active: rows.length, missing: missing.sort() };
+  return driversBelowActivityFloor(rows, reportNames);
 }
 
 export async function pullOrg(clerkOrgId: string, email: string, password: string, windows: PullWindow[], opts: { dryRun?: boolean } = {}): Promise<OrgPullResult> {
