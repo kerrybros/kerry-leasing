@@ -9,11 +9,14 @@
  * window again later picks up those late arrivals; every pull upserts the
  * window's rows and keeps the raw file as an audit record.
  *
- * Session: the org's dedicated portal user signs in over plain HTTP against the
- * same Rails login form the dashboard uses (credentials live in the org's
- * encrypted credentials blob as portalEmail / portalPassword). The resulting
- * `auth_token` cookie is then sent as X-Web-User-Auth, exactly as the dashboard
- * does. Nothing is cached between runs.
+ * Session: the org's dedicated portal user signs in over plain HTTP against
+ * whichever sign-in form the entry URL leads to (credentials live in the org's
+ * encrypted credentials blob as portalEmail / portalPassword). Since
+ * 2026-09-30 that is an OAuth provider on auth.gomotive.com rather than a form
+ * served directly, so the login follows redirects, reads the form it finds and
+ * carries its hidden fields back untouched. The resulting `auth_token` cookie
+ * is then sent as X-Web-User-Auth, exactly as the dashboard does. Nothing is
+ * cached between runs.
  *
  * This deliberately does NOT drive a browser. A headless Chromium worked on a
  * laptop but hung silently on Render's 512 MB cron instance, and it added a
@@ -35,20 +38,20 @@ import { parseDriverFuelPerformanceCsv } from './parseDriverFuelPerformanceCsv.j
 import { classifyWindow, addDays, ymdInEastern } from './reportWindow.js';
 import { storeReport } from './reportStore.js';
 
-const LOGIN_PAGE = 'https://account.gomotive.com/log-in';
+const LOGIN_ENTRY = 'https://account.gomotive.com/log-in';
 const RETURN_URL = 'https://app.gomotive.com/';
 const REPORT_URL = 'https://api.keeptruckin.com/api/w3/reports/driver_fuel_performance';
 const LOGIN_TIMEOUT_MS = 45_000;
-const MAX_REDIRECTS = 6;
+const MAX_REDIRECTS = 12;
 /** Sent on the login requests so the form behaves as it does for a real browser. */
 const BROWSER_UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
 // ---------------------------------------------------------------------------
-// Login (plain HTTP against the dashboard's own Rails form)
+// Login (plain HTTP against whichever sign-in form the entry URL leads to)
 // ---------------------------------------------------------------------------
 
-/** Minimal cookie jar: name to value, which is all this two-hop flow needs. */
+/** Minimal cookie jar: name to value, which is all this flow needs. */
 class CookieJar {
   private jar = new Map<string, string>();
   absorb(headers: Headers): void {
@@ -67,48 +70,91 @@ class CookieJar {
   }
 }
 
-function extractCsrfToken(html: string): string | null {
-  return (
-    html.match(/name="authenticity_token"[^>]*value="([^"]+)"/)?.[1] ??
-    html.match(/value="([^"]+)"[^>]*name="authenticity_token"/)?.[1] ??
-    null
-  );
+function decodeEntities(v: string): string {
+  return v
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>');
+}
+
+export interface LoginForm {
+  /** Form action exactly as written, resolved against the page URL by the caller. */
+  action: string;
+  /** Every other input on the form, carried through untouched (CSRF, OAuth client_id, return_url). */
+  fields: Record<string, string>;
+  emailField: string;
+  passwordField: string;
+}
+
+/**
+ * Find the sign-in form on a page and report how to fill it.
+ *
+ * This reads the form rather than hardcoding its field names, because
+ * hardcoding is what broke on 2026-09-30: Motive moved sign-in behind an
+ * OAuth provider, so account.gomotive.com/log-in began answering 303 and the
+ * fields were renamed user[...] to user_profile[...]. Carrying every hidden
+ * input through untouched means the CSRF token, the OAuth client_id and the
+ * return_url all come along without this code needing to know they exist.
+ *
+ * The form is identified by the password input, which is the one thing a
+ * sign-in form cannot be without.
+ */
+export function parseLoginForm(html: string): LoginForm | null {
+  for (const form of html.match(/<form[\s\S]*?<\/form>/gi) ?? []) {
+    if (!/<input[^>]*type="password"/i.test(form)) continue;
+    const action = form.match(/<form[^>]*\saction="([^"]*)"/i)?.[1] ?? '';
+    const fields: Record<string, string> = {};
+    let emailField = '';
+    let passwordField = '';
+    for (const input of form.match(/<input[^>]*>/gi) ?? []) {
+      const name = input.match(/\sname="([^"]*)"/i)?.[1];
+      if (!name) continue;
+      const type = (input.match(/\stype="([^"]*)"/i)?.[1] ?? 'text').toLowerCase();
+      if (type === 'password') { passwordField = name; continue; }
+      if (type === 'submit' || type === 'button') continue;
+      if (!emailField && /e-?mail|username|login/i.test(name)) { emailField = name; continue; }
+      fields[name] = decodeEntities(input.match(/\svalue="([^"]*)"/i)?.[1] ?? '');
+    }
+    if (emailField && passwordField) return { action, fields, emailField, passwordField };
+  }
+  return null;
 }
 
 /** Sign in and return the session token the dashboard sends as X-Web-User-Auth. */
 export async function portalLogin(email: string, password: string): Promise<string> {
   const jar = new CookieJar();
   const signal = AbortSignal.timeout(LOGIN_TIMEOUT_MS);
-  const loginUrl = `${LOGIN_PAGE}?return_url=${encodeURIComponent(RETURN_URL)}`;
+  const headers = { 'User-Agent': BROWSER_UA };
 
-  const page = await fetch(loginUrl, { redirect: 'manual', headers: { 'User-Agent': BROWSER_UA }, signal });
-  jar.absorb(page.headers);
-  if (!page.ok) throw new Error(`Motive login page returned HTTP ${page.status}`);
-  const html = await page.text();
-  const csrf = extractCsrfToken(html);
-  if (!csrf) {
-    throw new Error('Motive login page carried no authenticity_token. The sign-in form has changed.');
+  // 1. Walk from the entry URL to wherever sign-in actually lives. Motive
+  //    redirects this to its OAuth provider; following it means a future move
+  //    costs us nothing.
+  let url = `${LOGIN_ENTRY}?return_url=${encodeURIComponent(RETURN_URL)}`;
+  let resp = await fetch(url, { redirect: 'manual', headers, signal });
+  jar.absorb(resp.headers);
+  for (let hop = 0; hop < MAX_REDIRECTS && resp.status >= 300 && resp.status < 400; hop++) {
+    const location = resp.headers.get('location');
+    if (!location) break;
+    url = new URL(location, url).toString();
+    resp = await fetch(url, { redirect: 'manual', headers: { ...headers, Cookie: jar.header() }, signal });
+    jar.absorb(resp.headers);
+  }
+  if (!resp.ok) throw new Error(`Motive sign-in page returned HTTP ${resp.status} (last URL ${url})`);
+
+  const form = parseLoginForm(await resp.text());
+  if (!form) {
+    throw new Error(`Motive sign-in page at ${url} carried no recognisable login form. The form has changed.`);
   }
 
-  const body = new URLSearchParams({
-    utf8: '\u2713',
-    authenticity_token: csrf,
-    'user[email]': email,
-    'user[password]': password,
-    return_url: RETURN_URL,
-    ref: '',
-  });
-
-  let url = `${LOGIN_PAGE}?ref=sign-up`;
-  let resp = await fetch(url, {
+  // 2. Submit it, carrying every hidden field back untouched.
+  const body = new URLSearchParams({ ...form.fields, [form.emailField]: email, [form.passwordField]: password });
+  const postUrl = new URL(form.action || url, url).toString();
+  resp = await fetch(postUrl, {
     method: 'POST',
     redirect: 'manual',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      Cookie: jar.header(),
-      'User-Agent': BROWSER_UA,
-      Referer: loginUrl,
-    },
+    headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded', Cookie: jar.header(), Referer: url },
     body: body.toString(),
     signal,
   });
@@ -122,12 +168,14 @@ export async function portalLogin(email: string, password: string): Promise<stri
       : 'the form was re-rendered without redirecting';
     throw new Error(`Motive login failed: ${reason}.`);
   }
+  url = postUrl;
 
+  // 3. Follow the OAuth hops until the dashboard session cookie is set.
   for (let hop = 0; hop < MAX_REDIRECTS && resp.status >= 300 && resp.status < 400; hop++) {
     const location = resp.headers.get('location');
     if (!location) break;
     url = new URL(location, url).toString();
-    resp = await fetch(url, { redirect: 'manual', headers: { Cookie: jar.header(), 'User-Agent': BROWSER_UA }, signal });
+    resp = await fetch(url, { redirect: 'manual', headers: { ...headers, Cookie: jar.header() }, signal });
     jar.absorb(resp.headers);
     if (jar.get('auth_token')) break;
   }

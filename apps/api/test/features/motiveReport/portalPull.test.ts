@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   planPullWindows,
   driversBelowActivityFloor,
+  parseLoginForm,
   MIN_ACTIVITY_SECONDS,
 } from '../../../src/features/motiveReport/portalPull.js';
 
@@ -97,5 +98,79 @@ describe('driversBelowActivityFloor', () => {
     );
     expect(r.active).toBe(1);
     expect(r.missing).toEqual(['chris gross']);
+  });
+});
+
+describe('parseLoginForm', () => {
+  // The real form served by auth.gomotive.com on 2026-09-30, trimmed. Motive
+  // moved sign-in behind OAuth that day and renamed user[...] to
+  // user_profile[...], which is what broke the nightly pull.
+  const CURRENT = `
+    <form id="sign-in-page-form" action="/login" accept-charset="UTF-8" method="post">
+      <input type="hidden" name="authenticity_token" value="D5rp-W5wyqihniW" autocomplete="off" />
+      <input required="required" class="form-control" type="text" value="" name="user_profile[email]" />
+      <input type="password" required="required" name="user_profile[password]" />
+      <input name="client_id" value="8OlxtHqCxDMvMN7I" autocomplete="off" type="hidden" />
+      <input name="client_secret" autocomplete="off" type="hidden" />
+      <input name="return_url" value="https://auth.gomotive.com/oauth/authorize?response_type=code&amp;client_id=8OlxtHqCxDMvMN7I&amp;scope=openid" type="hidden" />
+      <input name="ref" value="sign-up" autocomplete="off" type="hidden" />
+      <input type="submit" name="commit" value="Sign in" />
+    </form>`;
+
+  it('reads the current OAuth form, including its renamed fields', () => {
+    const f = parseLoginForm(CURRENT)!;
+    expect(f.action).toBe('/login');
+    expect(f.emailField).toBe('user_profile[email]');
+    expect(f.passwordField).toBe('user_profile[password]');
+  });
+
+  it('carries every hidden field through untouched so CSRF and OAuth survive', () => {
+    const f = parseLoginForm(CURRENT)!;
+    expect(f.fields.authenticity_token).toBe('D5rp-W5wyqihniW');
+    expect(f.fields.client_id).toBe('8OlxtHqCxDMvMN7I');
+    expect(f.fields.ref).toBe('sign-up');
+    expect(f.fields.client_secret).toBe('');
+  });
+
+  it('decodes entities in a hidden value, so the OAuth return_url stays valid', () => {
+    const f = parseLoginForm(CURRENT)!;
+    expect(f.fields.return_url).toContain('response_type=code&client_id=');
+    expect(f.fields.return_url).not.toContain('&amp;');
+  });
+
+  it('leaves the credential fields out of the carried-through set', () => {
+    const f = parseLoginForm(CURRENT)!;
+    expect(f.fields).not.toHaveProperty('user_profile[email]');
+    expect(f.fields).not.toHaveProperty('user_profile[password]');
+  });
+
+  it('drops the submit button, which is not ours to send back', () => {
+    expect(parseLoginForm(CURRENT)!.fields).not.toHaveProperty('commit');
+  });
+
+  it('still reads the old pre-OAuth form, so the change is not a one-way door', () => {
+    const legacy = `
+      <form action="/log-in" method="post">
+        <input type="hidden" name="authenticity_token" value="abc" />
+        <input type="text" name="user[email]" value="" />
+        <input type="password" name="user[password]" />
+        <input type="hidden" name="return_url" value="https://app.gomotive.com/" />
+      </form>`;
+    const f = parseLoginForm(legacy)!;
+    expect(f.emailField).toBe('user[email]');
+    expect(f.passwordField).toBe('user[password]');
+    expect(f.fields.authenticity_token).toBe('abc');
+  });
+
+  it('picks the sign-in form out of a page that also has a search box', () => {
+    const page = `
+      <form action="/search"><input type="text" name="q" /></form>
+      <form action="/login"><input type="text" name="email" /><input type="password" name="password" /></form>`;
+    expect(parseLoginForm(page)!.action).toBe('/login');
+  });
+
+  it('returns null when no password field exists, so the caller can fail loudly', () => {
+    expect(parseLoginForm('<form action="/x"><input type="text" name="email" /></form>')).toBeNull();
+    expect(parseLoginForm('<html><body>JavaScript challenge</body></html>')).toBeNull();
   });
 });
