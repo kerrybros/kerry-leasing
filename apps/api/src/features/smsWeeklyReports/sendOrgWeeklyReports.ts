@@ -59,7 +59,32 @@ export interface SendOrgResult {
     twilioSid: string | null;
     error?: string | null;
   }>;
+  /**
+   * One row per DRIVER (not per channel) carrying what actually went out, for
+   * the operator digest. Built here because this is the only place the card's
+   * numbers and the send outcome are both in scope; re-deriving them afterwards
+   * could disagree with what the drivers were told.
+   */
+  digest: WeeklyDigestDriver[];
   error?: string;
+}
+
+/** A driver's line in the weekly operator digest. */
+export interface WeeklyDigestDriver {
+  displayName: string;
+  channels: Array<{ channel: ReportChannel; status: DriverSmsStatus; error?: string | null }>;
+  score: number;
+  idlePct: number;
+  avgMpg: number;
+  totalMiles: number;
+  /** Current week minus their trailing four week average. */
+  scoreVsAvg: number;
+  idlePctPtsVsAvg: number;
+  /** Weeks of data behind the card. 1 means this is their first week. */
+  weeksOfData: number;
+  noActivity: boolean;
+  /** Why nothing was sent, when nothing was. */
+  suppressedReason?: string;
 }
 
 export interface SendOrgOptions {
@@ -105,6 +130,36 @@ export function buildKpiSnapshot(report: DriverWeeklyReport): object {
   };
 }
 
+/**
+ * What an upsert may change on a row that already exists for this
+ * (org, driver, week, channel).
+ *
+ * A dry run deliberately omits `status`. The unique key means a preview lands
+ * on the SAME row as the real send for that week, so writing status here
+ * overwrote DELIVERED with SKIPPED while leaving the Twilio SID: for the week
+ * of 2026-09-21, Twilio reported 35 delivered and our own table reported none.
+ * A preview may refresh the rendered body; it may not rewrite history.
+ */
+export function buildSendUpdatePayload(input: {
+  dryRun: boolean;
+  status: DriverSmsStatus;
+  bodyPreview: string | null;
+  kpiSnapshot: unknown;
+  token: string;
+  tokenExpiresAt: Date;
+}): Record<string, unknown> {
+  const base = { bodyPreview: input.bodyPreview, kpiSnapshot: input.kpiSnapshot };
+  if (input.dryRun) return base;
+  return {
+    ...base,
+    // Re-attempt non-terminal sends; refresh token only when re-queuing.
+    status: input.status,
+    ...(input.status === DriverSmsStatus.QUEUED
+      ? { token: input.token, tokenExpiresAt: input.tokenExpiresAt }
+      : {}),
+  };
+}
+
 export async function sendOrgWeeklyReports(
   clerkOrgId: string,
   options: SendOrgOptions = {}
@@ -137,6 +192,7 @@ export async function sendOrgWeeklyReports(
       driversOptedOut: 0,
       driversNoConsent: 0,
       reports: [],
+      digest: [],
       error: `buildWeeklyReports failed: ${err.message ?? err}`,
     };
   }
@@ -189,7 +245,38 @@ export async function sendOrgWeeklyReports(
     driversOptedOut: counters.optedOut,
     driversNoConsent: counters.noConsent,
     reports: out,
+    digest: reportsToProcess
+      .filter((r) => r.driverContactId)
+      .map((r) => {
+        const sent = out.filter((o) => o.driverContactId === r.driverContactId);
+        return {
+          displayName: r.displayName,
+          channels: sent.map((o) => ({ channel: o.channel, status: o.status, error: o.error })),
+          score: r.current.score,
+          idlePct: r.current.idlePct,
+          avgMpg: r.current.avgMpg,
+          totalMiles: r.current.totalMiles,
+          scoreVsAvg: r.diffVsAvg.score,
+          idlePctPtsVsAvg: r.diffVsAvg.idlePctPts,
+          weeksOfData: r.trend.length,
+          noActivity: r.noActivity,
+          suppressedReason: sent.length > 0 ? undefined : suppressionReason(r),
+        };
+      }),
   };
+
+  /**
+   * Why this driver received nothing. Reported in the driver's own terms so the
+   * digest names the thing to fix rather than the symptom.
+   */
+  function suppressionReason(r: DriverWeeklyReport): string {
+    if (r.noActivity) return 'no activity this week';
+    if (!r.enrolled) return 'not enrolled';
+    if (!r.phoneE164 && !r.email) return 'no phone or email on file';
+    if (r.optedOut && r.emailOptedOut) return 'opted out of both channels';
+    if (r.smsConsentStatus !== 'CONFIRMED' && !r.email) return 'SMS consent not confirmed and no email';
+    return 'suppressed by send policy';
+  }
 
   // -------------------------------------------------------------------------
   // Per-(driver, channel) send. Closure over prisma/counters/out/built so the
@@ -264,15 +351,14 @@ export async function sendOrgWeeklyReports(
           bodyPreview: body,
           isTest: false,
         },
-        update: {
-          // Re-attempt non-terminal sends; refresh token only when re-queuing.
+        update: buildSendUpdatePayload({
+          dryRun: options.dryRun === true,
           status,
           bodyPreview: body,
           kpiSnapshot,
-          ...(status === DriverSmsStatus.QUEUED
-            ? { token, tokenExpiresAt: tokenExpiresAt() }
-            : {}),
-        },
+          token,
+          tokenExpiresAt: tokenExpiresAt(),
+        }),
         select: { id: true, token: true, status: true },
       });
     } catch (err: any) {
@@ -288,13 +374,17 @@ export async function sendOrgWeeklyReports(
       return;
     }
 
-    if (row.status !== DriverSmsStatus.QUEUED) {
-      if (row.status === DriverSmsStatus.SKIPPED) counters.skipped++;
+    // On a dry run the stored status is deliberately left alone, so report the
+    // status this run WOULD have produced rather than whatever the real send
+    // left behind. A dry run never yields QUEUED, so it always stops here.
+    const effectiveStatus = options.dryRun ? status : row.status;
+    if (effectiveStatus !== DriverSmsStatus.QUEUED) {
+      if (effectiveStatus === DriverSmsStatus.SKIPPED) counters.skipped++;
       out.push({
         driverContactId: report.driverContactId,
         displayName: report.displayName,
         channel,
-        status: row.status,
+        status: effectiveStatus,
         twilioSid: null,
         error: skipReason,
       });

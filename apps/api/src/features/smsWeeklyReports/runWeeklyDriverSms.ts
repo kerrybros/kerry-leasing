@@ -11,7 +11,7 @@ import { getAppPrisma } from '../../lib/prisma.js';
 import { cacheDelPattern } from '../../lib/redis.js';
 import { config } from '../../config.js';
 import type { DailySyncSummary, OrgSyncResultForCron } from '../../lib/telematicsCronRun.js';
-import { sendOrgWeeklyReports } from './sendOrgWeeklyReports.js';
+import { sendOrgWeeklyReports, type SendOrgResult } from './sendOrgWeeklyReports.js';
 
 export interface RunWeeklyDriverSmsOptions {
   dryRun?: boolean;
@@ -33,7 +33,7 @@ export interface RunWeeklyDriverSmsOptions {
 
 export async function runWeeklyDriverSms(
   options: RunWeeklyDriverSmsOptions = {}
-): Promise<DailySyncSummary> {
+): Promise<DailySyncSummary & { orgResults: SendOrgResult[] }> {
   const startedAt = Date.now();
   const prisma = getAppPrisma();
 
@@ -44,7 +44,7 @@ export async function runWeeklyDriverSms(
     console.log(
       '[smsWeeklyReports] master switch off (WEEKLY_DRIVER_SMS_ENABLED!=true) — skipping all orgs.'
     );
-    return { totalOrgs: 0, successCount: 0, errorCount: 0, results: [], duration: Date.now() - startedAt };
+    return { orgResults: [], totalOrgs: 0, successCount: 0, errorCount: 0, results: [], duration: Date.now() - startedAt };
   }
 
   const where: { enabled: boolean; clerkOrgId?: string; sendHourEt?: number } = { enabled: true };
@@ -97,6 +97,7 @@ export async function runWeeklyDriverSms(
   }
 
   const results: OrgSyncResultForCron[] = [];
+  const orgResults: SendOrgResult[] = [];
   let successCount = 0;
   let errorCount = 0;
 
@@ -106,6 +107,7 @@ export async function runWeeklyDriverSms(
       onlyDriverContactId: options.onlyDriverContactId,
       now: options.now,
     });
+    orgResults.push(result);
     if (result.success) successCount++;
     else errorCount++;
     results.push({
@@ -135,6 +137,7 @@ export async function runWeeklyDriverSms(
   }
 
   return {
+    orgResults,
     totalOrgs: configs.length,
     successCount,
     errorCount,
