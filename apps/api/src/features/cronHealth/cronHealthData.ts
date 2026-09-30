@@ -57,9 +57,15 @@ export async function gatherCronHealthChecks(): Promise<CronHealthCheck[]> {
     },
     { label: 'EIA diesel price', lastSuccessAt: diesel?.updatedAt ?? null, maxAgeHours: 48 },
     {
+      // 24h, not 26h, and the watchdog runs an hour AFTER the pull rather than
+      // in the same minute. With both at 13:00 and a 26h limit, a pull that
+      // failed at 13:01 still looked ~23h fresh at 13:00 and was not reported
+      // until the following day; on 2026-09-30 Render's own email beat this
+      // check to a real failure. An hour later with a 24h limit, a missed pull
+      // reads ~25h and alarms the same day, while a healthy pull reads ~1h.
       label: 'Motive report intake',
       lastSuccessAt: reportIngest,
-      maxAgeHours: 26,
+      maxAgeHours: 24,
       live: reportEverIngested != null,
       note: reportEverIngested ? undefined : 'not live: no report file ingested yet',
     },
