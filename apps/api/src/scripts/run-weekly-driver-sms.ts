@@ -8,7 +8,26 @@
  */
 import { runWeeklyDriverSms } from '../features/smsWeeklyReports/runWeeklyDriverSms.js';
 import { recordTelematicsCronRun } from '../lib/telematicsCronRun.js';
+import {
+  buildWeeklyDigest,
+  formatWeeklyDigestSubject,
+  formatWeeklyDigestText,
+} from '../features/smsWeeklyReports/weeklyDigest.js';
+import { sendMail, type GraphClientConfig } from '../integrations/microsoft/graphClient.js';
 import { CronJobType } from '../generated/app-client/index.js';
+
+const graphConfig: GraphClientConfig | null = process.env.MICROSOFT_GRAPH_TENANT_ID
+  ? {
+      tenantId: process.env.MICROSOFT_GRAPH_TENANT_ID,
+      clientId: process.env.MICROSOFT_GRAPH_CLIENT_ID ?? '',
+      clientSecret: process.env.MICROSOFT_GRAPH_CLIENT_SECRET ?? '',
+      // sendMail doesn't use these, but the type requires them.
+      siteHostname: process.env.MICROSOFT_GRAPH_SITE_HOSTNAME ?? '',
+      sitePath: process.env.MICROSOFT_GRAPH_SITE_PATH ?? '',
+    }
+  : null;
+const reportEmailFrom = process.env.REPORT_EMAIL_FROM ?? null;
+const digestEmail = process.env.WEEKLY_DIGEST_EMAIL ?? null;
 
 function parseArg(flag: string): string | true | null {
   const arg = process.argv.find((a) => a === flag || a.startsWith(`${flag}=`));
@@ -47,6 +66,29 @@ async function main() {
       });
     } catch (e) {
       console.warn('[smsWeeklyReports] failed to record cron run summary', e);
+    }
+  }
+
+  // Operator digest: who was sent what, who is new, what looks wrong. Printed
+  // on a dry run and emailed on a real one, so the preview is the same document
+  // that lands in the inbox. A digest failure must never fail the send itself:
+  // the drivers already have their reports by this point.
+  if (summary.orgResults.length > 0) {
+    const digest = buildWeeklyDigest(summary.orgResults);
+    const subject = formatWeeklyDigestSubject(digest);
+    const text = formatWeeklyDigestText(digest);
+    if (dryRun) {
+      console.log(`\n[digest] (dry run, not emailed)\nSubject: ${subject}\n\n${text}`);
+    } else if (graphConfig && reportEmailFrom && digestEmail) {
+      try {
+        await sendMail(graphConfig, { from: reportEmailFrom, to: digestEmail, subject, text });
+        console.log(`[digest] emailed to ${digestEmail}`);
+      } catch (e: any) {
+        console.error(`[digest] failed to email digest: ${e?.message ?? e}`);
+      }
+    } else {
+      console.warn('[digest] not emailed: WEEKLY_DIGEST_EMAIL, REPORT_EMAIL_FROM or MICROSOFT_GRAPH_* not set');
+      console.log(`\n${subject}\n\n${text}`);
     }
   }
 
