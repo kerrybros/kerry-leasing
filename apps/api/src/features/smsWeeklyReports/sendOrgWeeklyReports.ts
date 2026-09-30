@@ -15,6 +15,7 @@ import { getAppPrisma } from '../../lib/prisma.js';
 import { sendSms } from '../../integrations/twilio/client.js';
 import { sendEmail } from '../../integrations/email/client.js';
 import { buildWeeklyReports, type DriverWeeklyReport } from './weeklyReportBuilder.js';
+import { gatherDriverVehicles, gatherFleetComparison, type FleetTotals } from './weeklyDigestData.js';
 import { formatSmsBody } from './smsBodyFormatter.js';
 import { formatEmailBody } from './emailBodyFormatter.js';
 import { decideChannelStatus } from './reportPolicy.js';
@@ -66,6 +67,8 @@ export interface SendOrgResult {
    * could disagree with what the drivers were told.
    */
   digest: WeeklyDigestDriver[];
+  /** Fleet totals for this week and the one before, for the digest header. */
+  fleet?: { current: FleetTotals | null; previous: FleetTotals | null };
   error?: string;
 }
 
@@ -83,6 +86,8 @@ export interface WeeklyDigestDriver {
   /** Weeks of data behind the card. 1 means this is their first week. */
   weeksOfData: number;
   noActivity: boolean;
+  /** Trucks this driver was in over the week, busiest first. */
+  vehicles: string[];
   /** Why nothing was sent, when nothing was. */
   suppressedReason?: string;
 }
@@ -193,6 +198,7 @@ export async function sendOrgWeeklyReports(
       driversNoConsent: 0,
       reports: [],
       digest: [],
+      fleet: { current: null, previous: null },
       error: `buildWeeklyReports failed: ${err.message ?? err}`,
     };
   }
@@ -230,6 +236,19 @@ export async function sendOrgWeeklyReports(
     }).catch((e) => console.warn(`[smsWeeklyReports] failed to update lastSentAt: ${e.message}`));
   }
 
+  // Digest extras. Failing to gather them must never fail a send that already
+  // happened, so both degrade to empty rather than throwing.
+  const [vehiclesByDriver, fleet] = await Promise.all([
+    gatherDriverVehicles(clerkOrgId, built.weekStart, built.weekEnd).catch((e) => {
+      console.warn(`[smsWeeklyReports] vehicle lookup failed: ${e.message}`);
+      return new Map<number, string[]>();
+    }),
+    gatherFleetComparison(clerkOrgId, built.weekStart, built.weekEnd).catch((e) => {
+      console.warn(`[smsWeeklyReports] fleet totals failed: ${e.message}`);
+      return { current: null, previous: null };
+    }),
+  ]);
+
   return {
     clerkOrgId,
     success: counters.failed === 0,
@@ -245,6 +264,7 @@ export async function sendOrgWeeklyReports(
     driversOptedOut: counters.optedOut,
     driversNoConsent: counters.noConsent,
     reports: out,
+    fleet,
     digest: reportsToProcess
       .filter((r) => r.driverContactId)
       .map((r) => {
@@ -260,6 +280,7 @@ export async function sendOrgWeeklyReports(
           idlePctPtsVsAvg: r.diffVsAvg.idlePctPts,
           weeksOfData: r.trend.length,
           noActivity: r.noActivity,
+          vehicles: vehiclesByDriver.get(r.motiveDriverId) ?? [],
           suppressedReason: sent.length > 0 ? undefined : suppressionReason(r),
         };
       }),

@@ -17,6 +17,7 @@ import {
   buildWeeklyDigest,
   formatWeeklyDigestSubject,
   formatWeeklyDigestText,
+  formatWeeklyDigestHtml,
 } from '../features/smsWeeklyReports/weeklyDigest.js';
 import { sendMail, type GraphClientConfig } from '../integrations/microsoft/graphClient.js';
 import { CronJobType } from '../generated/app-client/index.js';
@@ -32,7 +33,12 @@ const graphConfig: GraphClientConfig | null = process.env.MICROSOFT_GRAPH_TENANT
     }
   : null;
 const reportEmailFrom = process.env.REPORT_EMAIL_FROM ?? null;
-const digestEmail = process.env.WEEKLY_DIGEST_EMAIL ?? null;
+// Comma separated: the digest goes to whoever needs to see the week, which is
+// at least the owner and the customer's fleet admin.
+const digestEmails = (process.env.WEEKLY_DIGEST_EMAIL ?? '')
+  .split(',')
+  .map((a) => a.trim())
+  .filter((a) => a.length > 0);
 
 function parseArg(flag: string): string | true | null {
   const arg = process.argv.find((a) => a === flag || a.startsWith(`${flag}=`));
@@ -81,21 +87,25 @@ async function main() {
   // the drivers already have their reports by this point.
   if (summary.orgResults.length > 0) {
     const digest = buildWeeklyDigest(summary.orgResults);
-    const subject = formatWeeklyDigestSubject(digest);
+    const subject = formatWeeklyDigestSubject(digest, { preview: dryRun });
     const text = formatWeeklyDigestText(digest);
+    // HTML is the real body: a text table collapses to gibberish in a mail
+    // client's proportional font. Text stays as the fallback.
+    const html = formatWeeklyDigestHtml(digest, { preview: dryRun });
     if (dryRun && !emailDigest) {
       console.log(`\n[digest] (dry run, not emailed)\nSubject: ${subject}\n\n${text}`);
-    } else if (graphConfig && reportEmailFrom && digestEmail) {
+    } else if (graphConfig && reportEmailFrom && digestEmails.length > 0) {
       try {
         await sendMail(graphConfig, {
           from: reportEmailFrom,
-          to: digestEmail,
+          to: digestEmails,
           subject: dryRun ? `[TEST, nothing sent to drivers] ${subject}` : subject,
           text: dryRun
             ? `This is a TEST digest from a dry run. No driver received anything.\n\n${text}`
             : text,
+          html,
         });
-        console.log(`[digest] emailed to ${digestEmail}`);
+        console.log(`[digest] emailed to ${digestEmails.join(', ')}`);
       } catch (e: any) {
         console.error(`[digest] failed to email digest: ${e?.message ?? e}`);
       }
