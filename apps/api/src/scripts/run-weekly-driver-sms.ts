@@ -5,6 +5,11 @@
  *   pnpm exec tsx src/scripts/run-weekly-driver-sms.ts --dry-run
  *   pnpm exec tsx src/scripts/run-weekly-driver-sms.ts --only-org=<clerkOrgId>
  *   pnpm exec tsx src/scripts/run-weekly-driver-sms.ts --ignore-send-hour
+ *   pnpm exec tsx src/scripts/run-weekly-driver-sms.ts --dry-run --email-digest
+ *
+ * --email-digest emails the operator digest even on a dry run. That is the only
+ * way to exercise the digest's delivery path without texting every driver, so
+ * the alternative would be finding out it is broken on a Tuesday morning.
  */
 import { runWeeklyDriverSms } from '../features/smsWeeklyReports/runWeeklyDriverSms.js';
 import { recordTelematicsCronRun } from '../lib/telematicsCronRun.js';
@@ -38,6 +43,7 @@ function parseArg(flag: string): string | true | null {
 
 async function main() {
   const dryRun = parseArg('--dry-run') !== null;
+  const emailDigest = parseArg('--email-digest') !== null;
   const ignoreSendHour = parseArg('--ignore-send-hour') !== null;
   const onlyOrgArg = parseArg('--only-org');
   const onlyOrgId = typeof onlyOrgArg === 'string' ? onlyOrgArg : undefined;
@@ -77,11 +83,18 @@ async function main() {
     const digest = buildWeeklyDigest(summary.orgResults);
     const subject = formatWeeklyDigestSubject(digest);
     const text = formatWeeklyDigestText(digest);
-    if (dryRun) {
+    if (dryRun && !emailDigest) {
       console.log(`\n[digest] (dry run, not emailed)\nSubject: ${subject}\n\n${text}`);
     } else if (graphConfig && reportEmailFrom && digestEmail) {
       try {
-        await sendMail(graphConfig, { from: reportEmailFrom, to: digestEmail, subject, text });
+        await sendMail(graphConfig, {
+          from: reportEmailFrom,
+          to: digestEmail,
+          subject: dryRun ? `[TEST, nothing sent to drivers] ${subject}` : subject,
+          text: dryRun
+            ? `This is a TEST digest from a dry run. No driver received anything.\n\n${text}`
+            : text,
+        });
         console.log(`[digest] emailed to ${digestEmail}`);
       } catch (e: any) {
         console.error(`[digest] failed to email digest: ${e?.message ?? e}`);
