@@ -2,43 +2,27 @@
  * WEEKLY SEND DIGEST
  *
  * The operator-facing counterpart to the driver cards: after the weekly run,
- * one email saying who was sent what, who is new, and what looks wrong.
+ * one email with the fleet's numbers for the week against last week, then every
+ * driver's own numbers and what they were sent.
  *
- * This exists because the send itself is silent when it works and, until the
- * reachability watchdog, was nearly silent when it did not. A driver could be
- * skipped for months without anyone seeing it. The digest makes every run
- * visible on its own terms: the numbers that went out, not a re-derivation of
- * them afterwards, so what this reports is exactly what the drivers received.
+ * It exists because the send is silent when it works and was nearly silent when
+ * it did not: a driver could be skipped for months and nobody would see it.
  *
- * Pure: takes the send results and returns text. No I/O, so the thresholds and
- * the wording are testable without sending anything.
+ * Numbers only, deliberately. An earlier version flagged "outliers" it judged
+ * worth a look; that was the tool deciding what mattered on behalf of people
+ * who know the fleet far better than it does. Facts are reported and the
+ * reader draws the conclusions.
+ *
+ * Built from the send results rather than re-derived afterwards, so what this
+ * reports is exactly what the drivers received. Pure: no I/O, so the wording
+ * and the arithmetic are testable without sending anything.
  */
 
 import type { WeeklyDigestDriver, SendOrgResult } from './sendOrgWeeklyReports.js';
-
-/**
- * Outlier thresholds. These are deliberately blunt: the digest is a daily-glance
- * document, so it should surface the handful of rows worth a second look, not
- * every ordinary wobble. A driver's week naturally moves a few points either
- * way, so the bar is set where a human would actually say "that is odd".
- */
-export const SCORE_SWING_POINTS = 15;
-export const IDLE_SWING_PCT_POINTS = 15;
-
-export type OutlierKind =
-  | 'send-failed'
-  | 'not-sent'
-  | 'score-swing'
-  | 'idle-swing'
-  | 'stopped-working';
-
-export interface DigestOutlier {
-  displayName: string;
-  kind: OutlierKind;
-  detail: string;
-}
+import type { FleetTotals } from './weeklyDigestData.js';
 
 export interface WeeklyDigest {
+  fleet: { current: FleetTotals | null; previous: FleetTotals | null };
   weekStart: string;
   weekEnd: string;
   orgCount: number;
@@ -46,8 +30,6 @@ export interface WeeklyDigest {
   failedCount: number;
   notSentCount: number;
   drivers: WeeklyDigestDriver[];
-  newDrivers: WeeklyDigestDriver[];
-  outliers: DigestOutlier[];
   errors: string[];
 }
 
@@ -63,117 +45,262 @@ function isNew(d: WeeklyDigestDriver): boolean {
 
 export function buildWeeklyDigest(results: SendOrgResult[]): WeeklyDigest {
   const drivers = results.flatMap((r) => r.digest);
-  const errors = results.filter((r) => r.error).map((r) => `${r.clerkOrgId}: ${r.error}`);
-  const outliers: DigestOutlier[] = [];
-
-  for (const d of drivers) {
-    const failed = d.channels.filter((c) => c.status === 'FAILED');
-    if (failed.length > 0) {
-      outliers.push({
-        displayName: d.displayName,
-        kind: 'send-failed',
-        detail: failed.map((c) => `${c.channel} failed: ${c.error ?? 'no reason given'}`).join('; '),
-      });
-    } else if (d.channels.length === 0) {
-      outliers.push({
-        displayName: d.displayName,
-        kind: 'not-sent',
-        detail: d.suppressedReason ?? 'nothing was sent and no reason was recorded',
-      });
-    }
-
-    // A driver with history who did no work this week. Worth a look: it is
-    // either time off, or a truck or tracker that stopped reporting.
-    if (d.noActivity && !isNew(d)) {
-      outliers.push({ displayName: d.displayName, kind: 'stopped-working', detail: 'no activity this week' });
-      continue; // the swing numbers below are meaningless against a blank week
-    }
-
-    // Swings are only meaningful once there is an average to swing against.
-    if (!isNew(d)) {
-      if (Math.abs(d.scoreVsAvg) >= SCORE_SWING_POINTS) {
-        outliers.push({
-          displayName: d.displayName,
-          kind: 'score-swing',
-          detail: `score ${d.score.toFixed(0)}, ${signed(d.scoreVsAvg, 0)} vs their 4 week average`,
-        });
-      }
-      if (Math.abs(d.idlePctPtsVsAvg) >= IDLE_SWING_PCT_POINTS) {
-        outliers.push({
-          displayName: d.displayName,
-          kind: 'idle-swing',
-          detail: `idle ${d.idlePct.toFixed(1)}%, ${signed(d.idlePctPtsVsAvg)} points vs their 4 week average`,
-        });
-      }
-    }
-  }
-
-  const sentCount = drivers.filter((d) => d.channels.some((c) => c.status === 'SENT' || c.status === 'DELIVERED')).length;
-  const failedCount = drivers.filter((d) => d.channels.some((c) => c.status === 'FAILED')).length;
-  const notSentCount = drivers.filter((d) => d.channels.length === 0).length;
-
   return {
+    fleet: results[0]?.fleet ?? { current: null, previous: null },
     weekStart: results[0]?.weekStart ?? '',
     weekEnd: results[0]?.weekEnd ?? '',
     orgCount: results.length,
-    sentCount,
-    failedCount,
-    notSentCount,
+    sentCount: drivers.filter((d) => d.channels.some((c) => c.status === 'SENT' || c.status === 'DELIVERED')).length,
+    failedCount: drivers.filter((d) => d.channels.some((c) => c.status === 'FAILED')).length,
+    notSentCount: drivers.filter((d) => d.channels.length === 0).length,
     drivers,
-    newDrivers: drivers.filter(isNew),
-    outliers,
-    errors,
+    errors: results.filter((r) => r.error).map((r) => `${r.clerkOrgId}: ${r.error}`),
   };
 }
 
-const KIND_LABEL: Record<OutlierKind, string> = {
-  'send-failed': 'Send failed',
-  'not-sent': 'Not sent',
-  'score-swing': 'Score swing',
-  'idle-swing': 'Idle swing',
-  'stopped-working': 'No activity',
-};
+// ---------------------------------------------------------------------------
+// Fleet totals
+// ---------------------------------------------------------------------------
 
-export function formatWeeklyDigestSubject(d: WeeklyDigest): string {
-  const problems = d.failedCount + d.notSentCount + d.errors.length;
-  const flag = problems > 0 ? `${problems} need a look` : 'all clean';
-  return `Driver reports ${d.weekStart} to ${d.weekEnd}: ${d.sentCount} sent, ${flag}`;
+/** One row of the fleet comparison: label, both weeks, and the change. */
+export interface FleetRow {
+  label: string;
+  current: string;
+  previous: string;
+  change: string;
+  /** Green where the change is good for the fleet, red where it is not. */
+  tone: 'good' | 'bad' | 'flat';
+}
+
+function num(v: number, digits = 0): string {
+  return v.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+}
+
+/**
+ * Fleet totals, this week against last.
+ *
+ * `lowerIsBetter` carries the direction per metric, because the same arrow
+ * means opposite things for miles and for idle: more miles is the business
+ * working, more idle is money burning in a stationary truck.
+ */
+export function buildFleetRows(current: FleetTotals | null, previous: FleetTotals | null): FleetRow[] {
+  if (!current) return [];
+  const row = (
+    label: string,
+    cur: number,
+    prev: number | null,
+    fmt: (v: number) => string,
+    lowerIsBetter: boolean,
+    pts = false,
+  ): FleetRow => {
+    if (prev == null) return { label, current: fmt(cur), previous: 'n/a', change: '', tone: 'flat' };
+    const diff = cur - prev;
+    const shown = pts ? `${signed(diff, 1)} pts` : signed(diff, Math.abs(diff) < 10 ? 2 : 0);
+    const tone: FleetRow['tone'] =
+      Math.abs(diff) < 1e-9 ? 'flat' : (diff < 0) === lowerIsBetter ? 'good' : 'bad';
+    return { label, current: fmt(cur), previous: fmt(prev), change: shown, tone };
+  };
+  return [
+    row('Drivers reported', current.drivers, previous?.drivers ?? null, (v) => num(v), false),
+    row('Miles', current.totalMiles, previous?.totalMiles ?? null, (v) => num(v), false),
+    row('Fuel used (gal)', current.totalFuelGal, previous?.totalFuelGal ?? null, (v) => num(v), true),
+    row('Fleet MPG', current.avgMpg, previous?.avgMpg ?? null, (v) => v.toFixed(2), false),
+    row('Idle', current.idlePct, previous?.idlePct ?? null, (v) => `${v.toFixed(1)}%`, true, true),
+    row('Idle fuel (gal)', current.idleFuelGal, previous?.idleFuelGal ?? null, (v) => num(v), true),
+  ];
+}
+
+// ---------------------------------------------------------------------------
+// Subject and plain-text fallback
+// ---------------------------------------------------------------------------
+
+export function formatWeeklyDigestSubject(d: WeeklyDigest, opts: { preview?: boolean } = {}): string {
+  // A preview has sent nothing by definition, so reporting "0 sent" would read
+  // as a catastrophe rather than as a dry run.
+  const parts = [opts.preview ? `${d.drivers.length} would send` : `${d.sentCount} sent`];
+  if (d.failedCount > 0) parts.push(`${d.failedCount} failed`);
+  if (d.notSentCount > 0) parts.push(`${d.notSentCount} not sent`);
+  if (d.errors.length > 0) parts.push(`${d.errors.length} run error${d.errors.length === 1 ? '' : 's'}`);
+  return `Driver reports ${d.weekStart} to ${d.weekEnd}: ${parts.join(', ')}`;
 }
 
 export function formatWeeklyDigestText(d: WeeklyDigest): string {
-  const lines: string[] = [];
-  lines.push(`Week ${d.weekStart} to ${d.weekEnd}`);
-  lines.push(`${d.sentCount} driver(s) received a report. ${d.failedCount} failed, ${d.notSentCount} not sent.`);
-
+  const lines: string[] = [`Week ${d.weekStart} to ${d.weekEnd}`];
+  lines.push(`${d.sentCount} sent, ${d.failedCount} failed, ${d.notSentCount} not sent.`);
   if (d.errors.length > 0) {
     lines.push('', 'RUN ERRORS');
     for (const e of d.errors) lines.push(`  ${e}`);
   }
-
-  if (d.newDrivers.length > 0) {
-    lines.push('', `NEW THIS WEEK (${d.newDrivers.length})`);
-    for (const n of d.newDrivers) {
-      lines.push(`  ${n.displayName}: first week of data, score ${n.score.toFixed(0)}, idle ${n.idlePct.toFixed(1)}%`);
-    }
+  const fleet = buildFleetRows(d.fleet.current, d.fleet.previous);
+  if (fleet.length > 0) {
+    lines.push('', 'FLEET TOTALS (this week / last week / change)');
+    for (const r of fleet) lines.push(`  ${r.label}: ${r.current} / ${r.previous} ${r.change}`);
   }
-
-  if (d.outliers.length > 0) {
-    lines.push('', `WORTH A LOOK (${d.outliers.length})`);
-    for (const o of d.outliers) lines.push(`  ${KIND_LABEL[o.kind]}: ${o.displayName}, ${o.detail}`);
-  } else {
-    lines.push('', 'Nothing looked out of place.');
-  }
-
-  lines.push('', `WHO WAS SENT WHAT (${d.drivers.length})`);
+  lines.push('', `DRIVERS (${d.drivers.length})`);
   for (const dr of [...d.drivers].sort((a, b) => b.score - a.score)) {
     const chans = dr.channels.length
       ? dr.channels.map((c) => `${c.channel}:${c.status}`).join(' ')
       : `NOT SENT (${dr.suppressedReason ?? 'no reason recorded'})`;
     const delta = isNew(dr) ? 'new' : `${signed(dr.scoreVsAvg, 0)} vs avg`;
     lines.push(
-      `  ${dr.displayName.padEnd(24)} score ${String(dr.score.toFixed(0)).padStart(3)} ` +
-        `idle ${String(dr.idlePct.toFixed(1)).padStart(5)}%  ${delta.padEnd(12)} ${chans}`,
+      `  ${dr.displayName}: score ${dr.score.toFixed(0)}, idle ${dr.idlePct.toFixed(1)}%, ${delta}, ` +
+        `units ${dr.vehicles.join('/') || '-'}, ${chans}`,
     );
   }
   return lines.join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// HTML rendering
+//
+// Email clients render a text body in a proportional font, which collapses the
+// column padding of the plain-text table into an unreadable mess. So the real
+// digest is an HTML table. Inline styles only, table layout, no web fonts and
+// no modern CSS: Outlook strips stylesheets and does not do flexbox or grid.
+// The text version above stays as the fallback body.
+// ---------------------------------------------------------------------------
+
+const INK = '#1a1a1a';
+const MUTED = '#6b7280';
+const RULE = '#e5e7eb';
+const GOOD = '#047857';
+const WARN = '#b45309';
+const BAD = '#b91c1c';
+const FONT = '-apple-system,Segoe UI,Roboto,Arial,sans-serif';
+
+function esc(v: string): string {
+  return v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/** Green where a driver is doing well, amber mid, red where it needs a word. */
+function scoreColor(score: number): string {
+  if (score >= 70) return GOOD;
+  if (score >= 40) return WARN;
+  return BAD;
+}
+
+function deltaCell(d: WeeklyDigestDriver): string {
+  if (isNew(d)) return `<span style="color:${MUTED}">new</span>`;
+  if (Math.abs(d.scoreVsAvg) < 1) return `<span style="color:${MUTED}">level</span>`;
+  return `<span style="color:${d.scoreVsAvg > 0 ? GOOD : BAD}">${signed(d.scoreVsAvg, 0)}</span>`;
+}
+
+function statusCell(d: WeeklyDigestDriver, preview: boolean): string {
+  if (d.channels.length === 0) {
+    return `<span style="color:${BAD}">not sent: ${esc(d.suppressedReason ?? 'no reason recorded')}</span>`;
+  }
+  if (preview) return `<span style="color:${MUTED}">would send</span>`;
+  return d.channels
+    .map((c) => {
+      const failed = c.status === 'FAILED';
+      const color = failed ? BAD : c.status === 'DELIVERED' ? GOOD : MUTED;
+      const label = failed ? `${c.channel} FAILED` : `${c.channel} ${String(c.status).toLowerCase()}`;
+      return `<span style="color:${color}">${esc(label)}</span>`;
+    })
+    .join('<br>');
+}
+
+function fleetTable(d: WeeklyDigest): string {
+  const rows = buildFleetRows(d.fleet.current, d.fleet.previous);
+  if (rows.length === 0) return '';
+  const th = `font:600 11px/1.2 ${FONT};color:${MUTED};text-transform:uppercase;letter-spacing:.04em;padding:0 10px 6px 0;border-bottom:1px solid ${RULE}`;
+  const td = `font:14px/1.5 ${FONT};color:${INK};padding:7px 10px 7px 0;border-bottom:1px solid #f3f4f6`;
+  const body = rows
+    .map((r) => {
+      const color = r.tone === 'good' ? GOOD : r.tone === 'bad' ? BAD : MUTED;
+      return `<tr>
+        <td style="${td}">${esc(r.label)}</td>
+        <td style="${td};text-align:right;font-weight:600">${esc(r.current)}</td>
+        <td style="${td};text-align:right;color:${MUTED}">${esc(r.previous)}</td>
+        <td style="${td};text-align:right;color:${color}">${esc(r.change)}</td>
+      </tr>`;
+    })
+    .join('');
+  return `
+    <div style="font:600 13px/1.4 ${FONT};color:${INK};margin:4px 0 8px 0">Fleet totals</div>
+    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;margin-bottom:26px">
+      <tr>
+        <th align="left" style="${th}"></th>
+        <th align="right" style="${th}">This week</th>
+        <th align="right" style="${th}">Last week</th>
+        <th align="right" style="${th}">Change</th>
+      </tr>
+      ${body}
+    </table>`;
+}
+
+export function formatWeeklyDigestHtml(d: WeeklyDigest, opts: { preview?: boolean } = {}): string {
+  const preview = opts.preview === true;
+  const th = `font:600 11px/1.2 ${FONT};color:${MUTED};text-transform:uppercase;letter-spacing:.04em;padding:0 8px 6px 0;border-bottom:1px solid ${RULE}`;
+  const td = `font:14px/1.5 ${FONT};color:${INK};padding:7px 8px 7px 0;border-bottom:1px solid #f3f4f6`;
+
+  const rows = [...d.drivers]
+    .sort((a, b) => b.score - a.score)
+    .map(
+      (dr) => `
+      <tr>
+        <td style="${td}">${esc(dr.displayName)}${isNew(dr) ? ` <span style="font-size:11px;color:${MUTED}">NEW</span>` : ''}</td>
+        <td style="${td};text-align:right;font-weight:600;color:${scoreColor(dr.score)}">${dr.score.toFixed(0)}</td>
+        <td style="${td};text-align:right">${deltaCell(dr)}</td>
+        <td style="${td};text-align:right">${dr.idlePct.toFixed(1)}%</td>
+        <td style="${td};text-align:right">${num(dr.totalMiles)}</td>
+        <td style="${td};color:${MUTED}">${dr.vehicles.length ? esc(dr.vehicles.join(', ')) : '&mdash;'}</td>
+        <td style="${td}">${statusCell(dr, preview)}</td>
+      </tr>`,
+    )
+    .join('');
+
+  const headline = preview
+    ? `${d.drivers.length} driver${d.drivers.length === 1 ? '' : 's'} would receive a report`
+    : `${d.sentCount} driver${d.sentCount === 1 ? '' : 's'} received a report`;
+  const problems: string[] = [];
+  if (d.failedCount > 0) problems.push(`${d.failedCount} failed`);
+  if (d.notSentCount > 0) problems.push(`${d.notSentCount} not sent`);
+
+  // Only shown when the run itself broke. Not a judgement about the numbers,
+  // which is why it survives where the old "worth a look" section did not: a
+  // run that failed is a fact, and hiding it would make a broken week look calm.
+  const errorBox = d.errors.length
+    ? `<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 20px 0;border-collapse:collapse">
+        <tr><td style="border-left:3px solid ${BAD};padding:10px 14px;background:#fafafa">
+          <div style="font:600 13px/1.4 ${FONT};color:${INK};margin-bottom:6px">Run errors</div>
+          ${d.errors.map((e) => `<div style="font:14px/1.6 ${FONT};color:${INK}">${esc(e)}</div>`).join('')}
+        </td></tr>
+      </table>`
+    : '';
+
+  return `<!doctype html><html><body style="margin:0;padding:0;background:#ffffff">
+  <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#ffffff">
+   <tr><td align="center" style="padding:24px 16px">
+    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="max-width:720px;text-align:left">
+      <tr><td>
+        ${preview ? `<div style="font:600 13px/1.5 ${FONT};color:${WARN};border:1px solid ${WARN};padding:8px 12px;margin-bottom:18px">TEST PREVIEW. Nothing was sent to any driver.</div>` : ''}
+        <div style="font:600 19px/1.3 ${FONT};color:${INK}">Weekly driver reports</div>
+        <div style="font:14px/1.5 ${FONT};color:${MUTED};margin:2px 0 18px 0">${esc(d.weekStart)} to ${esc(d.weekEnd)}</div>
+        <div style="font:15px/1.5 ${FONT};color:${INK};margin-bottom:22px">
+          ${esc(headline)}${problems.length ? `, <span style="color:${BAD}">${esc(problems.join(', '))}</span>` : ''}.
+        </div>
+        ${errorBox}
+        ${fleetTable(d)}
+        <div style="font:600 13px/1.4 ${FONT};color:${INK};margin:4px 0 8px 0">Drivers (${d.drivers.length})</div>
+        <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse">
+          <tr>
+            <th align="left" style="${th}">Driver</th>
+            <th align="right" style="${th}">Score</th>
+            <th align="right" style="${th}">vs avg</th>
+            <th align="right" style="${th}">Idle</th>
+            <th align="right" style="${th}">Miles</th>
+            <th align="left" style="${th}">Units</th>
+            <th align="left" style="${th}">Status</th>
+          </tr>
+          ${rows}
+        </table>
+        <div style="font:12px/1.5 ${FONT};color:${MUTED};margin-top:16px">
+          Score combines idle, MPG and safety. "vs avg" compares this week's score with that driver's own trailing four week average.
+        </div>
+      </td></tr>
+    </table>
+   </td></tr>
+  </table>
+  </body></html>`;
 }

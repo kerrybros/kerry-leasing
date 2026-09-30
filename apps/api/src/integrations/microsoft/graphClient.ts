@@ -390,7 +390,8 @@ export async function getDriveItemContent(
 
 export interface SendMailInput {
   from: string; // sender mailbox UPN/address, e.g. reports@kerrybros.com
-  to: string;
+  /** One address, or several: Graph takes a list of recipients. */
+  to: string | string[];
   subject: string;
   text: string; // plain-text body (used as content when html is omitted)
   html?: string; // optional HTML body
@@ -411,7 +412,10 @@ export async function sendMail(cfg: GraphClientConfig, input: SendMailInput): Pr
       contentType: input.html ? 'HTML' : 'Text',
       content: input.html ?? input.text,
     },
-    toRecipients: [{ emailAddress: { address: input.to } }],
+    toRecipients: (Array.isArray(input.to) ? input.to : [input.to])
+      .map((a) => a.trim())
+      .filter((a) => a.length > 0)
+      .map((address) => ({ emailAddress: { address } })),
   };
   if (input.replyTo) {
     message.replyTo = [{ emailAddress: { address: input.replyTo } }];
