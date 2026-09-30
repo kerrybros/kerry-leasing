@@ -85,12 +85,16 @@ describe('buildFleetRows', () => {
     expect(rows[0].change).toBe('');
   });
 
+  it('does not report a driver count, which the fleet table does not need', () => {
+    expect(buildFleetRows(totals(), totals()).map((r) => r.label)).not.toContain('Drivers reported');
+  });
+
   it('returns nothing at all when this week has no report data', () => {
     expect(buildFleetRows(null, totals())).toEqual([]);
   });
 
   it('formats large counts readably', () => {
-    expect(buildFleetRows(totals({ totalMiles: 109223 }), totals())[1].current).toBe('109,223');
+    expect(buildFleetRows(totals({ totalMiles: 109223 }), totals())[0].current).toBe('109,223');
   });
 });
 

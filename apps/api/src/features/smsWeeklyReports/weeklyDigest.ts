@@ -101,7 +101,6 @@ export function buildFleetRows(current: FleetTotals | null, previous: FleetTotal
     return { label, current: fmt(cur), previous: fmt(prev), change: shown, tone };
   };
   return [
-    row('Drivers reported', current.drivers, previous?.drivers ?? null, (v) => num(v), false),
     row('Miles', current.totalMiles, previous?.totalMiles ?? null, (v) => num(v), false),
     row('Fuel used (gal)', current.totalFuelGal, previous?.totalFuelGal ?? null, (v) => num(v), true),
     row('Fleet MPG', current.avgMpg, previous?.avgMpg ?? null, (v) => v.toFixed(2), false),
