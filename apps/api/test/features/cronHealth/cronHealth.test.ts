@@ -143,3 +143,47 @@ describe('formatCronHealthAlert', () => {
     expect(alert.text).toContain('not live — no report delivered yet');
   });
 });
+
+describe('report intake window vs the watchdog schedule', () => {
+  // The pull runs 13:00 UTC daily; the watchdog now runs 14:00 UTC. These pin
+  // the arithmetic that makes a failed pull alarm the SAME day, which is what
+  // went wrong on 2026-09-30 when both ran at 13:00 with a 26h limit.
+  const INTAKE_LIMIT_HOURS = 24;
+  const check = (lastSuccessAt: Date) => [
+    { label: 'Motive report intake', lastSuccessAt, maxAgeHours: INTAKE_LIMIT_HOURS },
+  ];
+
+  it('stays ok on a normal day, when the pull ran an hour earlier', () => {
+    const now = new Date('2026-10-01T14:00:00Z');
+    const [r] = evaluateCronHealth(check(new Date('2026-10-01T13:02:00Z')), now);
+    expect(r.ageHours).toBeCloseTo(0.97, 1);
+    expect(r.status).toBe('ok');
+  });
+
+  it('alarms the same day when today\'s pull failed', () => {
+    // Yesterday succeeded at 13:02; today's failed, so nothing newer exists.
+    const now = new Date('2026-10-01T14:00:00Z');
+    const [r] = evaluateCronHealth(check(new Date('2026-09-30T13:02:00Z')), now);
+    expect(r.ageHours).toBeGreaterThan(INTAKE_LIMIT_HOURS);
+    expect(r.status).toBe('overdue');
+  });
+
+  it('would NOT have alarmed under the old same-minute 26h setup', () => {
+    // The regression this guards: watchdog at 13:00, limit 26h, pull failed at
+    // 13:01. ~23h old, so it read healthy and stayed silent for a full day.
+    const now = new Date('2026-10-01T13:00:00Z');
+    const [r] = evaluateCronHealth(
+      [{ label: 'Motive report intake', lastSuccessAt: new Date('2026-09-30T13:02:00Z'), maxAgeHours: 26 }],
+      now
+    );
+    expect(r.ageHours).toBeLessThan(26);
+    expect(r.status).toBe('ok');
+  });
+
+  it('tolerates a pull that runs late without crying wolf', () => {
+    // 55 minutes of slack for a job that normally takes about two minutes.
+    const now = new Date('2026-10-01T14:00:00Z');
+    const [r] = evaluateCronHealth(check(new Date('2026-10-01T13:55:00Z')), now);
+    expect(r.status).toBe('ok');
+  });
+});

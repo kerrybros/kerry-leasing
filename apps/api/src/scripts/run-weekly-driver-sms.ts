@@ -33,16 +33,21 @@ async function main() {
   const summary = await runWeeklyDriverSms({ dryRun, ignoreSendHour, onlyOrgId, targetHourEt });
   console.log(JSON.stringify(summary, null, 2));
 
-  try {
-    await recordTelematicsCronRun(CronJobType.SMS_WEEKLY_DRIVER_REPORT, {
-      totalOrgs: summary.totalOrgs,
-      successCount: summary.successCount,
-      errorCount: summary.errorCount,
-      duration: summary.duration,
-      results: summary.results,
-    });
-  } catch (e) {
-    console.warn('[smsWeeklyReports] failed to record cron run summary', e);
+  // A dry run must never mark the job as having succeeded: the health watchdog
+  // reads these rows to decide whether the weekly send is overdue, so recording
+  // one here would tell it a send happened when nothing was delivered.
+  if (!dryRun) {
+    try {
+      await recordTelematicsCronRun(CronJobType.SMS_WEEKLY_DRIVER_REPORT, {
+        totalOrgs: summary.totalOrgs,
+        successCount: summary.successCount,
+        errorCount: summary.errorCount,
+        duration: summary.duration,
+        results: summary.results,
+      });
+    } catch (e) {
+      console.warn('[smsWeeklyReports] failed to record cron run summary', e);
+    }
   }
 
   const exitCode = summary.errorCount > 0 && summary.successCount === 0 ? 1 : 0;
