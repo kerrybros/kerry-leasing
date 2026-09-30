@@ -145,27 +145,39 @@ describe('formatCronHealthAlert', () => {
 });
 
 describe('report intake window vs the watchdog schedule', () => {
-  // The pull runs 13:00 UTC daily; the watchdog now runs 14:00 UTC. These pin
-  // the arithmetic that makes a failed pull alarm the SAME day, which is what
-  // went wrong on 2026-09-30 when both ran at 13:00 with a 26h limit.
+  // The pull runs 13:00 UTC daily, the watchdog 13:30, the weekly send 14:00 on
+  // Tuesdays. These pin the arithmetic that makes a failed pull alarm BEFORE
+  // the send that depends on it, rather than the same minute or a day later.
   const INTAKE_LIMIT_HOURS = 24;
   const check = (lastSuccessAt: Date) => [
     { label: 'Motive report intake', lastSuccessAt, maxAgeHours: INTAKE_LIMIT_HOURS },
   ];
 
-  it('stays ok on a normal day, when the pull ran an hour earlier', () => {
-    const now = new Date('2026-10-01T14:00:00Z');
+  it('stays ok on a normal day, half an hour after the pull', () => {
+    const now = new Date('2026-10-01T13:30:00Z');
     const [r] = evaluateCronHealth(check(new Date('2026-10-01T13:02:00Z')), now);
-    expect(r.ageHours).toBeCloseTo(0.97, 1);
+    expect(r.ageHours).toBeCloseTo(0.47, 1);
     expect(r.status).toBe('ok');
   });
 
-  it('alarms the same day when today\'s pull failed', () => {
+  it('alarms BEFORE the send when today\'s pull failed', () => {
     // Yesterday succeeded at 13:02; today's failed, so nothing newer exists.
-    const now = new Date('2026-10-01T14:00:00Z');
+    // 13:30 is half an hour ahead of the 14:00 Tuesday send.
+    const now = new Date('2026-10-01T13:30:00Z');
     const [r] = evaluateCronHealth(check(new Date('2026-09-30T13:02:00Z')), now);
     expect(r.ageHours).toBeGreaterThan(INTAKE_LIMIT_HOURS);
     expect(r.status).toBe('overdue');
+  });
+
+  it('does not race the Tuesday send by running in the same minute as it', () => {
+    // The 14:00 schedule alarmed at the exact moment the send fired, so the
+    // warning could not be acted on. At 13:30 the same failure is already known.
+    const failedPull = new Date('2026-09-30T13:02:00Z');
+    const atWatchdog = evaluateCronHealth(check(failedPull), new Date('2026-10-01T13:30:00Z'))[0];
+    const atSend = evaluateCronHealth(check(failedPull), new Date('2026-10-01T14:00:00Z'))[0];
+    expect(atWatchdog.status).toBe('overdue');
+    expect(atSend.status).toBe('overdue');
+    expect(atWatchdog.ageHours!).toBeLessThan(atSend.ageHours!);
   });
 
   it('would NOT have alarmed under the old same-minute 26h setup', () => {
@@ -181,9 +193,9 @@ describe('report intake window vs the watchdog schedule', () => {
   });
 
   it('tolerates a pull that runs late without crying wolf', () => {
-    // 55 minutes of slack for a job that normally takes about two minutes.
-    const now = new Date('2026-10-01T14:00:00Z');
-    const [r] = evaluateCronHealth(check(new Date('2026-10-01T13:55:00Z')), now);
+    // ~28 minutes of slack for a job that normally takes about two.
+    const now = new Date('2026-10-01T13:30:00Z');
+    const [r] = evaluateCronHealth(check(new Date('2026-10-01T13:28:00Z')), now);
     expect(r.status).toBe('ok');
   });
 });

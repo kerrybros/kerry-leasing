@@ -139,24 +139,22 @@ export function buildKpiSnapshot(report: DriverWeeklyReport): object {
  * What an upsert may change on a row that already exists for this
  * (org, driver, week, channel).
  *
- * A dry run deliberately omits `status`. The unique key means a preview lands
- * on the SAME row as the real send for that week, so writing status here
- * overwrote DELIVERED with SKIPPED while leaving the Twilio SID: for the week
- * of 2026-09-21, Twilio reported 35 delivered and our own table reported none.
- * A preview may refresh the rendered body; it may not rewrite history.
+ * Only ever reached on a real send: a dry run returns before persisting at all.
+ * That ordering matters because the unique key means a preview would land on
+ * the SAME row as the week's real send. When it did, it overwrote DELIVERED
+ * with SKIPPED while leaving the Twilio SID behind, and for the week of
+ * 2026-09-21 Twilio reported 35 delivered while our own table reported none.
  */
 export function buildSendUpdatePayload(input: {
-  dryRun: boolean;
   status: DriverSmsStatus;
   bodyPreview: string | null;
   kpiSnapshot: unknown;
   token: string;
   tokenExpiresAt: Date;
 }): Record<string, unknown> {
-  const base = { bodyPreview: input.bodyPreview, kpiSnapshot: input.kpiSnapshot };
-  if (input.dryRun) return base;
   return {
-    ...base,
+    bodyPreview: input.bodyPreview,
+    kpiSnapshot: input.kpiSnapshot,
     // Re-attempt non-terminal sends; refresh token only when re-queuing.
     status: input.status,
     ...(input.status === DriverSmsStatus.QUEUED
@@ -345,6 +343,24 @@ export async function sendOrgWeeklyReports(
       }
     }
 
+    // A dry run writes NOTHING. It used to reach the upsert below, which
+    // created a row for a week nobody was sent: that row carried the dry run's
+    // timestamp, so a later investigation read the preview's clock as the send's
+    // and concluded a delivered week had never gone out. A preview reports what
+    // it would do and touches no state.
+    if (options.dryRun) {
+      if (status === DriverSmsStatus.SKIPPED) counters.skipped++;
+      out.push({
+        driverContactId: report.driverContactId,
+        displayName: report.displayName,
+        channel,
+        status,
+        twilioSid: null,
+        error: skipReason,
+      });
+      return;
+    }
+
     // Persist FIRST, then attempt send. Upsert handles idempotency across cron retries.
     let row;
     try {
@@ -373,7 +389,6 @@ export async function sendOrgWeeklyReports(
           isTest: false,
         },
         update: buildSendUpdatePayload({
-          dryRun: options.dryRun === true,
           status,
           bodyPreview: body,
           kpiSnapshot,
@@ -395,10 +410,7 @@ export async function sendOrgWeeklyReports(
       return;
     }
 
-    // On a dry run the stored status is deliberately left alone, so report the
-    // status this run WOULD have produced rather than whatever the real send
-    // left behind. A dry run never yields QUEUED, so it always stops here.
-    const effectiveStatus = options.dryRun ? status : row.status;
+    const effectiveStatus = row.status;
     if (effectiveStatus !== DriverSmsStatus.QUEUED) {
       if (effectiveStatus === DriverSmsStatus.SKIPPED) counters.skipped++;
       out.push({

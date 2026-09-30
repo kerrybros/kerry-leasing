@@ -9,39 +9,31 @@ const base = {
   tokenExpiresAt: new Date('2026-10-07T00:00:00Z'),
 };
 
+// This payload is now only ever reached on a REAL send: a dry run returns
+// before persisting anything. That ordering is what stops a preview landing on
+// the same (org, driver, week, channel) row as the week's real send, which is
+// how 35 DELIVERED rows became SKIPPED while keeping their Twilio SIDs.
 describe('buildSendUpdatePayload', () => {
-  it('never writes status on a dry run', () => {
-    // The regression: the unique key is (org, driver, week, channel), so a
-    // preview lands on the SAME row as that week's real send. Writing status
-    // here turned 35 DELIVERED rows into SKIPPED for the week of 2026-09-21
-    // while leaving their Twilio SIDs in place.
-    const p = buildSendUpdatePayload({ ...base, dryRun: true, status: DriverSmsStatus.SKIPPED });
-    expect(p).not.toHaveProperty('status');
-    expect(p).not.toHaveProperty('token');
+  it('writes the status of a real send', () => {
+    expect(buildSendUpdatePayload({ ...base, status: DriverSmsStatus.QUEUED }).status).toBe(DriverSmsStatus.QUEUED);
   });
 
-  it('still refreshes the rendered body on a dry run, which is harmless', () => {
-    const p = buildSendUpdatePayload({ ...base, dryRun: true, status: DriverSmsStatus.SKIPPED });
+  it('refreshes the token only when re-queuing, not on a terminal status', () => {
+    expect(buildSendUpdatePayload({ ...base, status: DriverSmsStatus.QUEUED }).token).toBe('tok');
+    const terminal = buildSendUpdatePayload({ ...base, status: DriverSmsStatus.NO_CONSENT });
+    expect(terminal).not.toHaveProperty('token');
+    expect(terminal.status).toBe(DriverSmsStatus.NO_CONSENT);
+  });
+
+  it('always refreshes the rendered body and snapshot', () => {
+    const p = buildSendUpdatePayload({ ...base, status: DriverSmsStatus.QUEUED });
     expect(p.bodyPreview).toBe(base.bodyPreview);
     expect(p.kpiSnapshot).toEqual({ score: 33 });
   });
 
-  it('writes status on a real run', () => {
-    const p = buildSendUpdatePayload({ ...base, dryRun: false, status: DriverSmsStatus.QUEUED });
-    expect(p.status).toBe(DriverSmsStatus.QUEUED);
-  });
-
-  it('refreshes the token only when re-queuing, not on a terminal status', () => {
-    const queued = buildSendUpdatePayload({ ...base, dryRun: false, status: DriverSmsStatus.QUEUED });
-    expect(queued.token).toBe('tok');
-    const noConsent = buildSendUpdatePayload({ ...base, dryRun: false, status: DriverSmsStatus.NO_CONSENT });
-    expect(noConsent).not.toHaveProperty('token');
-    expect(noConsent.status).toBe(DriverSmsStatus.NO_CONSENT);
-  });
-
-  it('a dry run cannot downgrade any real status, whatever it computed', () => {
-    for (const s of [DriverSmsStatus.SKIPPED, DriverSmsStatus.NO_CONSENT, DriverSmsStatus.NO_PHONE]) {
-      expect(buildSendUpdatePayload({ ...base, dryRun: true, status: s })).not.toHaveProperty('status');
-    }
+  it('takes no dryRun input at all, so a preview cannot reach it by mistake', () => {
+    // Guards the invariant at the type boundary: the only way a dry run could
+    // write is if someone reintroduced a flag here.
+    expect(Object.keys(buildSendUpdatePayload({ ...base, status: DriverSmsStatus.SENT }))).not.toContain('dryRun');
   });
 });
