@@ -57,12 +57,20 @@ export async function gatherCronHealthChecks(): Promise<CronHealthCheck[]> {
     },
     { label: 'EIA diesel price', lastSuccessAt: diesel?.updatedAt ?? null, maxAgeHours: 48 },
     {
-      // 24h, not 26h, and the watchdog runs an hour AFTER the pull rather than
-      // in the same minute. With both at 13:00 and a 26h limit, a pull that
-      // failed at 13:01 still looked ~23h fresh at 13:00 and was not reported
-      // until the following day; on 2026-09-30 Render's own email beat this
-      // check to a real failure. An hour later with a 24h limit, a missed pull
-      // reads ~25h and alarms the same day, while a healthy pull reads ~1h.
+      // 24h, and the watchdog runs at 13:30, BETWEEN the 13:00 portal pull and
+      // the 14:00 Tuesday send.
+      //
+      // Two problems put it there. With the watchdog and the pull both at
+      // 13:00 and a 26h limit, a pull that failed at 13:01 still looked ~23h
+      // fresh and went unreported for a day; on 2026-09-30 Render's own email
+      // beat this check to a real failure. Moving it to 14:00 fixed that but
+      // landed it in the same minute as the Tuesday send, so the alert and the
+      // send raced and the week could go out unheralded either way.
+      //
+      // At 13:30 a missed pull reads ~24.5h and alarms 30 minutes BEFORE the
+      // send that depends on it, while a healthy pull reads ~0.5h. The pull
+      // takes about two minutes, so that leaves roughly 15 times its normal
+      // duration of slack before a merely slow pull could cry wolf.
       label: 'Motive report intake',
       lastSuccessAt: reportIngest,
       maxAgeHours: 24,
