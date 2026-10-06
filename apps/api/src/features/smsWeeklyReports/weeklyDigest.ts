@@ -22,6 +22,8 @@ import type { WeeklyDigestDriver, SendOrgResult } from './sendOrgWeeklyReports.j
 import type { FleetTotals } from './weeklyDigestData.js';
 
 export interface WeeklyDigest {
+  /** Customer-facing name for the subject line, e.g. "Wolverine". */
+  reportDisplayName: string | null;
   fleet: { current: FleetTotals | null; previous: FleetTotals | null };
   weekStart: string;
   weekEnd: string;
@@ -38,6 +40,42 @@ function signed(n: number, digits = 1): string {
   return n > 0 ? `+${v}` : v;
 }
 
+/**
+ * Did this driver get their report?
+ *
+ * On a preview nothing is actually sent, so the question becomes "would they
+ * have?". A dry run marks a driver it WOULD have sent to as SKIPPED, and leaves
+ * the real blocking reason (NO_CONSENT, NO_PHONE, OPTED_OUT) in place for one
+ * it would not. Reading SKIPPED as a miss made a healthy preview announce that
+ * all 35 drivers had been missed.
+ */
+function reached(x: WeeklyDigestDriver, preview: boolean): boolean {
+  return preview
+    ? x.channels.some((c) => c.status === 'SKIPPED')
+    : x.channels.some((c) => c.status === 'SENT' || c.status === 'DELIVERED');
+}
+
+/** Drivers who received a report. The clean report shows only these. */
+export function sentDrivers(d: WeeklyDigest, preview = false): WeeklyDigestDriver[] {
+  return d.drivers.filter((x) => reached(x, preview));
+}
+
+/** Everyone else: nothing sent, or a send that failed. The exceptions report. */
+export function missedDrivers(d: WeeklyDigest, preview = false): WeeklyDigestDriver[] {
+  return d.drivers.filter((x) => !reached(x, preview));
+}
+
+/** Why this driver got nothing, in the clearest terms available. */
+export function missReason(d: WeeklyDigestDriver): string {
+  const failed = d.channels.filter((c) => c.status === 'FAILED');
+  if (failed.length > 0) {
+    return failed.map((c) => `${c.channel} failed: ${c.error ?? 'no reason given'}`).join('; ');
+  }
+  if (d.channels.length === 0) return d.suppressedReason ?? 'no reason recorded';
+  const s = d.channels.map((c) => `${c.channel} ${String(c.status).toLowerCase()}`).join(', ');
+  return d.suppressedReason ? `${s} (${d.suppressedReason})` : s;
+}
+
 /** A driver on their first week of data has nothing to compare against yet. */
 function isNew(d: WeeklyDigestDriver): boolean {
   return d.weeksOfData <= 1;
@@ -46,6 +84,7 @@ function isNew(d: WeeklyDigestDriver): boolean {
 export function buildWeeklyDigest(results: SendOrgResult[]): WeeklyDigest {
   const drivers = results.flatMap((r) => r.digest);
   return {
+    reportDisplayName: results[0]?.reportDisplayName ?? null,
     fleet: results[0]?.fleet ?? { current: null, previous: null },
     weekStart: results[0]?.weekStart ?? '',
     weekEnd: results[0]?.weekEnd ?? '',
@@ -113,37 +152,37 @@ export function buildFleetRows(current: FleetTotals | null, previous: FleetTotal
 // Subject and plain-text fallback
 // ---------------------------------------------------------------------------
 
-export function formatWeeklyDigestSubject(d: WeeklyDigest, opts: { preview?: boolean } = {}): string {
-  // A preview has sent nothing by definition, so reporting "0 sent" would read
-  // as a catastrophe rather than as a dry run.
-  const parts = [opts.preview ? `${d.drivers.length} would send` : `${d.sentCount} sent`];
-  if (d.failedCount > 0) parts.push(`${d.failedCount} failed`);
-  if (d.notSentCount > 0) parts.push(`${d.notSentCount} not sent`);
-  if (d.errors.length > 0) parts.push(`${d.errors.length} run error${d.errors.length === 1 ? '' : 's'}`);
-  return `Driver reports ${d.weekStart} to ${d.weekEnd}: ${parts.join(', ')}`;
+function brand(d: WeeklyDigest): string {
+  return d.reportDisplayName ? `${d.reportDisplayName} Weekly Driver Report` : 'Weekly Driver Report';
+}
+
+/** Subject for the clean report, the one that gets forwarded onward. */
+export function formatReportSubject(d: WeeklyDigest, opts: { preview?: boolean } = {}): string {
+  const n = sentDrivers(d, opts.preview === true).length;
+  return `${brand(d)}: ${d.weekStart} to ${d.weekEnd} (${n} driver${n === 1 ? '' : 's'})`;
+}
+
+/** Subject for the exceptions report, which only goes out when there are any. */
+export function formatExceptionsSubject(d: WeeklyDigest, opts: { preview?: boolean } = {}): string {
+  const n = missedDrivers(d, opts.preview === true).length + d.errors.length;
+  return `${brand(d)}: ${n} not sent, ${d.weekStart} to ${d.weekEnd}`;
 }
 
 export function formatWeeklyDigestText(d: WeeklyDigest): string {
-  const lines: string[] = [`Week ${d.weekStart} to ${d.weekEnd}`];
-  lines.push(`${d.sentCount} sent, ${d.failedCount} failed, ${d.notSentCount} not sent.`);
-  if (d.errors.length > 0) {
-    lines.push('', 'RUN ERRORS');
-    for (const e of d.errors) lines.push(`  ${e}`);
-  }
+  const lines: string[] = [`${brand(d)}`, `Week ${d.weekStart} to ${d.weekEnd}`, ''];
   const fleet = buildFleetRows(d.fleet.current, d.fleet.previous);
   if (fleet.length > 0) {
-    lines.push('', 'FLEET TOTALS (this week / last week / change)');
+    lines.push('FLEET TOTALS (this week / last week / change)');
     for (const r of fleet) lines.push(`  ${r.label}: ${r.current} / ${r.previous} ${r.change}`);
+    lines.push('');
   }
-  lines.push('', `DRIVERS (${d.drivers.length})`);
-  for (const dr of [...d.drivers].sort((a, b) => b.score - a.score)) {
-    const chans = dr.channels.length
-      ? dr.channels.map((c) => `${c.channel}:${c.status}`).join(' ')
-      : `NOT SENT (${dr.suppressedReason ?? 'no reason recorded'})`;
-    const delta = isNew(dr) ? 'new' : `${signed(dr.scoreVsAvg, 0)} vs avg`;
+  const sent = sentDrivers(d);
+  lines.push(`DRIVERS (${sent.length})`);
+  for (const dr of [...sent].sort((a, b) => b.score - a.score)) {
     lines.push(
-      `  ${dr.displayName}: score ${dr.score.toFixed(0)}, idle ${dr.idlePct.toFixed(1)}%, ${delta}, ` +
-        `units ${dr.vehicles.join('/') || '-'}, ${chans}`,
+      `  ${dr.displayName}: score ${dr.score.toFixed(0)} (${signed(dr.scoreVsAvg, 0)} vs avg), ` +
+        `idle ${dr.idlePct.toFixed(1)}% (${dr.idlePctLastWeek == null ? 'new' : signed(dr.idlePct - dr.idlePctLastWeek, 1) + ' pts vs last week'}), ` +
+        `units ${dr.vehicles.join('/') || '-'}, ${dr.phoneE164 ?? 'no phone'}, ${dr.email ?? 'no email'}`,
     );
   }
   return lines.join('\n');
@@ -154,17 +193,17 @@ export function formatWeeklyDigestText(d: WeeklyDigest): string {
 //
 // Email clients render a text body in a proportional font, which collapses the
 // column padding of the plain-text table into an unreadable mess. So the real
-// digest is an HTML table. Inline styles only, table layout, no web fonts and
+// report is an HTML table. Inline styles only, table layout, no web fonts and
 // no modern CSS: Outlook strips stylesheets and does not do flexbox or grid.
 // The text version above stays as the fallback body.
 // ---------------------------------------------------------------------------
 
 const INK = '#1a1a1a';
 const MUTED = '#6b7280';
-const RULE = '#e5e7eb';
+const RULE = '#d7dbe0';
 const GOOD = '#047857';
-const WARN = '#b45309';
 const BAD = '#b91c1c';
+const WARN = '#b45309';
 const FONT = '-apple-system,Segoe UI,Roboto,Arial,sans-serif';
 
 function esc(v: string): string {
@@ -178,128 +217,180 @@ function scoreColor(score: number): string {
   return BAD;
 }
 
+/**
+ * Idle this week against last week, in percentage points.
+ *
+ * Deliberately last week rather than the four week average: idle is the number
+ * a driver can change, and the question asked of it is "is this better than
+ * last week" rather than "is this better than their own recent habit". Down is
+ * green, because idle is fuel burned standing still.
+ */
+function idleVsLastWeekCell(d: WeeklyDigestDriver): string {
+  if (d.idlePctLastWeek == null) return `<span style="color:${MUTED}">new</span>`;
+  const diff = d.idlePct - d.idlePctLastWeek;
+  if (Math.abs(diff) < 0.05) return `<span style="color:${MUTED}">level</span>`;
+  return `<span style="color:${diff < 0 ? GOOD : BAD}">${signed(diff, 1)} pts</span>`;
+}
+
 function deltaCell(d: WeeklyDigestDriver): string {
   if (isNew(d)) return `<span style="color:${MUTED}">new</span>`;
   if (Math.abs(d.scoreVsAvg) < 1) return `<span style="color:${MUTED}">level</span>`;
   return `<span style="color:${d.scoreVsAvg > 0 ? GOOD : BAD}">${signed(d.scoreVsAvg, 0)}</span>`;
 }
 
-function statusCell(d: WeeklyDigestDriver, preview: boolean): string {
-  if (d.channels.length === 0) {
-    return `<span style="color:${BAD}">not sent: ${esc(d.suppressedReason ?? 'no reason recorded')}</span>`;
-  }
-  if (preview) return `<span style="color:${MUTED}">would send</span>`;
-  return d.channels
-    .map((c) => {
-      const failed = c.status === 'FAILED';
-      const color = failed ? BAD : c.status === 'DELIVERED' ? GOOD : MUTED;
-      const label = failed ? `${c.channel} FAILED` : `${c.channel} ${String(c.status).toLowerCase()}`;
-      return `<span style="color:${color}">${esc(label)}</span>`;
-    })
-    .join('<br>');
+/** Every cell is ruled on all sides, so the grid reads as a grid. */
+const CELL = `border:1px solid ${RULE};padding:7px 10px`;
+
+/**
+ * A column heading.
+ *
+ * nowrap is the point: without it a narrow column breaks the heading mid-word,
+ * so "Idle" renders as "Idl e" and "Units" as "Unit s". Headings are short
+ * enough that keeping them on one line costs nothing, and the table is free to
+ * widen instead. Letter-spacing is dropped for the same reason: it was pushing
+ * borderline headings over the width at which they break.
+ */
+function head(label: string, align: 'left' | 'right' = 'left'): string {
+  return `<th align="${align}" style="${CELL};font:600 11px/1.2 ${FONT};color:${MUTED};text-transform:uppercase;white-space:nowrap;background:#f6f7f8">${esc(label)}</th>`;
+}
+
+function shell(title: string, sub: string, banner: string, body: string): string {
+  return `<!doctype html><html><body style="margin:0;padding:0;background:#ffffff">
+  <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#ffffff">
+   <tr><td align="center" style="padding:24px 16px">
+    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="max-width:860px;text-align:left">
+      <tr><td>
+        ${banner}
+        <div style="font:600 19px/1.3 ${FONT};color:${INK}">${esc(title)}</div>
+        <div style="font:14px/1.5 ${FONT};color:${MUTED};margin:2px 0 20px 0">${esc(sub)}</div>
+        ${body}
+      </td></tr>
+    </table>
+   </td></tr>
+  </table>
+  </body></html>`;
+}
+
+function previewBanner(preview: boolean): string {
+  return preview
+    ? `<div style="font:600 13px/1.5 ${FONT};color:${WARN};border:1px solid ${WARN};padding:8px 12px;margin-bottom:18px">TEST PREVIEW. Nothing was sent to any driver.</div>`
+    : '';
 }
 
 function fleetTable(d: WeeklyDigest): string {
   const rows = buildFleetRows(d.fleet.current, d.fleet.previous);
   if (rows.length === 0) return '';
-  const th = `font:600 11px/1.2 ${FONT};color:${MUTED};text-transform:uppercase;letter-spacing:.04em;padding:0 10px 6px 0;border-bottom:1px solid ${RULE}`;
-  const td = `font:14px/1.5 ${FONT};color:${INK};padding:7px 10px 7px 0;border-bottom:1px solid #f3f4f6`;
+  const td = `${CELL};font:14px/1.5 ${FONT};color:${INK}`;
   const body = rows
     .map((r) => {
       const color = r.tone === 'good' ? GOOD : r.tone === 'bad' ? BAD : MUTED;
       return `<tr>
-        <td style="${td}">${esc(r.label)}</td>
-        <td style="${td};text-align:right;font-weight:600">${esc(r.current)}</td>
+        <td style="${td};white-space:nowrap">${esc(r.label)}</td>
+        <td style="${td};text-align:right;font-weight:600;white-space:nowrap">${esc(r.current)}</td>
         <td style="${td};text-align:right;color:${MUTED}">${esc(r.previous)}</td>
         <td style="${td};text-align:right;color:${color}">${esc(r.change)}</td>
       </tr>`;
     })
     .join('');
   return `
-    <div style="font:600 13px/1.4 ${FONT};color:${INK};margin:4px 0 8px 0">Fleet totals</div>
-    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;margin-bottom:26px">
-      <tr>
-        <th align="left" style="${th}"></th>
-        <th align="right" style="${th}">This week</th>
-        <th align="right" style="${th}">Last week</th>
-        <th align="right" style="${th}">Change</th>
-      </tr>
+    <div style="font:600 13px/1.4 ${FONT};color:${INK};margin:0 0 8px 0">Fleet totals</div>
+    <table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-bottom:26px">
+      <tr>${head('')}${head('This week', 'right')}${head('Last week', 'right')}${head('Change', 'right')}</tr>
       ${body}
     </table>`;
 }
 
-export function formatWeeklyDigestHtml(d: WeeklyDigest, opts: { preview?: boolean } = {}): string {
+/**
+ * The clean report. Only drivers who actually received something, because this
+ * is the document that gets forwarded to the fleet admin: anything listed here
+ * went out. No status column, since every row has the same status. Phone and
+ * email instead, so a conversation about a driver does not need a lookup.
+ */
+export function formatWeeklyDigestHtml(
+  d: WeeklyDigest,
+  opts: { preview?: boolean; hideTestBanner?: boolean } = {},
+): string {
   const preview = opts.preview === true;
-  const th = `font:600 11px/1.2 ${FONT};color:${MUTED};text-transform:uppercase;letter-spacing:.04em;padding:0 8px 6px 0;border-bottom:1px solid ${RULE}`;
-  const td = `font:14px/1.5 ${FONT};color:${INK};padding:7px 8px 7px 0;border-bottom:1px solid #f3f4f6`;
+  const shown = sentDrivers(d, preview);
+  const td = `${CELL};font:14px/1.5 ${FONT};color:${INK}`;
 
-  const rows = [...d.drivers]
+  const rows = [...shown]
     .sort((a, b) => b.score - a.score)
     .map(
       (dr) => `
       <tr>
-        <td style="${td}">${esc(dr.displayName)}${isNew(dr) ? ` <span style="font-size:11px;color:${MUTED}">NEW</span>` : ''}</td>
-        <td style="${td};text-align:right;font-weight:600;color:${scoreColor(dr.score)}">${dr.score.toFixed(0)}</td>
-        <td style="${td};text-align:right">${deltaCell(dr)}</td>
-        <td style="${td};text-align:right">${dr.idlePct.toFixed(1)}%</td>
-        <td style="${td};text-align:right">${num(dr.totalMiles)}</td>
-        <td style="${td};color:${MUTED}">${dr.vehicles.length ? esc(dr.vehicles.join(', ')) : '&mdash;'}</td>
-        <td style="${td}">${statusCell(dr, preview)}</td>
+        <td style="${td};white-space:nowrap">${esc(dr.displayName)}${isNew(dr) ? ` <span style="font-size:11px;color:${MUTED}">NEW</span>` : ''}</td>
+        <td style="${td};text-align:right;font-weight:600;white-space:nowrap;color:${scoreColor(dr.score)}">${dr.score.toFixed(0)}</td>
+        <td style="${td};text-align:right;white-space:nowrap">${deltaCell(dr)}</td>
+        <td style="${td};text-align:right;white-space:nowrap">${dr.idlePct.toFixed(1)}%</td>
+        <td style="${td};text-align:right;white-space:nowrap">${idleVsLastWeekCell(dr)}</td>
+        <td style="${td};white-space:nowrap;color:${MUTED}">${dr.vehicles.length ? esc(dr.vehicles.join(', ')) : '&mdash;'}</td>
+        <td style="${td};white-space:nowrap">${dr.phoneE164 ? esc(dr.phoneE164) : `<span style="color:${MUTED}">&mdash;</span>`}</td>
+        <td style="${td};overflow-wrap:anywhere">${dr.email ? esc(dr.email) : `<span style="color:${MUTED}">&mdash;</span>`}</td>
       </tr>`,
     )
     .join('');
 
-  const headline = preview
-    ? `${d.drivers.length} driver${d.drivers.length === 1 ? '' : 's'} would receive a report`
-    : `${d.sentCount} driver${d.sentCount === 1 ? '' : 's'} received a report`;
-  const problems: string[] = [];
-  if (d.failedCount > 0) problems.push(`${d.failedCount} failed`);
-  if (d.notSentCount > 0) problems.push(`${d.notSentCount} not sent`);
+  const body = `
+    ${fleetTable(d)}
+    <div style="font:600 13px/1.4 ${FONT};color:${INK};margin:0 0 8px 0">Drivers (${shown.length})</div>
+    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse">
+      <tr>${head('Driver')}${head('Score', 'right')}${head('vs avg', 'right')}${head('Idle', 'right')}${head('vs last wk', 'right')}${head('Units')}${head('Phone')}${head('Email')}</tr>
+      ${rows}
+    </table>
+    <div style="font:12px/1.5 ${FONT};color:${MUTED};margin-top:16px">
+      Score combines idle, MPG and safety. "vs avg" compares this week's score with that driver's own trailing four week average. "vs last wk" is the change in idle against last week, in percentage points, where down is better.
+    </div>`;
 
-  // Only shown when the run itself broke. Not a judgement about the numbers,
-  // which is why it survives where the old "worth a look" section did not: a
-  // run that failed is a fact, and hiding it would make a broken week look calm.
-  const errorBox = d.errors.length
-    ? `<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 20px 0;border-collapse:collapse">
-        <tr><td style="border-left:3px solid ${BAD};padding:10px 14px;background:#fafafa">
-          <div style="font:600 13px/1.4 ${FONT};color:${INK};margin-bottom:6px">Run errors</div>
-          ${d.errors.map((e) => `<div style="font:14px/1.6 ${FONT};color:${INK}">${esc(e)}</div>`).join('')}
-        </td></tr>
-      </table>`
+  return shell(brand(d), `${d.weekStart} to ${d.weekEnd}`, previewBanner(preview && opts.hideTestBanner !== true), body);
+}
+
+/**
+ * The exceptions report. Everyone who did NOT get a report, and why, plus any
+ * error that broke the run. Kept apart from the clean report so that one stays
+ * forwardable: a document that lists both the sent and the unsent cannot be
+ * passed on without editing.
+ */
+export function formatExceptionsHtml(
+  d: WeeklyDigest,
+  opts: { preview?: boolean; hideTestBanner?: boolean } = {},
+): string {
+  const missed = missedDrivers(d, opts.preview === true);
+  const td = `${CELL};font:14px/1.5 ${FONT};color:${INK}`;
+
+  const errorBlock = d.errors.length
+    ? `<div style="font:600 13px/1.4 ${FONT};color:${INK};margin:0 0 8px 0">Run errors</div>
+       <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;margin-bottom:24px">
+         ${d.errors.map((e) => `<tr><td style="${td};color:${BAD}">${esc(e)}</td></tr>`).join('')}
+       </table>`
     : '';
 
-  return `<!doctype html><html><body style="margin:0;padding:0;background:#ffffff">
-  <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#ffffff">
-   <tr><td align="center" style="padding:24px 16px">
-    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="max-width:720px;text-align:left">
-      <tr><td>
-        ${preview ? `<div style="font:600 13px/1.5 ${FONT};color:${WARN};border:1px solid ${WARN};padding:8px 12px;margin-bottom:18px">TEST PREVIEW. Nothing was sent to any driver.</div>` : ''}
-        <div style="font:600 19px/1.3 ${FONT};color:${INK}">Weekly driver reports</div>
-        <div style="font:14px/1.5 ${FONT};color:${MUTED};margin:2px 0 18px 0">${esc(d.weekStart)} to ${esc(d.weekEnd)}</div>
-        <div style="font:15px/1.5 ${FONT};color:${INK};margin-bottom:22px">
-          ${esc(headline)}${problems.length ? `, <span style="color:${BAD}">${esc(problems.join(', '))}</span>` : ''}.
-        </div>
-        ${errorBox}
-        ${fleetTable(d)}
-        <div style="font:600 13px/1.4 ${FONT};color:${INK};margin:4px 0 8px 0">Drivers (${d.drivers.length})</div>
-        <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse">
-          <tr>
-            <th align="left" style="${th}">Driver</th>
-            <th align="right" style="${th}">Score</th>
-            <th align="right" style="${th}">vs avg</th>
-            <th align="right" style="${th}">Idle</th>
-            <th align="right" style="${th}">Miles</th>
-            <th align="left" style="${th}">Units</th>
-            <th align="left" style="${th}">Status</th>
-          </tr>
-          ${rows}
-        </table>
-        <div style="font:12px/1.5 ${FONT};color:${MUTED};margin-top:16px">
-          Score combines idle, MPG and safety. "vs avg" compares this week's score with that driver's own trailing four week average.
-        </div>
-      </td></tr>
-    </table>
-   </td></tr>
-  </table>
-  </body></html>`;
+  const rows = [...missed]
+    .sort((a, b) => a.displayName.localeCompare(b.displayName))
+    .map(
+      (dr) => `
+      <tr>
+        <td style="${td};white-space:nowrap">${esc(dr.displayName)}</td>
+        <td style="${td};color:${BAD}">${esc(missReason(dr))}</td>
+        <td style="${td};white-space:nowrap">${dr.phoneE164 ? esc(dr.phoneE164) : `<span style="color:${MUTED}">no phone</span>`}</td>
+        <td style="${td};overflow-wrap:anywhere">${dr.email ? esc(dr.email) : `<span style="color:${MUTED}">no email</span>`}</td>
+      </tr>`,
+    )
+    .join('');
+
+  const body = missed.length
+    ? `${errorBlock}
+       <div style="font:600 13px/1.4 ${FONT};color:${INK};margin:0 0 8px 0">Did not receive a report (${missed.length})</div>
+       <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse">
+         <tr>${head('Driver')}${head('Why')}${head('Phone')}${head('Email')}</tr>
+         ${rows}
+       </table>`
+    : `${errorBlock}<div style="font:14px/1.5 ${FONT};color:${GOOD}">Every driver received their report.</div>`;
+
+  return shell(
+    `${brand(d)}: exceptions`,
+    `${d.weekStart} to ${d.weekEnd}`,
+    previewBanner(opts.preview === true && opts.hideTestBanner !== true),
+    body,
+  );
 }

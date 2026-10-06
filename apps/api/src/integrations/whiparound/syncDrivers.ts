@@ -15,6 +15,7 @@
 
 import { parsePhoneNumber } from 'libphonenumber-js';
 import { getAppPrisma } from '../../lib/prisma.js';
+import { rosterImpliesSmsConsent, initialConsentFields } from '../../features/smsConsent/rosterConsent.js';
 import { DriverContactSource } from '../../generated/app-client/index.js';
 import { WhiparoundClient } from './client.js';
 import { dedupContactsByEmail } from './dedupContactsByEmail.js';
@@ -88,6 +89,9 @@ export async function syncWhiparoundDrivers(
   client: WhiparoundClient
 ): Promise<DriverSyncStepResult> {
   const prisma = getAppPrisma();
+  // Resolved once per sync: whether this customer's roster IS their consent
+  // record, which decides whether a newly synced driver starts reachable.
+  const rosterConsent = await rosterImpliesSmsConsent(clerkOrgId);
   const today = new Date().toISOString().slice(0, 10);
 
   let rawDrivers: RawDriver[];
@@ -299,6 +303,9 @@ export async function syncWhiparoundDrivers(
               source: DriverContactSource.WHIPAROUND_SYNC,
               enrolled: true,
               optedOut: false,
+              // Roster membership is the consent record for orgs that collect a
+              // signed form at enrollment. Otherwise this stays PENDING.
+              ...initialConsentFields(rosterConsent),
             },
           });
           newCount++;
@@ -316,6 +323,9 @@ export async function syncWhiparoundDrivers(
                 source: DriverContactSource.WHIPAROUND_SYNC,
                 enrolled: true,
                 optedOut: false,
+                // Roster membership is the consent record for orgs that collect a
+                // signed form at enrollment. Otherwise this stays PENDING.
+                ...initialConsentFields(rosterConsent),
               },
             });
             console.warn(

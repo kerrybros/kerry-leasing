@@ -67,6 +67,8 @@ export interface SendOrgResult {
    * could disagree with what the drivers were told.
    */
   digest: WeeklyDigestDriver[];
+  /** Customer-facing name for the subject line, e.g. "Wolverine". */
+  reportDisplayName?: string | null;
   /** Fleet totals for this week and the one before, for the digest header. */
   fleet?: { current: FleetTotals | null; previous: FleetTotals | null };
   error?: string;
@@ -83,11 +85,16 @@ export interface WeeklyDigestDriver {
   /** Current week minus their trailing four week average. */
   scoreVsAvg: number;
   idlePctPtsVsAvg: number;
+  /** Last week's idle percentage, or null when there is no prior week. */
+  idlePctLastWeek: number | null;
   /** Weeks of data behind the card. 1 means this is their first week. */
   weeksOfData: number;
   noActivity: boolean;
-  /** Trucks this driver was in over the week, busiest first. */
+  /** Units this driver was in over the week, busiest first. */
   vehicles: string[];
+  /** Printed on the clean report so the fleet admin can act without a lookup. */
+  phoneE164: string | null;
+  email: string | null;
   /** Why nothing was sent, when nothing was. */
   suppressedReason?: string;
 }
@@ -172,7 +179,7 @@ export async function sendOrgWeeklyReports(
 
   let built: Awaited<ReturnType<typeof buildWeeklyReports>>;
   try {
-    built = await buildWeeklyReports(clerkOrgId, options.now);
+    built = await buildWeeklyReports(clerkOrgId, options.now, { dryRun: options.dryRun === true });
     // Once an org is on Motive's dashboard report, every week on the card has
     // to come from it. A week that quietly falls back to the API puts a
     // 20-to-30 point idle error next to three correct weeks and makes the
@@ -196,6 +203,7 @@ export async function sendOrgWeeklyReports(
       driversNoConsent: 0,
       reports: [],
       digest: [],
+      reportDisplayName: null,
       fleet: { current: null, previous: null },
       error: `buildWeeklyReports failed: ${err.message ?? err}`,
     };
@@ -204,7 +212,7 @@ export async function sendOrgWeeklyReports(
   // Which channels does this org want? null/absent = SMS only.
   const cfg = await prisma.customerSmsReportConfig.findUnique({
     where: { clerkOrgId },
-    select: { channels: true },
+    select: { channels: true, reportDisplayName: true },
   });
   const channels = resolveChannels(cfg?.channels);
 
@@ -262,6 +270,7 @@ export async function sendOrgWeeklyReports(
     driversOptedOut: counters.optedOut,
     driversNoConsent: counters.noConsent,
     reports: out,
+    reportDisplayName: cfg?.reportDisplayName ?? null,
     fleet,
     digest: reportsToProcess
       .filter((r) => r.driverContactId)
@@ -276,9 +285,14 @@ export async function sendOrgWeeklyReports(
           totalMiles: r.current.totalMiles,
           scoreVsAvg: r.diffVsAvg.score,
           idlePctPtsVsAvg: r.diffVsAvg.idlePctPts,
+          // trend runs oldest to newest with the current week last, so the
+          // point before it is last week.
+          idlePctLastWeek: r.trend.length >= 2 ? r.trend[r.trend.length - 2].idlePct : null,
           weeksOfData: r.trend.length,
           noActivity: r.noActivity,
           vehicles: vehiclesByDriver.get(r.motiveDriverId) ?? [],
+          phoneE164: r.phoneE164,
+          email: r.email,
           suppressedReason: sent.length > 0 ? undefined : suppressionReason(r),
         };
       }),

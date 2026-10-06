@@ -11,6 +11,7 @@
 import { TelematicsService, type ScorecardDriver } from '../../services/telematicsService.js';
 import { normalizePhone } from '../drivers/phone.js';
 import { getAppPrisma } from '../../lib/prisma.js';
+import { rosterImpliesSmsConsent, initialConsentFields } from '../smsConsent/rosterConsent.js';
 import { DriverContactSource, DriverSmsConsentStatus } from '../../generated/app-client/index.js';
 import { getLastWeekRange, getTrailing4WeekRanges, type WeekRange } from './dateWindow.js';
 import { loadExcludedMotiveDriverIds } from '../drivers/excludedDrivers.js';
@@ -108,8 +109,18 @@ function normalizeName(name: string): string {
  * Build all weekly reports for an org. Also reconciles DriverContact by
  * upserting rows for any Motive driver names that don't yet have one.
  */
-export async function buildWeeklyReports(orgId: string, now: Date = new Date()): Promise<BuildWeeklyReportsResult> {
+export async function buildWeeklyReports(
+  orgId: string,
+  now: Date = new Date(),
+  opts: { dryRun?: boolean } = {},
+): Promise<BuildWeeklyReportsResult> {
   const prisma = getAppPrisma();
+  // A preview must not change the roster. This reconciles DriverContact as a
+  // side effect of building, so a dry run used to create real driver records:
+  // on 2026-10-06 a check run to confirm the send was safe added Brandon
+  // Stevenson seven seconds later, and he then appeared on that day's real send.
+  const dryRun = opts.dryRun === true;
+  const rosterConsent = await rosterImpliesSmsConsent(orgId);
   const last = getLastWeekRange(now);
   const trailing = getTrailing4WeekRanges(now);
 
@@ -265,17 +276,20 @@ export async function buildWeeklyReports(orgId: string, now: Date = new Date()):
     if (matchedByName || matchedById) {
       // If we matched by name but motiveDriverId is null, backfill it.
       if (matchedByName && !matchedByName.motiveDriverId) {
-        await prisma.driverContact.update({
-          where: { id: matchedByName.id },
-          data: { motiveDriverId: row.driverId },
-        });
+        if (!dryRun) {
+          await prisma.driverContact.update({
+            where: { id: matchedByName.id },
+            data: { motiveDriverId: row.driverId },
+          });
+        }
         matchedByName.motiveDriverId = row.driverId;
         byMotiveId.set(row.driverId, matchedByName as any);
       }
       continue;
     }
-    // No match — create
+    // No match, so create one.
     unmatchedDriverNames.push(row.driverName);
+    if (dryRun) continue;
     try {
       const created = await prisma.driverContact.create({
         data: {
@@ -288,6 +302,9 @@ export async function buildWeeklyReports(orgId: string, now: Date = new Date()):
           source: DriverContactSource.MOTIVE_AUTO,
           enrolled: true,
           optedOut: false,
+          // Where the roster IS the consent record, a new driver starts
+          // reachable instead of waiting for someone to notice and confirm.
+          ...initialConsentFields(rosterConsent),
         },
         select: {
           id: true,
