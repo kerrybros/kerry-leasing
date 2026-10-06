@@ -1173,6 +1173,11 @@ model CustomerSmsReportConfig {
   kpis        Json     // string[] of SAFETY | IDLE_PCT | MPG | MILES | HARD_EVENTS
   channels    Json?    // string[] of SMS | EMAIL. null/absent = ["SMS"] (backward compatible)
   sendHourEt  Int      @default(5) @map("send_hour_et") // 5..8 ET
+  /// True where the customer's drivers sign a written SMS consent form at
+  /// enrollment, so appearing on the roster IS the consent record. New contacts
+  /// auto-created from telematics are then born CONFIRMED instead of PENDING.
+  /// Defaults false: only honest where the signed forms are actually on file.
+  rosterImpliesSmsConsent Boolean @default(false) @map("roster_implies_sms_consent")
   lastSentAt  DateTime? @map("last_sent_at")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")

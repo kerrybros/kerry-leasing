@@ -172,7 +172,7 @@ export async function sendOrgWeeklyReports(
 
   let built: Awaited<ReturnType<typeof buildWeeklyReports>>;
   try {
-    built = await buildWeeklyReports(clerkOrgId, options.now);
+    built = await buildWeeklyReports(clerkOrgId, options.now, { dryRun: options.dryRun === true });
     // Once an org is on Motive's dashboard report, every week on the card has
     // to come from it. A week that quietly falls back to the API puts a
     // 20-to-30 point idle error next to three correct weeks and makes the
