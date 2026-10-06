@@ -178,11 +178,13 @@ export function formatWeeklyDigestText(d: WeeklyDigest): string {
   }
   const sent = sentDrivers(d);
   lines.push(`DRIVERS (${sent.length})`);
-  for (const dr of [...sent].sort((a, b) => b.score - a.score)) {
+  for (const dr of [...sent].sort((a, b) => (b.motiveSafetyScore ?? -1) - (a.motiveSafetyScore ?? -1))) {
     lines.push(
-      `  ${dr.displayName}: score ${dr.score.toFixed(0)} (${signed(dr.scoreVsAvg, 0)} vs avg), ` +
+      `  ${dr.displayName}: safety ${dr.motiveSafetyScore ?? '-'} ` +
+        `(${dr.motiveSafetyVsAvg == null ? 'new' : signed(dr.motiveSafetyVsAvg, 0) + ' vs avg'}), ` +
         `idle ${dr.idlePct.toFixed(1)}% (${dr.idlePctLastWeek == null ? 'new' : signed(dr.idlePct - dr.idlePctLastWeek, 1) + ' pts vs last week'}), ` +
-        `units ${dr.vehicles.join('/') || '-'}, ${dr.phoneE164 ?? 'no phone'}, ${dr.email ?? 'no email'}`,
+        `idle fuel ${dr.idleFuelGal.toFixed(1)} gal (${dr.idleFuelGalLastWeek == null ? 'new' : signed(dr.idleFuelGal - dr.idleFuelGalLastWeek, 1) + ' vs last week'}), units ${dr.vehicles.join('/') || '-'}, ` +
+        `${dr.phoneE164 ?? 'no phone'}, ${dr.email ?? 'no email'}`,
     );
   }
   return lines.join('\n');
@@ -232,10 +234,25 @@ function idleVsLastWeekCell(d: WeeklyDigestDriver): string {
   return `<span style="color:${diff < 0 ? GOOD : BAD}">${signed(diff, 1)} pts</span>`;
 }
 
-function deltaCell(d: WeeklyDigestDriver): string {
-  if (isNew(d)) return `<span style="color:${MUTED}">new</span>`;
-  if (Math.abs(d.scoreVsAvg) < 1) return `<span style="color:${MUTED}">level</span>`;
-  return `<span style="color:${d.scoreVsAvg > 0 ? GOOD : BAD}">${signed(d.scoreVsAvg, 0)}</span>`;
+/**
+ * Motive's safety score against the average of the earlier weeks on this card.
+ *
+ * Deliberately Motive's own number rather than anything we derive: the report
+ * has to be reconcilable against what Kerry sees in Motive, and a composite of
+ * our own invention sitting in a column headed "Score" was read as the safety
+ * score and did not match.
+ */
+function idleFuelVsLastWeekCell(d: WeeklyDigestDriver): string {
+  if (d.idleFuelGalLastWeek == null) return `<span style="color:${MUTED}">new</span>`;
+  const diff = d.idleFuelGal - d.idleFuelGalLastWeek;
+  if (Math.abs(diff) < 0.05) return `<span style="color:${MUTED}">level</span>`;
+  return `<span style="color:${diff < 0 ? GOOD : BAD}">${signed(diff, 1)}</span>`;
+}
+
+function safetyDeltaCell(d: WeeklyDigestDriver): string {
+  if (d.motiveSafetyVsAvg == null) return `<span style="color:${MUTED}">new</span>`;
+  if (Math.abs(d.motiveSafetyVsAvg) < 0.5) return `<span style="color:${MUTED}">level</span>`;
+  return `<span style="color:${d.motiveSafetyVsAvg > 0 ? GOOD : BAD}">${signed(d.motiveSafetyVsAvg, 0)}</span>`;
 }
 
 /** Every cell is ruled on all sides, so the grid reads as a grid. */
@@ -250,8 +267,20 @@ const CELL = `border:1px solid ${RULE};padding:7px 10px`;
  * widen instead. Letter-spacing is dropped for the same reason: it was pushing
  * borderline headings over the width at which they break.
  */
+const TH = `${CELL};font:600 11px/1.2 ${FONT};color:${MUTED};text-transform:uppercase;white-space:nowrap;background:#f6f7f8`;
+
 function head(label: string, align: 'left' | 'right' = 'left'): string {
-  return `<th align="${align}" style="${CELL};font:600 11px/1.2 ${FONT};color:${MUTED};text-transform:uppercase;white-space:nowrap;background:#f6f7f8">${esc(label)}</th>`;
+  return `<th align="${align}" style="${TH}">${esc(label)}</th>`;
+}
+
+/** A column that has no pair, so it spans both header rows. */
+function soloHead(label: string, align: 'left' | 'right' = 'left'): string {
+  return `<th rowspan="2" align="${align}" style="${TH};vertical-align:bottom">${esc(label)}</th>`;
+}
+
+/** The label over a pair of columns, e.g. "Idle %" over this week and vs last week. */
+function groupHead(label: string, span = 2): string {
+  return `<th colspan="${span}" align="center" style="${TH};color:${INK};letter-spacing:.03em">${esc(label)}</th>`;
 }
 
 function shell(title: string, sub: string, banner: string, body: string): string {
@@ -315,15 +344,17 @@ export function formatWeeklyDigestHtml(
   const td = `${CELL};font:14px/1.5 ${FONT};color:${INK}`;
 
   const rows = [...shown]
-    .sort((a, b) => b.score - a.score)
+    .sort((a, b) => (b.motiveSafetyScore ?? -1) - (a.motiveSafetyScore ?? -1))
     .map(
       (dr) => `
       <tr>
         <td style="${td};white-space:nowrap">${esc(dr.displayName)}${isNew(dr) ? ` <span style="font-size:11px;color:${MUTED}">NEW</span>` : ''}</td>
-        <td style="${td};text-align:right;font-weight:600;white-space:nowrap;color:${scoreColor(dr.score)}">${dr.score.toFixed(0)}</td>
-        <td style="${td};text-align:right;white-space:nowrap">${deltaCell(dr)}</td>
+        <td style="${td};text-align:right;font-weight:600;white-space:nowrap;color:${dr.motiveSafetyScore == null ? MUTED : scoreColor(dr.motiveSafetyScore)}">${dr.motiveSafetyScore == null ? '&mdash;' : dr.motiveSafetyScore.toFixed(0)}</td>
+        <td style="${td};text-align:right;white-space:nowrap">${safetyDeltaCell(dr)}</td>
         <td style="${td};text-align:right;white-space:nowrap">${dr.idlePct.toFixed(1)}%</td>
         <td style="${td};text-align:right;white-space:nowrap">${idleVsLastWeekCell(dr)}</td>
+        <td style="${td};text-align:right;white-space:nowrap">${dr.idleFuelGal.toFixed(1)}</td>
+        <td style="${td};text-align:right;white-space:nowrap">${idleFuelVsLastWeekCell(dr)}</td>
         <td style="${td};white-space:nowrap;color:${MUTED}">${dr.vehicles.length ? esc(dr.vehicles.join(', ')) : '&mdash;'}</td>
         <td style="${td};white-space:nowrap">${dr.phoneE164 ? esc(dr.phoneE164) : `<span style="color:${MUTED}">&mdash;</span>`}</td>
         <td style="${td};overflow-wrap:anywhere">${dr.email ? esc(dr.email) : `<span style="color:${MUTED}">&mdash;</span>`}</td>
@@ -335,11 +366,24 @@ export function formatWeeklyDigestHtml(
     ${fleetTable(d)}
     <div style="font:600 13px/1.4 ${FONT};color:${INK};margin:0 0 8px 0">Drivers (${shown.length})</div>
     <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse">
-      <tr>${head('Driver')}${head('Score', 'right')}${head('vs avg', 'right')}${head('Idle', 'right')}${head('vs last wk', 'right')}${head('Units')}${head('Phone')}${head('Email')}</tr>
+      <tr>
+        ${soloHead('Driver')}
+        ${groupHead('Motive safety')}
+        ${groupHead('Idle %')}
+        ${groupHead('Idle fuel (gal)')}
+        ${soloHead('Units')}
+        ${soloHead('Phone')}
+        ${soloHead('Email')}
+      </tr>
+      <tr>
+        ${head('Score', 'right')}${head('vs avg', 'right')}
+        ${head('This week', 'right')}${head('vs last wk', 'right')}
+        ${head('This week', 'right')}${head('vs last wk', 'right')}
+      </tr>
       ${rows}
     </table>
     <div style="font:12px/1.5 ${FONT};color:${MUTED};margin-top:16px">
-      Score combines idle, MPG and safety. "vs avg" compares this week's score with that driver's own trailing four week average. "vs last wk" is the change in idle against last week, in percentage points, where down is better.
+      Safety is Motive's own rolling four week safety score, shown exactly as Motive reports it. "vs avg" compares it with the average of the earlier weeks on this report. "vs last wk" is the change in idle against last week, in percentage points, where down is better.
     </div>`;
 
   return shell(brand(d), `${d.weekStart} to ${d.weekEnd}`, previewBanner(preview && opts.hideTestBanner !== true), body);

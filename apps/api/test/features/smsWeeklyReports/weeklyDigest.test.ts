@@ -16,6 +16,7 @@ import type { FleetTotals } from '../../../src/features/smsWeeklyReports/weeklyD
 const driver = (over: Partial<WeeklyDigestDriver> = {}): WeeklyDigestDriver => ({
   displayName: 'Tony Jones',
   channels: [{ channel: 'SMS' as any, status: 'DELIVERED' as any }],
+  motiveSafetyScore: 96, motiveSafetyVsAvg: 2, idleFuelGal: 12.4, idleFuelGalLastWeek: 15.0,
   score: 80, idlePct: 20, avgMpg: 7.3, totalMiles: 900,
   scoreVsAvg: 1, idlePctPtsVsAvg: -0.5, weeksOfData: 4, noActivity: false, vehicles: ['114'],
   phoneE164: '+13135550123', email: 'tony@wolverinepacking.com', idlePctLastWeek: 21,
@@ -270,7 +271,7 @@ describe('idle against last week', () => {
 
   it('shows the two metrics that matter, and drops the per-driver miles column', () => {
     const h = formatWeeklyDigestHtml(d(20.0, 18.0));
-    expect(h).toContain('>Score<');
+    expect(h).toContain('Motive safety');
     expect(h).toContain('>vs avg<');
     expect(h).toContain('>Idle<');
     expect(h).toContain('>vs last wk<');
@@ -326,5 +327,114 @@ describe('column headings do not break mid-word', () => {
       driver({ displayName: 'Amir', channels: [], suppressedReason: 'no phone' }),
     ])]));
     for (const th of html.match(/<th[^>]*>/g) ?? []) expect(th).toContain('white-space:nowrap');
+  });
+});
+
+describe('the report shows Motive safety, never a score of our own', () => {
+  // The composite (idle 40 / MPG 35 / safety 25) sat in a column headed
+  // "Score" and was read as the safety score. It did not match Motive, because
+  // it was never meant to be Motive's number.
+  it('prints Motive safety verbatim, not the composite', () => {
+    const h = formatWeeklyDigestHtml(
+      buildWeeklyDigest([org([driver({ motiveSafetyScore: 100, score: 85 })])]),
+    );
+    expect(h).toContain('>100<');
+    expect(h).not.toContain('>85<');
+  });
+
+  it('attributes the column to Motive, so the number can be reconciled there', () => {
+    const h = formatWeeklyDigestHtml(buildWeeklyDigest([org([driver()])]));
+    // "Score" survives as the sub-header beneath the "Motive safety" group.
+    // What must never return is OUR composite under a heading that reads as
+    // safety, which is the confusion this whole column came from.
+    expect(h).toContain('Motive safety');
+    expect(h).toContain("Motive's own rolling four week safety score");
+  });
+
+  it('says where the number comes from, so it can be reconciled in Motive', () => {
+    expect(formatWeeklyDigestHtml(buildWeeklyDigest([org([driver()])]))).toContain(
+      "Motive's own rolling four week safety score",
+    );
+  });
+
+  it('shows a dash when Motive has no score for a driver', () => {
+    const h = formatWeeklyDigestHtml(
+      buildWeeklyDigest([org([driver({ motiveSafetyScore: null, motiveSafetyVsAvg: null })])]),
+    );
+    expect(h).toContain('&mdash;');
+  });
+
+  it('ranks by the number it shows', () => {
+    const h = formatWeeklyDigestHtml(buildWeeklyDigest([org([
+      driver({ displayName: 'Lower', motiveSafetyScore: 70, score: 99 }),
+      driver({ displayName: 'Higher', motiveSafetyScore: 100, score: 10 }),
+    ])]));
+    expect(h.indexOf('Higher')).toBeLessThan(h.indexOf('Lower'));
+  });
+
+  it('compares against the earlier weeks, and says new when there are none', () => {
+    const up = formatWeeklyDigestHtml(buildWeeklyDigest([org([driver({ motiveSafetyVsAvg: 6 })])]));
+    expect(up).toContain('+6');
+    const none = formatWeeklyDigestHtml(buildWeeklyDigest([org([driver({ motiveSafetyVsAvg: null })])]));
+    expect(none).toMatch(/vs avg[\s\S]*?new/);
+  });
+});
+
+describe('the report mirrors the three tiles on the driver card', () => {
+  // The card shows exactly: Motive safety score, idle percentage, idle fuel.
+  // The report should show the same, because its job is to say what was sent.
+  it('carries safety, idle and idle fuel', () => {
+    const h = formatWeeklyDigestHtml(buildWeeklyDigest([org([driver({ idleFuelGal: 12.4 })])]));
+    expect(h).toContain('Motive safety');
+    expect(h).toContain('Idle %');
+    expect(h).toContain('Idle fuel (gal)');
+    expect(h).toContain('>12.4<');
+  });
+});
+
+describe('grouped column headers', () => {
+  const h = () => formatWeeklyDigestHtml(buildWeeklyDigest([org([driver()])]));
+
+  it('groups each metric over its own pair of columns', () => {
+    const html = h();
+    expect(html).toContain('colspan="2"');
+    for (const g of ['Motive safety', 'Idle %', 'Idle fuel (gal)']) expect(html).toContain(g);
+  });
+
+  it('labels the pairs underneath', () => {
+    const html = h();
+    expect(html).toContain('>Score<');
+    expect(html).toContain('>vs avg<');
+    expect(html).toContain('>This week<');
+    expect(html).toContain('>vs last wk<');
+  });
+
+  it('spans the unpaired columns across both header rows', () => {
+    const html = h();
+    expect(html).toContain('rowspan="2"');
+    for (const c of ['Driver', 'Units', 'Phone', 'Email']) expect(html).toContain(`>${c}<`);
+  });
+
+  it('keeps every heading on one line', () => {
+    for (const th of h().match(/<th[^>]*>/g) ?? []) expect(th).toContain('white-space:nowrap');
+  });
+});
+
+describe('idle fuel against last week', () => {
+  const d = (now: number, last: number | null) =>
+    formatWeeklyDigestHtml(buildWeeklyDigest([org([driver({ idleFuelGal: now, idleFuelGalLastWeek: last })])]));
+
+  it('reads less idle fuel as good', () => {
+    const h = d(10.0, 15.0);
+    expect(h).toContain('-5.0');
+    expect(h).toContain('#047857');
+  });
+
+  it('reads more idle fuel as bad', () => {
+    expect(d(20.0, 15.0)).toContain('+5.0');
+  });
+
+  it('says new when there is no prior week', () => {
+    expect(d(10.0, null)).toMatch(/Idle fuel[\s\S]*?new/);
   });
 });
