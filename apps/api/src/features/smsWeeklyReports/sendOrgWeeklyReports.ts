@@ -78,8 +78,16 @@ export interface SendOrgResult {
 export interface WeeklyDigestDriver {
   displayName: string;
   channels: Array<{ channel: ReportChannel; status: DriverSmsStatus; error?: string | null }>;
+  /** Motive's OWN rolling 4-week safety score, surfaced verbatim. */
+  motiveSafetyScore: number | null;
+  /** That score against the average of the earlier weeks on this card. */
+  motiveSafetyVsAvg: number | null;
   score: number;
   idlePct: number;
+  /** Gallons burned at idle. The third tile on the driver's own card. */
+  idleFuelGal: number;
+  /** Last week's idle fuel, or null when there is no prior week. */
+  idleFuelGalLastWeek: number | null;
   avgMpg: number;
   totalMiles: number;
   /** Current week minus their trailing four week average. */
@@ -279,8 +287,19 @@ export async function sendOrgWeeklyReports(
         return {
           displayName: r.displayName,
           channels: sent.map((o) => ({ channel: o.channel, status: o.status, error: o.error })),
+          motiveSafetyScore: r.motiveScore,
+          // Compared against the earlier weeks on the card, not a fleet average:
+          // the question is whether this driver improved on themselves.
+          motiveSafetyVsAvg: (() => {
+            const prior = r.trend.slice(0, -1).map((t) => t.motiveScore).filter((x): x is number => x != null);
+            if (r.motiveScore == null || prior.length === 0) return null;
+            return r.motiveScore - prior.reduce((a, b) => a + b, 0) / prior.length;
+          })(),
           score: r.current.score,
           idlePct: r.current.idlePct,
+          idleFuelGal: r.current.idleFuelGal,
+          idleFuelGalLastWeek:
+            r.trend.length >= 2 ? r.trend[r.trend.length - 2].idleFuelGal : null,
           avgMpg: r.current.avgMpg,
           totalMiles: r.current.totalMiles,
           scoreVsAvg: r.diffVsAvg.score,

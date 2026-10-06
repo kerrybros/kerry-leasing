@@ -30,6 +30,7 @@ import {
   formatExceptionsHtml,
   missedDrivers,
 } from '../features/smsWeeklyReports/weeklyDigest.js';
+import { buildDigestFromSends } from '../features/smsWeeklyReports/digestFromSends.js';
 import { sendMail, type GraphClientConfig } from '../integrations/microsoft/graphClient.js';
 import { CronJobType } from '../generated/app-client/index.js';
 
@@ -107,21 +108,40 @@ async function main() {
   // document that lands in the inbox. A report failure is caught and logged,
   // never allowed to fail the send: the drivers already have their cards.
   if (summary.orgResults.length > 0) {
-    const digest = buildWeeklyDigest(summary.orgResults);
-    const missed = missedDrivers(digest, dryRun);
+    let digest = buildWeeklyDigest(summary.orgResults);
+
+    // --final states what a week's drivers actually received, so it must read
+    // the frozen snapshots rather than this run's fresh build. Rebuilding was
+    // only ever right by coincidence: Motive's weekly safety refresh or a later
+    // portal pull landing between the send and the report would produce a
+    // document that disagreed with the cards it claims to describe.
+    if (finalRender) {
+      const first = summary.orgResults[0];
+      const fromSends = await buildDigestFromSends(first.clerkOrgId, first.weekStart, first.weekEnd);
+      if (fromSends.length === 0) {
+        console.error(
+          `[report] --final refused: no sends recorded for ${first.clerkOrgId} week ${first.weekStart}. ` +
+            'Run the real send first; a report claiming cards nobody received would be worse than none.',
+        );
+        process.exit(1);
+      }
+      digest = { ...digest, drivers: fromSends };
+      console.log(`[report] --final built from ${fromSends.length} stored send(s), not a fresh build`);
+    }
+    const missed = missedDrivers(digest, dryRun && !finalRender);
     const clean = {
-      subject: formatReportSubject(digest, { preview: dryRun }),
+      subject: formatReportSubject(digest, { preview: dryRun && !finalRender }),
       text: formatWeeklyDigestText(digest),
-      html: formatWeeklyDigestHtml(digest, { preview: dryRun, hideTestBanner: finalRender }),
+      html: formatWeeklyDigestHtml(digest, { preview: dryRun && !finalRender, hideTestBanner: finalRender }),
     };
     // Silence when nothing went wrong: an exceptions email that arrives every
     // week stops being read by the week it matters.
     const exceptions =
       missed.length > 0 || digest.errors.length > 0
         ? {
-            subject: formatExceptionsSubject(digest, { preview: dryRun }),
+            subject: formatExceptionsSubject(digest, { preview: dryRun && !finalRender }),
             text: missed.map((m) => `${m.displayName}: ${m.suppressedReason ?? 'not sent'}`).join('\n'),
-            html: formatExceptionsHtml(digest, { preview: dryRun, hideTestBanner: finalRender }),
+            html: formatExceptionsHtml(digest, { preview: dryRun && !finalRender, hideTestBanner: finalRender }),
           }
         : null;
 
