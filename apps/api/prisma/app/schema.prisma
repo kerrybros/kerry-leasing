@@ -1178,6 +1178,10 @@ model CustomerSmsReportConfig {
   /// auto-created from telematics are then born CONFIRMED instead of PENDING.
   /// Defaults false: only honest where the signed forms are actually on file.
   rosterImpliesSmsConsent Boolean @default(false) @map("roster_implies_sms_consent")
+  /// Customer-facing name used in the weekly report subject line, e.g.
+  /// "Wolverine" gives "Wolverine Weekly Driver Report". Null falls back to a
+  /// generic subject.
+  reportDisplayName String? @map("report_display_name")
   lastSentAt  DateTime? @map("last_sent_at")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")

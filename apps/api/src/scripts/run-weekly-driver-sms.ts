@@ -4,8 +4,16 @@
  *   pnpm exec tsx src/scripts/run-weekly-driver-sms.ts
  *   pnpm exec tsx src/scripts/run-weekly-driver-sms.ts --dry-run
  *   pnpm exec tsx src/scripts/run-weekly-driver-sms.ts --only-org=<clerkOrgId>
+ *   pnpm exec tsx src/scripts/run-weekly-driver-sms.ts --only-driver=<driverContactId>
  *   pnpm exec tsx src/scripts/run-weekly-driver-sms.ts --ignore-send-hour
  *   pnpm exec tsx src/scripts/run-weekly-driver-sms.ts --dry-run --email-digest
+ *   pnpm exec tsx src/scripts/run-weekly-driver-sms.ts --dry-run --email-digest --final
+ *
+ * --final drops the TEST banner and subject prefix so the clean report can be
+ * forwarded as the customer-facing document. It still sends nothing to drivers.
+ * Only use it once the real send for that week has actually run: the report
+ * lists the drivers who WOULD receive a card, so ahead of the send it would
+ * describe cards nobody has.
  *
  * --email-digest emails the operator digest even on a dry run. That is the only
  * way to exercise the digest's delivery path without texting every driver, so
@@ -15,9 +23,12 @@ import { runWeeklyDriverSms } from '../features/smsWeeklyReports/runWeeklyDriver
 import { recordTelematicsCronRun } from '../lib/telematicsCronRun.js';
 import {
   buildWeeklyDigest,
-  formatWeeklyDigestSubject,
+  formatReportSubject,
+  formatExceptionsSubject,
   formatWeeklyDigestText,
   formatWeeklyDigestHtml,
+  formatExceptionsHtml,
+  missedDrivers,
 } from '../features/smsWeeklyReports/weeklyDigest.js';
 import { sendMail, type GraphClientConfig } from '../integrations/microsoft/graphClient.js';
 import { CronJobType } from '../generated/app-client/index.js';
@@ -50,8 +61,12 @@ function parseArg(flag: string): string | true | null {
 async function main() {
   const dryRun = parseArg('--dry-run') !== null;
   const emailDigest = parseArg('--email-digest') !== null;
+  const finalRender = parseArg('--final') !== null;
   const ignoreSendHour = parseArg('--ignore-send-hour') !== null;
   const onlyOrgArg = parseArg('--only-org');
+  // Resend to one driver, for a card missed on the scheduled run.
+  const onlyDriverArg = parseArg('--only-driver');
+  const onlyDriverContactId = typeof onlyDriverArg === 'string' ? onlyDriverArg : undefined;
   const onlyOrgId = typeof onlyOrgArg === 'string' ? onlyOrgArg : undefined;
   const targetHourArg = parseArg('--target-hour');
   const targetHourEt = typeof targetHourArg === 'string' ? parseInt(targetHourArg, 10) : undefined;
@@ -61,7 +76,7 @@ async function main() {
       `dryRun=${dryRun} targetHourEt=${targetHourEt ?? '(none — all enabled orgs)'} ` +
       `onlyOrgId=${onlyOrgId ?? '(any)'}`,
   );
-  const summary = await runWeeklyDriverSms({ dryRun, ignoreSendHour, onlyOrgId, targetHourEt });
+  const summary = await runWeeklyDriverSms({ dryRun, ignoreSendHour, onlyOrgId, targetHourEt, onlyDriverContactId });
   console.log(JSON.stringify(summary, null, 2));
 
   // A dry run must never mark the job as having succeeded: the health watchdog
@@ -81,37 +96,66 @@ async function main() {
     }
   }
 
-  // Operator digest: who was sent what, who is new, what looks wrong. Printed
-  // on a dry run and emailed on a real one, so the preview is the same document
-  // that lands in the inbox. A digest failure must never fail the send itself:
-  // the drivers already have their reports by this point.
+  // Two reports, deliberately separate.
+  //
+  // The clean one lists only drivers who actually received a report, with no
+  // status column, because it is the document that gets forwarded onward:
+  // everything on it went out. The exceptions one carries whoever did not, and
+  // why. A single document holding both could not be passed on without editing.
+  //
+  // Printed on a dry run and emailed on a real one, so the preview is the same
+  // document that lands in the inbox. A report failure is caught and logged,
+  // never allowed to fail the send: the drivers already have their cards.
   if (summary.orgResults.length > 0) {
     const digest = buildWeeklyDigest(summary.orgResults);
-    const subject = formatWeeklyDigestSubject(digest, { preview: dryRun });
-    const text = formatWeeklyDigestText(digest);
-    // HTML is the real body: a text table collapses to gibberish in a mail
-    // client's proportional font. Text stays as the fallback.
-    const html = formatWeeklyDigestHtml(digest, { preview: dryRun });
+    const missed = missedDrivers(digest, dryRun);
+    const clean = {
+      subject: formatReportSubject(digest, { preview: dryRun }),
+      text: formatWeeklyDigestText(digest),
+      html: formatWeeklyDigestHtml(digest, { preview: dryRun, hideTestBanner: finalRender }),
+    };
+    // Silence when nothing went wrong: an exceptions email that arrives every
+    // week stops being read by the week it matters.
+    const exceptions =
+      missed.length > 0 || digest.errors.length > 0
+        ? {
+            subject: formatExceptionsSubject(digest, { preview: dryRun }),
+            text: missed.map((m) => `${m.displayName}: ${m.suppressedReason ?? 'not sent'}`).join('\n'),
+            html: formatExceptionsHtml(digest, { preview: dryRun, hideTestBanner: finalRender }),
+          }
+        : null;
+
     if (dryRun && !emailDigest) {
-      console.log(`\n[digest] (dry run, not emailed)\nSubject: ${subject}\n\n${text}`);
+      console.log(`\n[report] (dry run, not emailed)\nSubject: ${clean.subject}\n\n${clean.text}`);
+      console.log(
+        exceptions
+          ? `\n[exceptions] (dry run, not emailed)\nSubject: ${exceptions.subject}\n${exceptions.text}`
+          : '\n[exceptions] none: every driver received their report',
+      );
     } else if (graphConfig && reportEmailFrom && digestEmails.length > 0) {
-      try {
-        await sendMail(graphConfig, {
-          from: reportEmailFrom,
-          to: digestEmails,
-          subject: dryRun ? `[TEST, nothing sent to drivers] ${subject}` : subject,
-          text: dryRun
-            ? `This is a TEST digest from a dry run. No driver received anything.\n\n${text}`
-            : text,
-          html,
-        });
-        console.log(`[digest] emailed to ${digestEmails.join(', ')}`);
-      } catch (e: any) {
-        console.error(`[digest] failed to email digest: ${e?.message ?? e}`);
+      const prefix = dryRun && !finalRender ? '[TEST, nothing sent to drivers] ' : '';
+      for (const mail of [clean, exceptions]) {
+        if (!mail) continue;
+        try {
+          await sendMail(graphConfig, {
+            from: reportEmailFrom,
+            to: digestEmails,
+            subject: prefix + mail.subject,
+            text:
+              dryRun && !finalRender
+                ? `This is a TEST from a dry run. No driver received anything.\n\n${mail.text}`
+                : mail.text,
+            html: mail.html,
+          });
+          console.log(`[report] emailed "${mail.subject}" to ${digestEmails.join(', ')}`);
+        } catch (e: any) {
+          console.error(`[report] failed to email "${mail.subject}": ${e?.message ?? e}`);
+        }
       }
+      if (!exceptions) console.log('[exceptions] not emailed: every driver received their report');
     } else {
-      console.warn('[digest] not emailed: WEEKLY_DIGEST_EMAIL, REPORT_EMAIL_FROM or MICROSOFT_GRAPH_* not set');
-      console.log(`\n${subject}\n\n${text}`);
+      console.warn('[report] not emailed: WEEKLY_DIGEST_EMAIL, REPORT_EMAIL_FROM or MICROSOFT_GRAPH_* not set');
+      console.log(`\n${clean.subject}\n\n${clean.text}`);
     }
   }
 
