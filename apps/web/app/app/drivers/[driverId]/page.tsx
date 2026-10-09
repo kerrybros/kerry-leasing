@@ -4,7 +4,6 @@ import { useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useDriverUtilizationQuery, useVehicleUtilizationQuery, useFleetUnitsQuery, useOrgSettingsQuery, useDriverScorecardQuery } from '@/hooks/useDataQueries';
 import { Loader2, ArrowLeft } from 'lucide-react';
-import { computeDriverScore } from '@/lib/driverScore';
 import { KpiCard } from '@/components/KpiCard';
 import { Skeleton } from '@/components/Skeleton';
 import { EmptyState } from '@/components/EmptyState';
@@ -140,10 +139,9 @@ export default function DriverDetailPage() {
     const avgMpg = totalFuel > 0 && totalMiles > 0 ? totalMiles / totalFuel : 0;
     const driveTimeHours = totalDrivingTime / 3600;
     const drivingFuelGal = Math.max(0, totalFuel - totalIdleFuel);
-    const score = computeDriverScore({ idlePct, mpg: avgMpg, fleetAvgMpg, safetyScore: driverSafety });
     const idleTimeHrs = totalIdleTime / 3600;
     const engineTimeHrs = (totalIdleTime + totalDrivingTime) / 3600;
-    return { totalMiles, totalFuel, avgMpg, idlePct, totalIdleFuel, driveTimeHours, drivingFuelGal, idleTimeHrs, engineTimeHrs, score };
+    return { totalMiles, totalFuel, avgMpg, idlePct, totalIdleFuel, driveTimeHours, drivingFuelGal, idleTimeHrs, engineTimeHrs };
   }, [driverRecords, fleetAvgMpg, driverSafety]);
 
   const monthlyMetrics = useMemo((): MonthlyDriverMetrics[] => {
