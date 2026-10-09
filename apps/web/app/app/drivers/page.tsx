@@ -20,6 +20,8 @@ import type { DriverRow } from '@/features/drivers/types';
 
 type PageView = 'scorecard' | 'mom' | 'sms-preview';
 type Granularity = 'monthly' | 'weekly';
+// 'score' is our internal cost composite and is deliberately not a column:
+// it is not Motive's number and cannot be reconciled against Motive.
 type ColumnKey = keyof Omit<DriverRow, 'driverId' | 'driverName' | 'score' | 'safetyViolations'>;
 type SortKey = 'driverName' | ColumnKey;
 
@@ -34,6 +36,23 @@ const ALL_COLUMNS: {
   format: (v: number) => string;
   colorFn?: (v: number) => string;
 }[] = [
+  {
+    key: 'motiveSafetyScore',
+    label: 'Motive Safety Score',
+    shortLabel: 'Safety',
+    higherIsBetter: true,
+    // Motive's own rolling four week score, shown exactly as Motive reports it
+    // so the dashboard reconciles against Motive. A dash where Motive has none.
+    format: v => (v == null ? '-' : String(Math.round(v))),
+    colorFn: v =>
+      v == null
+        ? 'text-muted-foreground'
+        : v >= 90
+          ? ''
+          : v >= 70
+            ? 'text-amber-600 dark:text-amber-400 font-semibold'
+            : 'text-destructive font-semibold',
+  },
   {
     key: 'totalMiles',
     label: 'Miles Driven',
@@ -246,6 +265,15 @@ function usePopover() {
   return { open, setOpen, ref };
 }
 
+/**
+ * Explains the Safety column.
+ *
+ * This used to document our own composite (idle 40 / MPG 35 / safety 25). That
+ * number is real and cost-led, but it is not Motive's, so anyone comparing the
+ * dashboard against Motive found figures that did not reconcile. The dashboard
+ * now shows Motive's own score and this says exactly what it is, including the
+ * rolling window, which is the part most likely to confuse someone checking.
+ */
 function ScoreFormulaPopover() {
   const { open, setOpen, ref } = usePopover();
   return (
@@ -255,28 +283,29 @@ function ScoreFormulaPopover() {
         className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
       >
         <Info className="h-3.5 w-3.5" />
-        <span>Score formula</span>
+        <span>About the safety score</span>
       </button>
       {open && (
         <div className="absolute left-0 top-6 z-50 w-80 rounded-lg border border-border bg-popover text-popover-foreground shadow-lg p-4">
           <div className="flex items-start justify-between mb-3">
-            <h3 className="text-sm font-semibold">Composite Score (0–100)</h3>
+            <h3 className="text-sm font-semibold">Motive Safety Score</h3>
             <button onClick={() => setOpen(false)} className="text-muted-foreground hover:text-foreground cursor-pointer">
               <X className="h-3.5 w-3.5" />
             </button>
           </div>
-          <div className="flex flex-col gap-2 text-xs">
-            {[
-              { label: 'Idle %',       weight: '40%', desc: '0% idle → 100 pts · ≥50% idle → 0 pts (linear). Absorbs idle-fuel waste.' },
-              { label: 'MPG vs Fleet', weight: '35%', desc: 'Fleet average earns 60 pts; scaled proportionally' },
-              { label: 'Safety',       weight: '25%', desc: 'Per-mile, Motive-weighted event rate (speeding, tailgating, hard brake/corner, stop-sign…)' },
-            ].map(row => (
-              <div key={row.label} className="flex items-start gap-2">
-                <span className="w-20 shrink-0 font-semibold text-foreground">{row.label}</span>
-                <span className="w-8 shrink-0 tabular-nums text-primary font-semibold">{row.weight}</span>
-                <span className="text-muted-foreground">{row.desc}</span>
-              </div>
-            ))}
+          <div className="flex flex-col gap-2 text-xs text-muted-foreground">
+            <p>
+              Motive&apos;s own driver safety score, shown exactly as Motive reports it. Nothing here is
+              calculated by this dashboard, so it should match what you see in Motive.
+            </p>
+            <p>
+              It is a <span className="font-semibold text-foreground">rolling four week score</span> that
+              Motive refreshes weekly, not a score for the period you have selected. The value shown is
+              Motive&apos;s most recent refresh on or before the end of your date range.
+            </p>
+            <p>
+              A dash means Motive has no score for that driver, usually too little recent driving.
+            </p>
           </div>
         </div>
       )}
@@ -474,9 +503,8 @@ export default function ScorecardPage() {
       ? [
           'Driver',
           ...activeCols.flatMap(c => [`${c.label} (${prevColLabel})`, `${c.label} (${curColLabel})`]),
-          'Score',
         ]
-      : ['Driver', ...activeCols.map(c => c.label), 'Score'];
+      : ['Driver', ...activeCols.map(c => c.label)];
     const rows = sorted.map(row => {
       const prev = showComparison ? prevMap.get(row.driverId) : undefined;
       const cells = showComparison
@@ -488,7 +516,7 @@ export default function ScorecardPage() {
             ];
           })
         : activeCols.map(c => clean(c.format(row[c.key] as number)));
-      return [row.driverName, ...cells, row.score.toFixed(0)];
+      return [row.driverName, ...cells];
     });
     const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
     const filename = `scorecard-${currentPeriod.label.replace(/\s/g, '-').toLowerCase()}.csv`;

@@ -105,6 +105,7 @@ function sumsToRow(
     estimatedFuelCost: Math.round(sums.totalFuel * dieselPrice),
     safetyViolations: 0,
     hardEvents: 0,
+    motiveSafetyScore: null,
     score,
   };
 }
@@ -158,17 +159,28 @@ export function useDriversData(startDate: string, endDate: string, scorecardEnab
     const grouped = buildDriverSums(periodRecords);
     const hardEventsMap = new Map<number, number>();
     const safetyMap = new Map<number, number>();
+    const motiveSafetyMap = new Map<number, number>();
     scorecardQuery.data?.data.forEach(d => {
       hardEventsMap.set(d.driverId, d.hardEvents ?? 0);
       if (typeof d.subScores?.safety === 'number') safetyMap.set(d.driverId, d.subScores.safety);
+      if (typeof d.motiveSafetyScore === 'number') motiveSafetyMap.set(d.driverId, d.motiveSafetyScore);
     });
     return Array.from(grouped.values())
       .map(sums => {
         const row = sumsToRow(sums, fleetAvgMpg, dieselPrice, safetyMap.get(sums.driverId));
         row.hardEvents = hardEventsMap.get(sums.driverId) ?? 0;
+        row.motiveSafetyScore = motiveSafetyMap.get(sums.driverId) ?? null;
         return row;
       })
-      .sort((a, b) => b.score - a.score);
+      // Ranked by the number we display: Motive's safety score. Drivers Motive
+      // has no score for sort last rather than being treated as zero. Equal
+      // safety is common (many drivers sit at 100), so idle breaks the tie,
+      // lower first: it is the cost lever and the next most useful ordering.
+      .sort((a, b) => {
+        const av = a.motiveSafetyScore ?? -1;
+        const bv = b.motiveSafetyScore ?? -1;
+        return bv !== av ? bv - av : a.idlePct - b.idlePct;
+      });
   }, [periodRecords, fleetAvgMpg, scorecardQuery.data]);
 
   // Last 12 calendar months (oldest → newest) for the MoM view

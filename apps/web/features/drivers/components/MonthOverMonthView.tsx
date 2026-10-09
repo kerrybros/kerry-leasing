@@ -15,7 +15,6 @@ import type { MonthlyDriverData, WeeklyDriverData } from '@/features/drivers/hoo
 import type { DriverRow } from '@/features/drivers/types';
 
 const KPI_OPTIONS = [
-  { id: 'score' as const,              label: 'Score' },
   { id: 'avgMpg' as const,             label: 'MPG' },
   { id: 'idlePct' as const,            label: 'Idle %' },
   { id: 'driveTimeHrs' as const,       label: 'Drive (hrs)' },
@@ -28,14 +27,18 @@ const KPI_OPTIONS = [
 ] as const;
 
 type KpiId = (typeof KPI_OPTIONS)[number]['id'];
-const DEFAULT_KPIS: KpiId[] = ['score', 'avgMpg', 'idlePct', 'driveTimeHrs', 'totalMiles'];
+// No composite score here. Period Trends used to default to our own cost-led
+// score, which is not Motive's number and cannot be reconciled against Motive.
+// A Motive safety trend needs Motive's score as of each period end, which is a
+// separate piece of work; until then the trends show the measures that do
+// reconcile: MPG, idle, driving time and miles.
+const DEFAULT_KPIS: KpiId[] = ['avgMpg', 'idlePct', 'driveTimeHrs', 'totalMiles'];
 const STORAGE_KEY_PREFIX = 'kl_mom_kpis';
 
 function formatKpiValue(kpiId: KpiId, row: DriverRow): string {
   const v = row[kpiId as keyof DriverRow] as number;
   if (v === undefined || v === null) return '—';
   switch (kpiId) {
-    case 'score':             return String(Math.round(v));
     case 'avgMpg':            return v.toFixed(2);
     case 'idlePct':           return v.toFixed(1) + '%';
     case 'driveTimeHrs':      return v.toFixed(1);
@@ -109,11 +112,13 @@ export function MonthOverMonthView({
     return Array.from((byDriver as Map<number, MonthlyDriverData | WeeklyDriverData>).entries())
       .map(([driverId, data]) => {
         const rows = getPeriodRows(data);
-        const scores = Array.from(rows.values()).map(r => r.score);
-        const avgScore = scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
-        return { driverId, avgScore };
+        // Ordered by average idle, lowest first: the cost lever, and a figure
+        // that reconciles against Motive. Previously ordered by our composite.
+        const idles = Array.from(rows.values()).map(r => r.idlePct);
+        const avgIdle = idles.length > 0 ? idles.reduce((a, b) => a + b, 0) / idles.length : 0;
+        return { driverId, avgIdle };
       })
-      .sort((a, b) => b.avgScore - a.avgScore)
+      .sort((a, b) => a.avgIdle - b.avgIdle)
       .map(d => d.driverId);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [byDriver, granularity]);

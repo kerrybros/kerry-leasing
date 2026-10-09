@@ -132,6 +132,13 @@ export type ScorecardDriver = {
   driverId: number;
   driverName: string;
   rank: number;
+  /**
+   * Motive's OWN rolling four week safety score, as Motive reports it, anchored
+   * to the end of the requested range. This is what the dashboard displays, so
+   * the figures reconcile against Motive. Null when Motive has no score.
+   */
+  motiveSafetyScore: number | null;
+  /** Our internal cost composite. Not displayed: it cannot be reconciled in Motive. */
   score: number;
   grade: string;
   totalMiles: number;

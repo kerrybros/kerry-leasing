@@ -639,6 +639,8 @@ export class TelematicsService {
       return {
         driverId,
         driverName: d.driverName,
+        // Filled in after scoring for Motive orgs; Samsara has no Motive score.
+        motiveSafetyScore: null,
         score,
         grade,
         totalMiles: Math.round(d.totalMiles * 100) / 100,
@@ -659,7 +661,15 @@ export class TelematicsService {
       };
     });
 
-    // 7. Rank by score descending
+    // 7. Attach Motive's own safety score, anchored to the end of the range.
+    //    Motive publishes a ROLLING four week score refreshed weekly, not a
+    //    score for an arbitrary window, so the honest value for any range is
+    //    the latest refresh at or before its end date. That is the number a
+    //    fleet manager sees if they open that driver in Motive.
+    const motiveSafety = await this.motiveSafetyScoresAsOf(orgId, endDate);
+    for (const d of scored) d.motiveSafetyScore = motiveSafety.get(d.driverId) ?? null;
+
+    // 8. Rank by score descending
     scored.sort((a, b) => b.score - a.score);
     scored.forEach((d, i) => { (d as any).rank = i + 1; });
 
@@ -680,6 +690,27 @@ export class TelematicsService {
    * motiveDriverId get a stable negative synthetic id so they still appear on
    * the card (the ingest log lists them for follow-up).
    */
+
+  /**
+   * Motive's own safety score per driver, as of a date: the latest stored
+   * refresh at or before it. Motive's score is a rolling four week window
+   * refreshed weekly, so there is no such thing as a score "for" an arbitrary
+   * range; this is the value Motive itself would show on that date.
+   */
+  private async motiveSafetyScoresAsOf(orgId: string, asOf: string): Promise<Map<number, number>> {
+    const rows = await getAppPrisma().motiveScorecardSummary.findMany({
+      where: { clerkOrgId: orgId, date: { lte: asOf }, score: { not: null } },
+      select: { driverId: true, date: true, score: true },
+      orderBy: { date: 'desc' },
+    });
+    const out = new Map<number, number>();
+    for (const r of rows) {
+      if (r.driverId == null || r.score == null) continue;
+      if (!out.has(r.driverId)) out.set(r.driverId, r.score); // date-desc, so first wins
+    }
+    return out;
+  }
+
   private async aggregateMotiveReport(
     orgId: string,
     coverage: ReportCoverage
@@ -963,6 +994,8 @@ export class TelematicsService {
       return {
         driverId,
         driverName: d.driverName,
+        // Filled in after scoring for Motive orgs; Samsara has no Motive score.
+        motiveSafetyScore: null,
         score,
         grade,
         totalMiles: Math.round(d.totalMiles * 100) / 100,
@@ -998,6 +1031,20 @@ export interface ScorecardDriver {
   driverId: number;
   driverName: string;
   rank?: number;
+  /**
+   * Motive's OWN rolling four week safety score, as Motive reports it, anchored
+   * to the end of the requested range. This is the score the dashboard shows,
+   * because the dashboard has to reconcile against Motive. Null when Motive has
+   * no score for that driver.
+   */
+  motiveSafetyScore: number | null;
+  /**
+   * Our cost-led composite (idle 40 / MPG 35 / safety 25). Retained for ranking
+   * and for anything that needs a single cost signal, but it is NOT shown to
+   * users as "the score": it is not Motive's number and cannot be reconciled
+   * against Motive, which is exactly how it came to be mistaken for a safety
+   * score on the weekly report.
+   */
   score: number;
   grade: string;
   totalMiles: number;

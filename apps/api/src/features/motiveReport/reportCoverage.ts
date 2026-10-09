@@ -53,7 +53,19 @@ export async function resolveReportCoverage(
 ): Promise<ReportCoverage | null> {
   const prisma = getAppPrisma();
   const ingests = await prisma.motiveReportIngest.findMany({
-    where: { clerkOrgId, status: 'ACCEPTED', windowStart: { gte: startDate }, windowEnd: { lte: endDate } },
+    // UNVERIFIED counts: such a day is one where Motive's report omits a driver
+    // the API says worked, 5 days in 15 months. Excluding them dropped whole
+    // ranges back to the API, which inflates idle on yard trucks for EVERY
+    // driver in the range. The dashboard has to reconcile against Motive, and
+    // the API cannot. The weekly send keeps its own stricter guard
+    // (assertReportBackedOrThrow) so a driver card is never built on a week
+    // whose report is missing someone.
+    where: {
+      clerkOrgId,
+      status: { in: ['ACCEPTED', 'UNVERIFIED'] },
+      windowStart: { gte: startDate },
+      windowEnd: { lte: endDate },
+    },
     select: { windowStart: true, windowEnd: true },
     distinct: ['windowStart', 'windowEnd'],
   });
