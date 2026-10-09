@@ -23,6 +23,12 @@ export type OrgSettings = {
   brandColorPreset: BrandColorPreset | null;
   dieselPricePerGallon: number | null;
   hasWhiparound: boolean;
+  /**
+   * Newest day we hold a Motive dashboard report file for (YYYY-MM-DD), or null.
+   * Date ranges are clamped to this: asking for a day with no report drops the
+   * whole range to the API, which inflates idle on yard trucks.
+   */
+  reportCoverageThrough: string | null;
 };
 
 export type VehicleUtilization = {
