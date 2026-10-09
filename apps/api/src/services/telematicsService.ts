@@ -15,7 +15,7 @@ import { TelematicsProvider } from '../telematics/types.js';
 import { cacheGetOrSet } from '../lib/redis.js';
 import { config } from '../config.js';
 import { SAFETY_EVENT_WEIGHTS, weightedEventTotal, safetyScoreFromRate, type NormalizedSafetyEvent } from './safetyScore.js';
-import { resolveReportCoverage, latestReportIngestToken, type ReportCoverage } from '../features/motiveReport/reportCoverage.js';
+import { resolveReportCoverage, resolveDailyReportCoverage, latestReportIngestToken, type ReportCoverage } from '../features/motiveReport/reportCoverage.js';
 import { mapSamsaraBehavior } from '../telematics/samsara/behaviorLabelMap.js';
 
 const CACHE_TTL_SECS = 7200; // 2 hours — nightly sync invalidates anyway
@@ -202,12 +202,13 @@ export class TelematicsService {
   ): Promise<NormalizedDriverRecord[]> {
     const appPrisma = getAppPrisma();
 
-    // Report-first (see _fetchDriverScorecard): when the range is tiled by
-    // DAILY report files, emit one record per driver per day from the report
-    // so the drivers page agrees with the scorecard. Weekly/monthly windows
-    // cannot be split into days, so those ranges stay on the API rows.
-    const coverage = await resolveReportCoverage(orgId, startDate, endDate);
-    if (coverage && coverage.windows.every((w) => w.windowStart === w.windowEnd)) {
+    // Report-first, asking the question this page actually needs: is every day
+    // in the range covered by its own daily file? The general tiler prefers the
+    // WIDEST window, so once weekly and monthly files existed the old check
+    // ("are all the chosen tiles single days?") failed and every range fell
+    // back to the API, the source that inflates idle on yard trucks.
+    const coverage = await resolveDailyReportCoverage(orgId, startDate, endDate);
+    if (coverage) {
       return this.getMotiveDriverUtilizationFromReport(orgId, coverage);
     }
 
