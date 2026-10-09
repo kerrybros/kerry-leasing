@@ -124,7 +124,26 @@ export function useDriversData(startDate: string, endDate: string, scorecardEnab
   const tracksDrivers = orgSettings?.tracksDrivers === true;
   const canShow = (isMotive || isSamsara) && tracksDrivers;
 
-  const driverUtilQuery = useDriverUtilizationQuery(canShow);
+  // Fetch the window this page actually needs, not "everything".
+  //
+  // This used to request no range at all, which the API defaults to
+  // 2020-01-01..today. No Motive report can cover that, so for a customer whose
+  // driver figures must come from the report the response was correctly empty,
+  // and the table and trends rendered blank. Ask for the span the page renders:
+  // the 12 month trend window through the selected end date, which the report
+  // does cover.
+  const fetchStart = useMemo(() => {
+    const now = new Date();
+    const oldestMonth = new Date(now.getFullYear(), now.getMonth() - 11, 1);
+    const oldestWeek = new Date(now);
+    oldestWeek.setDate(now.getDate() - ((now.getDay() + 6) % 7) - 15 * 7);
+    const oldest = oldestMonth < oldestWeek ? oldestMonth : oldestWeek;
+    const asStr = localDateStr(oldest);
+    // Never ask for data older than the range being displayed.
+    return asStr < startDate ? asStr : startDate;
+  }, [startDate]);
+
+  const driverUtilQuery = useDriverUtilizationQuery(canShow, fetchStart, endDate);
   const scorecardQuery = useDriverScorecardQuery(canShow && scorecardEnabled, startDate, endDate);
   const fleetUnitsQuery = useFleetUnitsQuery();
   const vehicleUtilQuery = useVehicleUtilizationQuery();
