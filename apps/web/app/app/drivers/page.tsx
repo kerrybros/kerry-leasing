@@ -430,8 +430,25 @@ export default function ScorecardPage() {
     });
   }
 
-  const months = useMemo(generateMonths, []);
-  const weeks = useMemo(generateWeeks, []);
+  const allMonths = useMemo(generateMonths, []);
+  const allWeeks = useMemo(generateWeeks, []);
+
+  // Hide periods that start before our Motive report data does. For a
+  // report-only customer there is nothing to show before then (it predates
+  // their onboarding), and offering the period would land them on an empty
+  // page. Only applied where the report is the sole permitted source; other
+  // customers still have API history further back.
+  const settingsForRange = useOrgSettingsQuery().data;
+  const coverageFrom =
+    settingsForRange?.requireReportBackedDriverData ? (settingsForRange.reportCoverageFrom ?? null) : null;
+  const months = useMemo(
+    () => (coverageFrom ? allMonths.filter(m => m.start >= coverageFrom) : allMonths),
+    [allMonths, coverageFrom],
+  );
+  const weeks = useMemo(
+    () => (coverageFrom ? allWeeks.filter(w => w.start >= coverageFrom) : allWeeks),
+    [allWeeks, coverageFrom],
+  );
 
   const [selectedMonthKey, setSelectedMonthKey] = useState<string>(
     () => months[months.length - 1].key
@@ -463,7 +480,7 @@ export default function ScorecardPage() {
   // the window is clamped to it. "Yesterday" alone is not safe: yesterday's
   // file only lands when the nightly pull runs, so before that the freshest
   // complete day is older still.
-  const coverageThrough = useOrgSettingsQuery().data?.reportCoverageThrough ?? null;
+  const coverageThrough = settingsForRange?.reportCoverageThrough ?? null;
   const effectiveEnd = useMemo(() => {
     if (!coverageThrough) return cmpRanges.curEnd;
     const end = coverageThrough < cmpRanges.curEnd ? coverageThrough : cmpRanges.curEnd;
