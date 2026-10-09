@@ -551,8 +551,19 @@ router.get(
         select: { id: true },
       });
 
-      // Fetch diesel price in parallel — non-blocking, falls back to cached/hardcoded
+      // Fetch diesel price in parallel, non-blocking, falls back to cached/hardcoded
       const dieselPricePerGallon = await getDieselPricePerGallon();
+
+      // The newest day we hold a Motive dashboard report file for. The client
+      // clamps its date range to this, because asking for a day with no report
+      // drops the WHOLE range to the API, which inflates idle on yard trucks.
+      // "Yesterday" is not a safe assumption: yesterday's file only lands when
+      // the pull runs, so before that the freshest complete day is older.
+      const newestReportDay = await appPrisma.motiveReportIngest.findFirst({
+        where: { clerkOrgId, granularity: 'DAY', status: { in: ['ACCEPTED', 'UNVERIFIED'] } },
+        orderBy: { windowStart: 'desc' },
+        select: { windowStart: true },
+      });
 
       res.json({
         tracksDrivers: settings?.tracksDrivers ?? true,
@@ -568,6 +579,7 @@ router.get(
         brandColorPreset: settings?.brandColorPreset ?? null,
         dieselPricePerGallon,
         hasWhiparound: !!whiparoundAccount,
+        reportCoverageThrough: newestReportDay?.windowStart ?? null,
       });
     } catch (error) {
       console.error('Error fetching org settings:', error);

@@ -14,6 +14,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { useDriversData } from '@/features/drivers/hooks/useDriversData';
+import { useOrgSettingsQuery } from '@/hooks/useDataQueries';
 import { MonthOverMonthView } from '@/features/drivers/components/MonthOverMonthView';
 import { SmsPreviewView } from '@/features/drivers/components/SmsPreviewView';
 import type { DriverRow } from '@/features/drivers/types';
@@ -35,12 +36,20 @@ const ALL_COLUMNS: {
   higherIsBetter: boolean;
   format: (v: number) => string;
   colorFn?: (v: number) => string;
+  /** Hover text on the column header, for a figure that needs explaining. */
+  tooltip?: string;
 }[] = [
   {
     key: 'motiveSafetyScore',
     label: 'Motive Safety Score',
     shortLabel: 'Safety',
     higherIsBetter: true,
+    tooltip:
+      "Motive's own driver safety score, shown exactly as Motive reports it. " +
+      'It is a rolling 4 week score that Motive refreshes weekly, not a score for ' +
+      'the period selected here, so the value shown is Motive\'s most recent refresh ' +
+      'on or before the end of your date range. A dash means Motive has no score for ' +
+      'that driver.',
     // Motive's own rolling four week score, shown exactly as Motive reports it
     // so the dashboard reconciles against Motive. A dash where Motive has none.
     format: v => (v == null ? '-' : String(Math.round(v))),
@@ -449,6 +458,25 @@ export default function ScorecardPage() {
     [cmpRanges.prevStart, granularity]
   );
 
+  // Where our Motive report files actually stop. Asking for a day beyond this
+  // drops the WHOLE range to the API, which inflates idle on yard trucks, so
+  // the window is clamped to it. "Yesterday" alone is not safe: yesterday's
+  // file only lands when the nightly pull runs, so before that the freshest
+  // complete day is older still.
+  const coverageThrough = useOrgSettingsQuery().data?.reportCoverageThrough ?? null;
+  const effectiveEnd = useMemo(() => {
+    if (!coverageThrough) return cmpRanges.curEnd;
+    const end = coverageThrough < cmpRanges.curEnd ? coverageThrough : cmpRanges.curEnd;
+    // Never clamp past the start of the selected period.
+    return end < cmpRanges.curStart ? cmpRanges.curStart : end;
+  }, [coverageThrough, cmpRanges.curEnd, cmpRanges.curStart]);
+
+  // Query the window that actually has data, not the whole calendar period.
+  // The current month ends in the FUTURE, and asking for dates that have not
+  // happened meant report coverage could never resolve for the default view:
+  // every user landed on API figures, which inflate idle on yard trucks. The
+  // capped end is yesterday, the freshest complete telematics day, and since no
+  // data exists beyond it the numbers shown are unchanged.
   const {
     organization,
     orgLoaded,
@@ -462,7 +490,7 @@ export default function ScorecardPage() {
     weeklyByDriver,
     isLoading,
     isRefetching,
-  } = useDriversData(currentPeriod.start, currentPeriod.end);
+  } = useDriversData(cmpRanges.curStart, effectiveEnd);
 
   const { driverRows: prevDriverRows } = useDriversData(cmpRanges.prevStart, cmpRanges.prevEnd, showComparison);
 
@@ -745,20 +773,22 @@ export default function ScorecardPage() {
                         </TableHead>,
                         <TableHead
                           key={`${col.key}:cur`}
+                          title={col.tooltip}
                           className="text-muted-foreground font-semibold uppercase tracking-wide text-[10px] px-3 py-2 h-auto cursor-pointer select-none whitespace-nowrap text-right border-r border-border"
                           onClick={() => handleSort(col.key)}
                         >
-                          {col.shortLabel}<SortIcon k={col.key} />
+                          {col.shortLabel}{col.tooltip ? <Info className="inline h-3 w-3 ml-1 opacity-60 align-[-1px]" /> : null}<SortIcon k={col.key} />
                           <span className="block text-[9px] font-normal normal-case opacity-70">{curColLabel}</span>
                         </TableHead>,
                       ]
                     ) : (
                       <TableHead
                         key={col.key}
+                        title={col.tooltip}
                         className="text-muted-foreground font-semibold uppercase tracking-wide text-[10px] px-3 py-2 h-auto cursor-pointer select-none whitespace-nowrap"
                         onClick={() => handleSort(col.key)}
                       >
-                        {col.shortLabel}<SortIcon k={col.key} />
+                        {col.shortLabel}{col.tooltip ? <Info className="inline h-3 w-3 ml-1 opacity-60 align-[-1px]" /> : null}<SortIcon k={col.key} />
                       </TableHead>
                     )
                   )}
