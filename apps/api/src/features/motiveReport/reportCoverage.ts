@@ -71,3 +71,56 @@ export async function latestReportIngestToken(clerkOrgId: string): Promise<strin
   });
   return latest ? String(latest.createdAt.getTime()) : 'none';
 }
+
+/**
+ * Coverage for a range using ONLY single-day report files.
+ *
+ * The greedy tiler deliberately prefers the widest window available, because a
+ * weekly or monthly export carries Motive's retroactive edits. That is right
+ * for a total, and wrong for anything that needs a value PER DAY: a week-long
+ * file cannot be split back into days.
+ *
+ * The drivers page needs per-day rows, and it used to accept the normal tiling
+ * and then check whether every window happened to be one day. Once weekly and
+ * monthly files existed for a period, that check failed and the whole range
+ * silently dropped to the API, which is the source that under-counts low speed
+ * driving and inflates idle on yard trucks by 20 to 30 points. The 90 day
+ * backfill made it worse, because more files meant wider tiles were chosen.
+ *
+ * So ask the question directly: is every day in this range covered by its own
+ * daily file? If any day is missing, return null and let the caller fall back
+ * honestly rather than serve a mix.
+ *
+ * UNVERIFIED days count here, and only here. A day is marked UNVERIFIED when
+ * Motive's report omits a driver the API says worked, which over 15 months of
+ * backfill happened on 5 days out of 365. Excluding them would drop any range
+ * spanning one back to the API, making idle wrong for EVERY driver in it to
+ * avoid one driver missing a single row: about 0.05% of driver-days traded for
+ * 100% of them. The scorecard and the weekly send still demand ACCEPTED, since
+ * there a missing driver changes what someone is told about themselves.
+ */
+export async function resolveDailyReportCoverage(
+  clerkOrgId: string,
+  startDate: string,
+  endDate: string
+): Promise<ReportCoverage | null> {
+  if (startDate > endDate) return null;
+  const prisma = getAppPrisma();
+  const ingests = await prisma.motiveReportIngest.findMany({
+    where: {
+      clerkOrgId,
+      status: { in: ['ACCEPTED', 'UNVERIFIED'] },
+      granularity: 'DAY',
+      windowStart: { gte: startDate, lte: endDate },
+    },
+    select: { windowStart: true, windowEnd: true },
+    distinct: ['windowStart'],
+  });
+  const have = new Set(ingests.filter((i) => i.windowStart === i.windowEnd).map((i) => i.windowStart));
+  const windows: ReportCoverage['windows'] = [];
+  for (let d = startDate; d <= endDate; d = addDays(d, 1)) {
+    if (!have.has(d)) return null;
+    windows.push({ windowStart: d, windowEnd: d });
+  }
+  return { windows };
+}

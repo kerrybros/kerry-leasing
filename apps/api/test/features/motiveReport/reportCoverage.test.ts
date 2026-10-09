@@ -37,3 +37,32 @@ describe('tileRange', () => {
     expect(tileRange('2026-09-07', '2026-09-10', [W('2026-09-07', '2026-09-13')])).toBeNull();
   });
 });
+
+describe('resolveDailyReportCoverage (per-day surfaces)', () => {
+  // The drivers page needs a value PER DAY, so a weekly file is no use to it
+  // even though the general tiler prefers one. Asking "are all the chosen
+  // tiles single days?" failed as soon as weekly files existed, dropping the
+  // whole range to the API that inflates idle on yard trucks.
+  it('is a different question from general coverage', () => {
+    const available = [
+      { windowStart: '2026-09-21', windowEnd: '2026-09-27' }, // a week
+      ...['21', '22', '23', '24', '25', '26', '27'].map((d) => ({
+        windowStart: `2026-09-${d}`,
+        windowEnd: `2026-09-${d}`,
+      })),
+    ];
+    // General tiling prefers the week: one tile, not seven.
+    const general = tileRange('2026-09-21', '2026-09-27', available);
+    expect(general!.windows).toHaveLength(1);
+    expect(general!.windows[0].windowEnd).toBe('2026-09-27');
+  });
+
+  it('a range is only daily-covered when every single day has its own file', () => {
+    const days = ['2026-09-21', '2026-09-22', '2026-09-23'];
+    const all = days.map((d) => ({ windowStart: d, windowEnd: d }));
+    expect(tileRange('2026-09-21', '2026-09-23', all)!.windows).toHaveLength(3);
+    // Drop the middle day: the range can no longer be served per-day.
+    const missing = all.filter((w) => w.windowStart !== '2026-09-22');
+    expect(tileRange('2026-09-21', '2026-09-23', missing)).toBeNull();
+  });
+});
