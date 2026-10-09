@@ -129,8 +129,13 @@ const ALL_COLUMNS: {
   },
 ];
 
-const DEFAULT_COLS: ColumnKey[] = ['totalMiles', 'avgMpg', 'idlePct', 'idleFuelGal', 'driveTimeHrs', 'totalFuelGal', 'hardEvents'];
-const COL_STORAGE_PREFIX = 'kl_scorecard_cols';
+// Safety leads: it is Motive's own score and the figure this page exists to
+// reconcile against Motive.
+const DEFAULT_COLS: ColumnKey[] = ['motiveSafetyScore', 'totalMiles', 'avgMpg', 'idlePct', 'idleFuelGal', 'driveTimeHrs', 'totalFuelGal', 'hardEvents'];
+// Bumped to v2 so saved column sets from before the Safety column existed do
+// not hide it. Without this an existing user keeps their old selection and
+// never sees the score, which is the whole point of the page.
+const COL_STORAGE_PREFIX = 'kl_scorecard_cols_v2';
 
 function fmtDate(d: Date): string {
   const y = d.getFullYear();
