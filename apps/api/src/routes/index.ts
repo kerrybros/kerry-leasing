@@ -528,6 +528,7 @@ router.get(
           telematicsDashboardUsername: true,
           telematicsDashboardPassword: true,
           brandColorPreset: true,
+          requireReportBackedDriverData: true,
         },
       });
 
@@ -559,11 +560,18 @@ router.get(
       // drops the WHOLE range to the API, which inflates idle on yard trucks.
       // "Yesterday" is not a safe assumption: yesterday's file only lands when
       // the pull runs, so before that the freshest complete day is older.
-      const newestReportDay = await appPrisma.motiveReportIngest.findFirst({
-        where: { clerkOrgId, granularity: 'DAY', status: { in: ['ACCEPTED', 'UNVERIFIED'] } },
-        orderBy: { windowStart: 'desc' },
-        select: { windowStart: true },
-      });
+      const [newestReportDay, oldestReportDay] = await Promise.all([
+        appPrisma.motiveReportIngest.findFirst({
+          where: { clerkOrgId, granularity: 'DAY', status: { in: ['ACCEPTED', 'UNVERIFIED'] } },
+          orderBy: { windowStart: 'desc' },
+          select: { windowStart: true },
+        }),
+        appPrisma.motiveReportIngest.findFirst({
+          where: { clerkOrgId, granularity: 'DAY', status: { in: ['ACCEPTED', 'UNVERIFIED'] } },
+          orderBy: { windowStart: 'asc' },
+          select: { windowStart: true },
+        }),
+      ]);
 
       res.json({
         tracksDrivers: settings?.tracksDrivers ?? true,
@@ -580,6 +588,8 @@ router.get(
         dieselPricePerGallon,
         hasWhiparound: !!whiparoundAccount,
         reportCoverageThrough: newestReportDay?.windowStart ?? null,
+        reportCoverageFrom: oldestReportDay?.windowStart ?? null,
+        requireReportBackedDriverData: settings?.requireReportBackedDriverData ?? false,
       });
     } catch (error) {
       console.error('Error fetching org settings:', error);

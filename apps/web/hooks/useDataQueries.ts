@@ -29,6 +29,10 @@ export type OrgSettings = {
    * whole range to the API, which inflates idle on yard trucks.
    */
   reportCoverageThrough: string | null;
+  /** Oldest day we hold a Motive report file for (YYYY-MM-DD), or null. */
+  reportCoverageFrom: string | null;
+  /** True where driver figures may only come from the Motive report. */
+  requireReportBackedDriverData: boolean;
 };
 
 export type VehicleUtilization = {
