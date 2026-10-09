@@ -162,6 +162,12 @@ export type ScorecardDriver = {
 
 export type DriverScorecardResponse = {
   data: ScorecardDriver[];
+  /**
+   * Where the figures came from. NO_REPORT_COVERAGE means this customer only
+   * accepts Motive dashboard report data for drivers and no report covers the
+   * requested range, so NOTHING was served rather than falling back to the API.
+   */
+  source?: 'MOTIVE_REPORT' | 'MOTIVE_API' | 'SAMSARA_API' | 'NO_REPORT_COVERAGE';
   provider: string | null;
   fleetAvgMpg: number;
   period: { startDate: string; endDate: string };

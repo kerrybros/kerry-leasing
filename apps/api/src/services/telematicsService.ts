@@ -211,6 +211,13 @@ export class TelematicsService {
     if (coverage) {
       return this.getMotiveDriverUtilizationFromReport(orgId, coverage);
     }
+    // Fail closed where the org forbids API driver figures.
+    if (await this.requiresReportBackedDrivers(orgId)) {
+      console.warn(
+        `[telematics] ${orgId} ${startDate}..${endDate}: no daily report coverage and API driver data is forbidden for this org, serving nothing`,
+      );
+      return [];
+    }
 
     const rows = await appPrisma.motiveDriverUtilization.findMany({
       where: {
@@ -517,6 +524,21 @@ export class TelematicsService {
       agg = r.agg;
       fleetAvgMpg = r.fleetAvgMpg;
       source = 'MOTIVE_REPORT';
+    } else if (await this.requiresReportBackedDrivers(orgId)) {
+      // Fail closed: this org forbids API driver figures, so a range the
+      // report does not cover yields nothing at all. Returning API rows here
+      // would put inflated yard-truck idle in front of the customer with
+      // nothing on screen to say it was the wrong source.
+      console.warn(
+        `[telematics] ${orgId} ${startDate}..${endDate}: no report coverage and API driver data is forbidden for this org, serving nothing`,
+      );
+      return {
+        data: [],
+        provider: 'MOTIVE',
+        source: 'NO_REPORT_COVERAGE',
+        fleetAvgMpg: 0,
+        period: { startDate, endDate },
+      };
     } else {
       source = 'MOTIVE_API';
       // 1. Driver utilization records for the period
@@ -697,6 +719,24 @@ export class TelematicsService {
    * refreshed weekly, so there is no such thing as a score "for" an arbitrary
    * range; this is the value Motive itself would show on that date.
    */
+
+  /**
+   * Does this org forbid serving driver figures from the API?
+   *
+   * Where it does, a range with no report coverage yields NOTHING rather than
+   * API rows. The Motive API under-counts low speed driving and inflates idle
+   * on yard trucks by 20 to 30 points, so a silent fallback puts a wrong number
+   * in front of a customer with nothing on screen to say it is wrong. Empty and
+   * explained beats confident and false.
+   */
+  private async requiresReportBackedDrivers(orgId: string): Promise<boolean> {
+    const s = await getAppPrisma().organizationSettings.findUnique({
+      where: { clerkOrgId: orgId },
+      select: { requireReportBackedDriverData: true },
+    });
+    return s?.requireReportBackedDriverData === true;
+  }
+
   private async motiveSafetyScoresAsOf(orgId: string, asOf: string): Promise<Map<number, number>> {
     const rows = await getAppPrisma().motiveScorecardSummary.findMany({
       where: { clerkOrgId: orgId, date: { lte: asOf }, score: { not: null } },
@@ -1065,7 +1105,7 @@ export interface ScorecardDriver {
  * "Driver Fuel Performance" export (source of truth per Motive support);
  * MOTIVE_API = v2/driver_utilization fallback when no report covers the range.
  */
-export type ScorecardSource = 'MOTIVE_REPORT' | 'MOTIVE_API' | 'SAMSARA_API';
+export type ScorecardSource = 'MOTIVE_REPORT' | 'MOTIVE_API' | 'SAMSARA_API' | 'NO_REPORT_COVERAGE';
 
 export interface DriverScorecardResponse {
   data: ScorecardDriver[];

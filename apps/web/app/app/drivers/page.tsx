@@ -484,6 +484,7 @@ export default function ScorecardPage() {
     canShow,
     orgSettingsQuery,
     driverRows,
+    noReportCoverage,
     months: momMonths,
     monthlyByDriver,
     weeks: momWeeks,
@@ -593,6 +594,27 @@ export default function ScorecardPage() {
     return (
       <div className="w-full p-6">
         <Skeleton style={{ height: 300, borderRadius: 8, marginTop: 24 }} />
+      </div>
+    );
+  }
+
+  // This customer's driver figures come only from the Motive dashboard report.
+  // When no report covers the selected range we serve nothing rather than
+  // falling back to the API, which inflates idle on yard trucks. Say so plainly:
+  // a blank table with no explanation reads as "nobody drove".
+  if (noReportCoverage) {
+    return (
+      <div className="w-full p-6">
+        <EmptyState
+          title="No Motive report for this period"
+          description={
+            'Driver figures for this account come only from the Motive dashboard report, ' +
+            'never from the Motive API, which measures idle differently. No report covers ' +
+            'the selected period yet, so nothing is shown rather than numbers that would not ' +
+            'match Motive. Reports arrive the day after, so the most recent day or two may ' +
+            'not be available until the next pull.'
+          }
+        />
       </div>
     );
   }

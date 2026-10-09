@@ -65,6 +65,11 @@ model OrganizationSettings {
   telematicsDashboardUsername String?           @map("telematics_dashboard_username")
   telematicsDashboardPassword String?           @map("telematics_dashboard_password")
   brandColorPreset            BrandColorPreset? @map("brand_color_preset")
+  /// Driver figures may ONLY come from the Motive dashboard report. When no
+  /// report covers a requested range the API is NOT used as a fallback: the
+  /// surface returns nothing and says why. The API inflates idle on yard
+  /// trucks, and a silent fallback would be wrong where nobody could see it.
+  requireReportBackedDriverData Boolean @default(false) @map("require_report_backed_driver_data")
   createdAt                   DateTime          @default(now()) @map("created_at")
   updatedAt                   DateTime          @updatedAt @map("updated_at")
 
