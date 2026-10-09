@@ -333,6 +333,10 @@ export function useDriversData(startDate: string, endDate: string, scorecardEnab
     orgSettingsQuery,
     canShow,
     driverRows,
+    // Set when this customer only accepts report data for drivers and no
+    // report covers the selected range. The page must say so: an empty table
+    // with no explanation reads as 'no driving happened'.
+    noReportCoverage: scorecardQuery.data?.source === 'NO_REPORT_COVERAGE',
     months,
     monthlyByDriver,
     weeks,
