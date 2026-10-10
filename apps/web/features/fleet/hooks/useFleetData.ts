@@ -1,4 +1,5 @@
 import { useMemo, useState, useEffect } from 'react';
+import { clampToReportCoverage } from '@/lib/reportWindow';
 import { useOrganization } from '@clerk/nextjs';
 import { ALL_TYPES, formatUnitTypeList, isUnitTypeFilterActive } from '@/components/UnitTypeFilter';
 import {
@@ -48,7 +49,20 @@ export function useFleetData() {
   const canLoadDrivers =
     orgSettings.tracksDrivers &&
     (orgSettings.telematicsProvider === 'MOTIVE' || orgSettings.telematicsProvider === 'SAMSARA');
-  const driverUtilQuery = useDriverUtilizationQuery(canLoadDrivers ?? false);
+  // Ask for the window being displayed, clamped to the Motive report data we
+  // hold. Requesting an unbounded range (the old behaviour) means the API
+  // defaults to 2020 onwards, which no report covers, so a report-only
+  // customer got an empty driver view with no explanation.
+  const driverWindow = clampToReportCoverage(
+    filters.startDate,
+    filters.endDate,
+    orgSettingsQuery.data ?? undefined,
+  );
+  const driverUtilQuery = useDriverUtilizationQuery(
+    canLoadDrivers ?? false,
+    driverWindow.startDate,
+    driverWindow.endDate,
+  );
   // Repairs are loaded as a bounded, grow-only window. Default = trailing 12
   // months (covers the "this year" preset instantly and stays small enough to
   // cache). If the user picks a start date older than what's loaded, the

@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { clampToReportCoverage } from '@/lib/reportWindow';
 import { useParams, useRouter } from 'next/navigation';
 import { useDriverUtilizationQuery, useVehicleUtilizationQuery, useFleetUnitsQuery, useOrgSettingsQuery, useDriverScorecardQuery } from '@/hooks/useDataQueries';
 import { Loader2, ArrowLeft } from 'lucide-react';
@@ -82,8 +83,16 @@ export default function DriverDetailPage() {
   const orgSettingsQuery = useOrgSettingsQuery();
   const provider = orgSettingsQuery.data?.telematicsProvider;
   const canQuery = !!(orgSettingsQuery.data?.tracksDrivers && (provider === 'MOTIVE' || provider === 'SAMSARA'));
-  const driverUtilQuery = useDriverUtilizationQuery(canQuery);
-  const scorecardQuery = useDriverScorecardQuery(canQuery);
+  // Clamp to the Motive report data we hold. "All" has no bounds and every
+  // preset runs to today, neither of which the report covers, so an unclamped
+  // request returned nothing for a report-only customer.
+  const driverWindow = clampToReportCoverage(
+    periodDates.startDate,
+    periodDates.endDate,
+    orgSettingsQuery.data ?? undefined,
+  );
+  const driverUtilQuery = useDriverUtilizationQuery(canQuery, driverWindow.startDate, driverWindow.endDate);
+  const scorecardQuery = useDriverScorecardQuery(canQuery, driverWindow.startDate, driverWindow.endDate);
   const fleetUnitsQuery = useFleetUnitsQuery();
   const vehicleUtilQuery = useVehicleUtilizationQuery();
 
