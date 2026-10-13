@@ -15,6 +15,7 @@ import { TelematicsProvider } from '../telematics/types.js';
 import { cacheGetOrSet } from '../lib/redis.js';
 import { config } from '../config.js';
 import { SAFETY_EVENT_WEIGHTS, weightedEventTotal, safetyScoreFromRate, type NormalizedSafetyEvent } from './safetyScore.js';
+import { SCORED_ROWS_ONLY } from '../lib/motiveSafetyScore.js';
 import { resolveReportCoverage, resolveDailyReportCoverage, latestReportIngestToken, type ReportCoverage } from '../features/motiveReport/reportCoverage.js';
 import { mapSamsaraBehavior } from '../telematics/samsara/behaviorLabelMap.js';
 
@@ -739,7 +740,10 @@ export class TelematicsService {
 
   private async motiveSafetyScoresAsOf(orgId: string, asOf: string): Promise<Map<number, number>> {
     const rows = await getAppPrisma().motiveScorecardSummary.findMany({
-      where: { clerkOrgId: orgId, date: { lte: asOf }, score: { not: null } },
+      // A 0 is Motive saying it has no score for that driver yet, so it must not
+      // win over an older real score or be shown as the driver's number. See
+      // lib/motiveSafetyScore.ts.
+      where: { clerkOrgId: orgId, date: { lte: asOf }, score: SCORED_ROWS_ONLY },
       select: { driverId: true, date: true, score: true },
       orderBy: { date: 'desc' },
     });
