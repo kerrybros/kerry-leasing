@@ -4,12 +4,37 @@
  * last 14 days, last 2 weeks, and the current/prior month. See portalPull.ts.
  *
  *   pnpm exec tsx src/scripts/run-motive-portal-pull.ts [--dry-run] [--only-org=<id>] [--window=YYYY-MM-DD..YYYY-MM-DD]
+ *   pnpm exec tsx src/scripts/run-motive-portal-pull.ts --at-et-hour=6,9
+ *
+ * --at-et-hour makes the schedule daylight-saving proof. Render schedules in
+ * UTC, so a fixed UTC time moves an hour when the clocks change: 13:00 UTC is
+ * 09:00 EDT today and 08:00 EST from 2026-11-01, which would drag the pull into
+ * the window where Motive's overnight batch has not reliably finished. The cron
+ * fires at both candidate UTC hours for each wanted ET hour and this gate lets
+ * through only the right one, so exactly the intended runs happen year round.
  */
 import { runPortalPull, type PullWindow } from '../features/motiveReport/portalPull.js';
 import { recordTelematicsCronRun } from '../lib/telematicsCronRun.js';
 import { CronJobType } from '../generated/app-client/index.js';
 
+/** Current hour in Eastern, 0 to 23. */
+function etHour(d: Date): number {
+  return parseInt(
+    new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', hour12: false }).format(d),
+    10,
+  );
+}
+
 async function main() {
+  const atEtHour = process.argv.find((a) => a.startsWith('--at-et-hour='))?.split('=')[1];
+  if (atEtHour) {
+    const wanted = atEtHour.split(',').map((h) => parseInt(h.trim(), 10)).filter(Number.isFinite);
+    const now = etHour(new Date());
+    if (!wanted.includes(now)) {
+      console.log(`[motive-portal] ${now}:00 ET is not a pull hour (${wanted.join(', ')}). Nothing to do.`);
+      process.exit(0);
+    }
+  }
   const dryRun = process.argv.includes('--dry-run');
   const onlyOrgId = process.argv.find((a) => a.startsWith('--only-org='))?.split('=')[1];
   const windows: PullWindow[] = process.argv

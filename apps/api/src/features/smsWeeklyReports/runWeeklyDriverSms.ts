@@ -11,7 +11,11 @@ import { getAppPrisma } from '../../lib/prisma.js';
 import { cacheDelPattern } from '../../lib/redis.js';
 import { config } from '../../config.js';
 import type { DailySyncSummary, OrgSyncResultForCron } from '../../lib/telematicsCronRun.js';
-import { sendOrgWeeklyReports, type SendOrgResult } from './sendOrgWeeklyReports.js';
+import { sendOrgWeeklyReports, type SendOrgResult, type SendMode } from './sendOrgWeeklyReports.js';
+import { dispatchFrozenWeek, type DispatchResult } from './dispatchFrozenWeek.js';
+import { checkWeekReadiness, type WeekReadiness } from './weekReadiness.js';
+import { diffFrozenAgainstFresh, type FrozenDivergence } from './frozenDivergence.js';
+import { getLastWeekRange } from './dateWindow.js';
 
 export interface RunWeeklyDriverSmsOptions {
   dryRun?: boolean;
@@ -29,11 +33,28 @@ export interface RunWeeklyDriverSmsOptions {
   targetHourEt?: number;
   /** Deprecated alias kept for compatibility. Same as omitting targetHourEt. */
   ignoreSendHour?: boolean;
+  /**
+   * 'send'     one pass: build, freeze and dispatch. The original behaviour.
+   * 'prepare'  freeze the week and send nothing, so the operator report built
+   *            from those rows is the real document hours before dispatch.
+   * 'dispatch' send the frozen rows verbatim, recomputing nothing.
+   */
+  mode?: SendMode | 'dispatch';
+}
+
+export interface WeeklyRunExtras {
+  orgResults: SendOrgResult[];
+  /** prepare only: weeks held back because the data was not settled. */
+  held: Array<{ clerkOrgId: string; readiness: WeekReadiness }>;
+  /** dispatch only. */
+  dispatched: DispatchResult[];
+  /** dispatch only: figures that moved after the freeze. */
+  divergence: FrozenDivergence[];
 }
 
 export async function runWeeklyDriverSms(
   options: RunWeeklyDriverSmsOptions = {}
-): Promise<DailySyncSummary & { orgResults: SendOrgResult[] }> {
+): Promise<DailySyncSummary & WeeklyRunExtras> {
   const startedAt = Date.now();
   const prisma = getAppPrisma();
 
@@ -44,8 +65,9 @@ export async function runWeeklyDriverSms(
     console.log(
       '[smsWeeklyReports] master switch off (WEEKLY_DRIVER_SMS_ENABLED!=true) — skipping all orgs.'
     );
-    return { orgResults: [], totalOrgs: 0, successCount: 0, errorCount: 0, results: [], duration: Date.now() - startedAt };
+    return { orgResults: [], held: [], dispatched: [], divergence: [], totalOrgs: 0, successCount: 0, errorCount: 0, results: [], duration: Date.now() - startedAt };
   }
+  const mode = options.mode ?? 'send';
 
   const where: { enabled: boolean; clerkOrgId?: string; sendHourEt?: number } = { enabled: true };
   if (options.onlyOrgId) where.clerkOrgId = options.onlyOrgId;
@@ -98,14 +120,59 @@ export async function runWeeklyDriverSms(
 
   const results: OrgSyncResultForCron[] = [];
   const orgResults: SendOrgResult[] = [];
+  const held: WeeklyRunExtras['held'] = [];
+  const dispatched: DispatchResult[] = [];
+  const divergence: FrozenDivergence[] = [];
   let successCount = 0;
   let errorCount = 0;
 
   for (const cfg of configs) {
+    // Dispatch never rebuilds. It sends what prepare froze, and falls back to a
+    // full one-pass send only when there is nothing frozen to send, so a held
+    // or skipped prepare can never cost a week.
+    if (mode === 'dispatch') {
+      const d = await dispatchFrozenWeek(cfg.clerkOrgId, {
+        now: options.now,
+        dryRun: options.dryRun,
+        onlyDriverContactId: options.onlyDriverContactId,
+      });
+      dispatched.push(d);
+      if (d.hadFrozenWeek) {
+        if (d.failed === 0) successCount++;
+        else errorCount++;
+        results.push(cronRow(cfg.clerkOrgId, d.weekStart, d.failed === 0, d.queued, d.sent, d.failed));
+        if (!options.dryRun) {
+          divergence.push(
+            ...(await diffFrozenAgainstFresh(cfg.clerkOrgId, d.weekStart, options.now).catch((e) => {
+              console.warn(`[smsWeeklyReports] divergence check failed for ${cfg.clerkOrgId}: ${e.message}`);
+              return [];
+            })),
+          );
+        }
+        continue;
+      }
+      console.warn(
+        `[smsWeeklyReports] ${cfg.clerkOrgId}: nothing frozen for week ${d.weekStart}, falling back to a full send.`,
+      );
+    }
+
+    // Freezing locks the week in for every driver, so only freeze data that has
+    // settled. Not ready means hold: the fallback above still sends the week.
+    if (mode === 'prepare') {
+      const week = getLastWeekRange(options.now ?? new Date());
+      const readiness = await checkWeekReadiness(cfg.clerkOrgId, week.startDate, week.endDate);
+      if (!readiness.ready) {
+        console.warn(`[smsWeeklyReports] ${cfg.clerkOrgId}: holding the freeze, ${readiness.reason}`);
+        held.push({ clerkOrgId: cfg.clerkOrgId, readiness });
+        continue;
+      }
+    }
+
     const result = await sendOrgWeeklyReports(cfg.clerkOrgId, {
       dryRun: options.dryRun,
       onlyDriverContactId: options.onlyDriverContactId,
       now: options.now,
+      mode: mode === 'dispatch' ? 'send' : mode,
     });
     orgResults.push(result);
     if (result.success) successCount++;
@@ -138,10 +205,42 @@ export async function runWeeklyDriverSms(
 
   return {
     orgResults,
+    held,
+    dispatched,
+    divergence,
     totalOrgs: configs.length,
     successCount,
     errorCount,
     results,
     duration: Date.now() - startedAt,
+  };
+}
+
+function cronRow(
+  clerkOrgId: string,
+  date: string,
+  success: boolean,
+  queued: number,
+  sent: number,
+  failed: number,
+): OrgSyncResultForCron {
+  return {
+    clerkOrgId,
+    success,
+    date,
+    verify: false,
+    duration: 0,
+    results: [
+      {
+        endpoint: 'sms-weekly-driver-report-dispatch',
+        date,
+        recordCount: queued,
+        newCount: sent,
+        updatedCount: 0,
+        unchangedCount: Math.max(0, queued - sent - failed),
+        errorCount: failed,
+        skipped: false,
+      },
+    ],
   };
 }
