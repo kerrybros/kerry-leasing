@@ -41,28 +41,48 @@ function signed(n: number, digits = 1): string {
 }
 
 /**
- * Did this driver get their report?
+ * Which question is "did this driver get their report?" actually asking?
  *
- * On a preview nothing is actually sent, so the question becomes "would they
- * have?". A dry run marks a driver it WOULD have sent to as SKIPPED, and leaves
- * the real blocking reason (NO_CONSENT, NO_PHONE, OPTED_OUT) in place for one
- * it would not. Reading SKIPPED as a miss made a healthy preview announce that
- * all 35 drivers had been missed.
+ *  - sent     : it already happened. SENT or DELIVERED.
+ *  - preview  : a dry run, nothing was sent, so the question is "would they?".
+ *               A dry run marks a driver it WOULD have sent to as SKIPPED and
+ *               leaves the real blocking reason (NO_CONSENT, NO_PHONE,
+ *               OPTED_OUT) on one it would not. Reading SKIPPED as a miss made
+ *               a healthy preview announce that all 35 drivers had been missed.
+ *  - prepared : the week is frozen and queued but not yet dispatched. QUEUED
+ *               rows are the drivers who WILL receive exactly this card, which
+ *               is what makes the 07:00 report the real document rather than a
+ *               forecast: dispatch sends these rows verbatim and may not
+ *               recompute them.
  */
-function reached(x: WeeklyDigestDriver, preview: boolean): boolean {
-  return preview
-    ? x.channels.some((c) => c.status === 'SKIPPED')
-    : x.channels.some((c) => c.status === 'SENT' || c.status === 'DELIVERED');
+export type ReachMode = 'sent' | 'preview' | 'prepared';
+
+/** Older callers pass a `preview` boolean; keep that working. */
+function toReachMode(v: boolean | ReachMode | undefined): ReachMode {
+  if (v === true) return 'preview';
+  if (v === false || v === undefined) return 'sent';
+  return v;
+}
+
+function reached(x: WeeklyDigestDriver, mode: boolean | ReachMode): boolean {
+  switch (toReachMode(mode)) {
+    case 'preview':
+      return x.channels.some((c) => c.status === 'SKIPPED');
+    case 'prepared':
+      return x.channels.some((c) => c.status === 'QUEUED');
+    case 'sent':
+      return x.channels.some((c) => c.status === 'SENT' || c.status === 'DELIVERED');
+  }
 }
 
 /** Drivers who received a report. The clean report shows only these. */
-export function sentDrivers(d: WeeklyDigest, preview = false): WeeklyDigestDriver[] {
-  return d.drivers.filter((x) => reached(x, preview));
+export function sentDrivers(d: WeeklyDigest, mode: boolean | ReachMode = 'sent'): WeeklyDigestDriver[] {
+  return d.drivers.filter((x) => reached(x, mode));
 }
 
 /** Everyone else: nothing sent, or a send that failed. The exceptions report. */
-export function missedDrivers(d: WeeklyDigest, preview = false): WeeklyDigestDriver[] {
-  return d.drivers.filter((x) => !reached(x, preview));
+export function missedDrivers(d: WeeklyDigest, mode: boolean | ReachMode = 'sent'): WeeklyDigestDriver[] {
+  return d.drivers.filter((x) => !reached(x, mode));
 }
 
 /** Why this driver got nothing, in the clearest terms available. */
@@ -157,14 +177,14 @@ function brand(d: WeeklyDigest): string {
 }
 
 /** Subject for the clean report, the one that gets forwarded onward. */
-export function formatReportSubject(d: WeeklyDigest, opts: { preview?: boolean } = {}): string {
-  const n = sentDrivers(d, opts.preview === true).length;
+export function formatReportSubject(d: WeeklyDigest, opts: { preview?: boolean; reach?: ReachMode } = {}): string {
+  const n = sentDrivers(d, opts.reach ?? opts.preview === true).length;
   return `${brand(d)}: ${d.weekStart} to ${d.weekEnd} (${n} driver${n === 1 ? '' : 's'})`;
 }
 
 /** Subject for the exceptions report, which only goes out when there are any. */
-export function formatExceptionsSubject(d: WeeklyDigest, opts: { preview?: boolean } = {}): string {
-  const n = missedDrivers(d, opts.preview === true).length + d.errors.length;
+export function formatExceptionsSubject(d: WeeklyDigest, opts: { preview?: boolean; reach?: ReachMode } = {}): string {
+  const n = missedDrivers(d, opts.reach ?? opts.preview === true).length + d.errors.length;
   return `${brand(d)}: ${n} not sent, ${d.weekStart} to ${d.weekEnd}`;
 }
 
@@ -337,10 +357,10 @@ function fleetTable(d: WeeklyDigest): string {
  */
 export function formatWeeklyDigestHtml(
   d: WeeklyDigest,
-  opts: { preview?: boolean; hideTestBanner?: boolean } = {},
+  opts: { preview?: boolean; hideTestBanner?: boolean; reach?: ReachMode } = {},
 ): string {
   const preview = opts.preview === true;
-  const shown = sentDrivers(d, preview);
+  const shown = sentDrivers(d, opts.reach ?? preview);
   const td = `${CELL};font:14px/1.5 ${FONT};color:${INK}`;
 
   const rows = [...shown]
@@ -397,9 +417,9 @@ export function formatWeeklyDigestHtml(
  */
 export function formatExceptionsHtml(
   d: WeeklyDigest,
-  opts: { preview?: boolean; hideTestBanner?: boolean } = {},
+  opts: { preview?: boolean; hideTestBanner?: boolean; reach?: ReachMode } = {},
 ): string {
-  const missed = missedDrivers(d, opts.preview === true);
+  const missed = missedDrivers(d, opts.reach ?? opts.preview === true);
   const td = `${CELL};font:14px/1.5 ${FONT};color:${INK}`;
 
   const errorBlock = d.errors.length

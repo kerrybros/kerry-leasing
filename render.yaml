@@ -146,8 +146,19 @@ services:
         sync: false
 
   # ---------------------------------------------------------------------------
-  # Weekly driver scorecard — SMS + Email. Mondays. Requires the master switch
-  # WEEKLY_DRIVER_SMS_ENABLED=true or it no-ops.
+  # Weekly driver scorecard, SMS + Email. Tuesdays, in two phases. Requires the
+  # master switch WEEKLY_DRIVER_SMS_ENABLED=true or it no-ops.
+  #
+  # PREPARE at 07:00 ET freezes every card and emails the operator the report
+  # built from those exact rows. DISPATCH at 10:00 ET sends those same rows
+  # verbatim, recomputing nothing, so the report the operator reviewed three
+  # hours earlier cannot disagree with the cards the drivers receive.
+  #
+  # The schedule lists two UTC hours per phase and the script's --prepare-at-et
+  # / --dispatch-at-et gate lets through whichever is the right hour in Eastern.
+  # That is deliberate: Render schedules in UTC, so a single fixed time silently
+  # moves an hour when the clocks change (14:00 UTC was 10:00 EDT and becomes
+  # 09:00 EST on 2026-11-03). Exactly one run fires per phase, year round.
   # ---------------------------------------------------------------------------
   - type: cron
     name: kerry-weekly-driver-sms
@@ -156,9 +167,10 @@ services:
     plan: starter
     branch: main
     rootDir: ""
-    schedule: "0 10 * * 1"  # Mondays 10:00 UTC (~6a ET EDT / 5a EST)
+    schedule: "0 11,12,14,15 * * 2"  # Tuesdays. 11/12 UTC covers 07:00 ET, 14/15 UTC covers 10:00 ET,
+                                     # across both EDT and EST. The ET gate no-ops the other two.
     buildCommand: cd apps/api && pnpm install && pnpm prisma:app:generate && pnpm prisma:repair:generate && pnpm build
-    startCommand: cd apps/api && node dist/scripts/run-weekly-driver-sms.js
+    startCommand: cd apps/api && node dist/scripts/run-weekly-driver-sms.js --prepare-at-et=7 --dispatch-at-et=10
     envVars:
       - key: NODE_ENV
         value: production
@@ -259,12 +271,18 @@ services:
     plan: starter
     branch: main
     rootDir: ""
-    schedule: "0 13 * * *"  # daily 13:00 UTC = 09:00 ET. Motive's nightly batch publishes
-                            # yesterday between 04:00 and 08:00 ET (measured over four nights).
+    schedule: "0 10,11,13,14 * * *"  # daily. 10/11 UTC covers 06:00 ET and 13/14 UTC covers 09:00 ET,
+                                     # across both EDT and EST; the ET gate no-ops the other two.
+                                     # 09:00 is the safe hour: Motive's nightly batch publishes
+                                     # yesterday between 04:00 and 08:00 ET (measured over four
+                                     # nights). The 06:00 run exists so Tuesday's 07:00 freeze has
+                                     # the week's late driver attributions before it locks them in;
+                                     # it may find yesterday still unpublished, which costs nothing
+                                     # because the 09:00 run re-pulls and upserts the same windows.
     # --prod=false because NODE_ENV=production otherwise makes pnpm skip
     # devDependencies, and the build tools live there.
     buildCommand: pnpm install --frozen-lockfile --prod=false; pnpm run build
-    startCommand: pnpm --filter @kerry-leasing/api pull-motive-portal
+    startCommand: pnpm --filter @kerry-leasing/api pull-motive-portal --at-et-hour=6,9
     envVars:
       - key: NODE_ENV
         value: production

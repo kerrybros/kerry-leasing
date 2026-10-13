@@ -107,10 +107,37 @@ export interface WeeklyDigestDriver {
   suppressedReason?: string;
 }
 
+/**
+ * 'send'    : build, freeze and dispatch in one pass. The original behaviour.
+ * 'prepare' : build and freeze, dispatch nothing. The frozen rows become the
+ *             week's record, so the operator report built from them at 07:00 is
+ *             the real document and `dispatch` later sends those rows verbatim.
+ */
+export type SendMode = 'send' | 'prepare';
+
 export interface SendOrgOptions {
   dryRun?: boolean;
   onlyDriverContactId?: string;
   now?: Date;
+  mode?: SendMode;
+}
+
+/**
+ * Statuses that mean this driver already has their card. Nothing may re-send
+ * over one.
+ *
+ * There was no such guard. `sendOneChannel` upserted straight back to QUEUED
+ * and sent again, so a second run of the cron, a retry, or a manual invocation
+ * would text every driver a second time. That is also why an early manual send
+ * had to be refused on 2026-10-13 rather than simply run.
+ */
+export const TERMINAL_SEND_STATUSES: DriverSmsStatus[] = [
+  DriverSmsStatus.SENT,
+  DriverSmsStatus.DELIVERED,
+];
+
+export function isAlreadyDelivered(status: DriverSmsStatus | null | undefined): boolean {
+  return status != null && TERMINAL_SEND_STATUSES.includes(status);
 }
 
 function newToken(): string {
@@ -224,6 +251,7 @@ export async function sendOrgWeeklyReports(
   });
   const channels = resolveChannels(cfg?.channels);
 
+  const mode: SendMode = options.mode ?? 'send';
   const counters = { sent: 0, skipped: 0, failed: 0, noPhone: 0, optedOut: 0, noConsent: 0 };
   const out: SendOrgResult['reports'] = [];
 
@@ -243,7 +271,7 @@ export async function sendOrgWeeklyReports(
   }
 
   // Bump lastSentAt on the config so admin UI can show freshness
-  if (!options.dryRun && counters.sent > 0) {
+  if (!options.dryRun && mode === 'send' && counters.sent > 0) {
     await prisma.customerSmsReportConfig.update({
       where: { clerkOrgId },
       data: { lastSentAt: new Date() },
@@ -394,6 +422,34 @@ export async function sendOrgWeeklyReports(
       return;
     }
 
+    // Never send over a card the driver already has. Checked before the upsert
+    // because the upsert itself would reset the row to QUEUED and lose the
+    // evidence that it had already gone out.
+    const existing = await prisma.driverWeeklyReportSent
+      .findUnique({
+        where: {
+          clerkOrgId_driverContactId_weekStartDate_channel: {
+            clerkOrgId,
+            driverContactId: report.driverContactId,
+            weekStartDate: built.weekStart,
+            channel,
+          },
+        },
+        select: { status: true, twilioSid: true },
+      })
+      .catch(() => null);
+    if (isAlreadyDelivered(existing?.status)) {
+      out.push({
+        driverContactId: report.driverContactId,
+        displayName: report.displayName,
+        channel,
+        status: existing!.status,
+        twilioSid: existing!.twilioSid,
+        error: null,
+      });
+      return;
+    }
+
     // Persist FIRST, then attempt send. Upsert handles idempotency across cron retries.
     let row;
     try {
@@ -440,6 +496,22 @@ export async function sendOrgWeeklyReports(
         twilioSid: null,
         error: `persistence error: ${err.message}`,
       });
+      return;
+    }
+
+    // Prepare freezes and stops. The row now holds the exact card this driver
+    // will receive, which is what dispatch reads and what the 07:00 report is
+    // built from. Nothing is sent here.
+    if (mode === 'prepare') {
+      out.push({
+        driverContactId: report.driverContactId,
+        displayName: report.displayName,
+        channel,
+        status: row.status,
+        twilioSid: null,
+        error: skipReason,
+      });
+      if (row.status === DriverSmsStatus.SKIPPED) counters.skipped++;
       return;
     }
 
