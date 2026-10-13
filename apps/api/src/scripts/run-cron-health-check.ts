@@ -14,6 +14,12 @@
  * neither has nor needs).
  *
  * Env: APP_DATABASE_URL, MICROSOFT_GRAPH_*, REPORT_EMAIL_FROM, CRON_ALERT_EMAIL.
+ *
+ * --at-et-hour gates on Eastern time. Render schedules in UTC, so a fixed time
+ * drifts an hour at the clock change, and WHERE this watchdog sits in the
+ * morning is the whole point of it: it has to run after the early Motive pull
+ * and before the weekly freeze that consumes it. The cron fires at both
+ * candidate UTC hours and this lets through the right one.
  */
 import { getAppPrisma } from '../lib/prisma.js';
 import { sendMail, type GraphClientConfig } from '../integrations/microsoft/graphClient.js';
@@ -35,7 +41,24 @@ const graphConfig: GraphClientConfig | null = process.env.MICROSOFT_GRAPH_TENANT
 const reportEmailFrom = process.env.REPORT_EMAIL_FROM ?? null;
 const cronAlertEmail = process.env.CRON_ALERT_EMAIL ?? reportEmailFrom;
 
+/** Current hour in Eastern, 0 to 23. */
+function etHour(d: Date): number {
+  return parseInt(
+    new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', hour12: false }).format(d),
+    10,
+  );
+}
+
 async function main() {
+  const atEtHour = process.argv.find((a) => a.startsWith('--at-et-hour='))?.split('=')[1];
+  if (atEtHour) {
+    const wanted = atEtHour.split(',').map((h) => parseInt(h.trim(), 10)).filter(Number.isFinite);
+    const nowEt = etHour(new Date());
+    if (!wanted.includes(nowEt)) {
+      console.log(`[cron-health] ${nowEt}:00 ET is not a check hour (${wanted.join(', ')}). Nothing to do.`);
+      process.exit(0);
+    }
+  }
   const prisma = getAppPrisma();
   const now = new Date();
 

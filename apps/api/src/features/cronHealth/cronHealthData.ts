@@ -57,23 +57,27 @@ export async function gatherCronHealthChecks(): Promise<CronHealthCheck[]> {
     },
     { label: 'EIA diesel price', lastSuccessAt: diesel?.updatedAt ?? null, maxAgeHours: 48 },
     {
-      // 24h, and the watchdog runs at 13:30, BETWEEN the 13:00 portal pull and
-      // the 14:00 Tuesday send.
+      // WHERE this check runs is the point of it, so the timing is written
+      // down rather than left to be rediscovered.
       //
-      // Two problems put it there. With the watchdog and the pull both at
-      // 13:00 and a 26h limit, a pull that failed at 13:01 still looked ~23h
-      // fresh and went unreported for a day; on 2026-09-30 Render's own email
-      // beat this check to a real failure. Moving it to 14:00 fixed that but
-      // landed it in the same minute as the Tuesday send, so the alert and the
-      // send raced and the week could go out unheralded either way.
+      // It runs at 06:30 ET, between the 06:00 ET Motive pull and the 07:00 ET
+      // weekly freeze. The freeze is the first thing that consumes the pull,
+      // and it locks the week in for every driver, so a dead pull has to shout
+      // BEFORE it rather than after.
       //
-      // At 13:30 a missed pull reads ~24.5h and alarms 30 minutes BEFORE the
-      // send that depends on it, while a healthy pull reads ~0.5h. The pull
-      // takes about two minutes, so that leaves roughly 15 times its normal
-      // duration of slack before a merely slow pull could cry wolf.
+      // It used to run at 13:30 UTC, chosen to sit between a 13:00 pull and a
+      // 14:00 send. Both of those moved on 2026-10-13 when the send was split
+      // into prepare and dispatch, which left this sitting after the freeze
+      // instead of before it, and drifting to 08:30 ET every November.
+      //
+      // 12h rather than 24h, because the pull now runs twice a day (06:00 and
+      // 09:00 ET). At 06:30 a healthy intake is half an hour old and a missed
+      // 06:00 pull is 21.5 hours old, so anything between those two separates
+      // them cleanly; 24h could not tell them apart and stayed silent through a
+      // failed morning pull.
       label: 'Motive report intake',
       lastSuccessAt: reportIngest,
-      maxAgeHours: 24,
+      maxAgeHours: 12,
       live: reportEverIngested != null,
       note: reportEverIngested ? undefined : 'not live: no report file ingested yet',
     },
