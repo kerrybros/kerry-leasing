@@ -203,10 +203,34 @@ async function main() {
   // document that lands in the inbox. A report failure is caught and logged,
   // never allowed to fail the send: the drivers already have their cards.
 
+  // Dispatch normally has nothing to email: prepare already reported on these
+  // exact cards at 07:00. But if it found nothing frozen it falls back to a
+  // full send, and then no early report was ever sent, so the week would go out
+  // with no record reaching anyone. In that case report it like an ordinary
+  // send, and say why the early report did not arrive.
+  const fellBack =
+    mode === 'dispatch' &&
+    summary.dispatched.some((d) => !d.hadFrozenWeek) &&
+    summary.orgResults.length > 0;
+  if (fellBack) {
+    await emailOperator(
+      'Weekly driver report: sent without the early report',
+      [
+        'Nothing was frozen for this week, so the 07:00 report did not go out and',
+        'the drivers were sent from a fresh build instead, which is how this worked',
+        'before the split. The cards are correct; what is missing is your chance to',
+        'read them first.',
+        '',
+        'Most likely the 07:00 freeze was held because the week was not settled.',
+        'Check this cron\'s 07:00 ET run for the reason.',
+      ].join('\n'),
+    );
+  }
+
   // Dispatch sends cards that were already reported on at prepare time, so it
   // does not email the week again. It speaks up only when something needs a
   // human: a figure that moved after the freeze, or a card that did not go.
-  if (mode === 'dispatch') {
+  if (mode === 'dispatch' && !fellBack) {
     const failed = summary.dispatched.reduce((a, d) => a + d.failed, 0);
     const note = formatDivergenceText(summary.divergence);
     if (note || failed > 0) {
@@ -246,7 +270,7 @@ async function main() {
     );
   }
 
-  if (mode !== 'dispatch' && summary.orgResults.length > 0) {
+  if ((mode !== 'dispatch' || fellBack) && summary.orgResults.length > 0) {
     let digest = buildWeeklyDigest(summary.orgResults);
 
     // A report has to describe real cards. --final states what a week's drivers
