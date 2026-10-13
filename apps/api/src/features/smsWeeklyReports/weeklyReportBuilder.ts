@@ -11,6 +11,7 @@
 import { TelematicsService, type ScorecardDriver } from '../../services/telematicsService.js';
 import { normalizePhone } from '../drivers/phone.js';
 import { getAppPrisma } from '../../lib/prisma.js';
+import { SCORED_ROWS_ONLY, isScored } from '../../lib/motiveSafetyScore.js';
 import { rosterImpliesSmsConsent, initialConsentFields } from '../smsConsent/rosterConsent.js';
 import { DriverContactSource, DriverSmsConsentStatus } from '../../generated/app-client/index.js';
 import { getLastWeekRange, getTrailing4WeekRanges, type WeekRange } from './dateWindow.js';
@@ -177,7 +178,10 @@ export async function buildWeeklyReports(
     where: {
       clerkOrgId: orgId,
       date: { gte: trailing[0].startDate, lte: currentAnchor },
-      score: { not: null },
+      // 0 means Motive has no score for that driver yet, not a score of zero,
+      // so it must not land in the trend or the prior-weeks average. See
+      // lib/motiveSafetyScore.ts.
+      score: SCORED_ROWS_ONLY,
     },
     select: { driverId: true, date: true, score: true },
     orderBy: { date: 'desc' },
@@ -214,7 +218,8 @@ export async function buildWeeklyReports(
         );
         liveCurrent = new Map();
         for (const r of rows) {
-          if (r.driver?.id != null && r.score != null) liveCurrent.set(r.driver.id, r.score);
+          // Same rule as the stored rows: a 0 here is "no score yet".
+          if (r.driver?.id != null && isScored(r.score)) liveCurrent.set(r.driver.id, r.score);
         }
       }
     }
