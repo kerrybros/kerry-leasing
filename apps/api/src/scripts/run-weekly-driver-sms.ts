@@ -145,9 +145,19 @@ async function main() {
   const showBanner = dryRun && !finalRender && !isPrepare;
   const reach: ReachMode = isPrepare ? 'prepared' : showBanner ? 'preview' : 'sent';
 
+  // An email that never arrives is the one failure this job cannot shrug off.
+  // The whole point of the 07:00 phase is a document in James's inbox, and a
+  // Graph outage used to be swallowed: the catch logged, the cron exited 0, and
+  // nothing anywhere said the report had not been sent. The send itself still
+  // must not fail over it (the drivers already have their cards), so the error
+  // is still caught and the run still finishes. It just exits non-zero at the
+  // end, which is what makes Render's own failure alert fire.
+  let emailFailures = 0;
+
   /** Short operator note, used by dispatch and by a held prepare. */
   async function emailOperator(subject: string, text: string): Promise<void> {
     if (!graphConfig || !reportEmailFrom || digestEmails.length === 0) {
+      emailFailures++;
       console.warn(`[report] not emailed (mail not configured): ${subject}`);
       console.log(text);
       return;
@@ -163,6 +173,7 @@ async function main() {
       });
       console.log(`[report] emailed "${subject}" to ${digestEmails.join(', ')}`);
     } catch (e: any) {
+      emailFailures++;
       console.error(`[report] failed to email "${subject}": ${e?.message ?? e}`);
     }
   }
@@ -345,18 +356,26 @@ async function main() {
           });
           console.log(`[report] emailed "${mail.subject}" to ${digestEmails.join(', ')}`);
         } catch (e: any) {
+          emailFailures++;
           console.error(`[report] failed to email "${mail.subject}": ${e?.message ?? e}`);
         }
       }
       if (!exceptions) console.log('[exceptions] not emailed: every driver received their report');
     } else {
+      emailFailures++;
       console.warn('[report] not emailed: WEEKLY_DIGEST_EMAIL, REPORT_EMAIL_FROM or MICROSOFT_GRAPH_* not set');
       console.log(`\n${clean.subject}\n\n${clean.text}`);
     }
   }
 
-  const exitCode = summary.errorCount > 0 && summary.successCount === 0 ? 1 : 0;
-  process.exit(exitCode);
+  if (emailFailures > 0) {
+    console.error(
+      `[report] ${emailFailures} operator email(s) did not go out. Exiting non-zero so the ` +
+        'failure is visible rather than silent.',
+    );
+  }
+  const sendFailed = summary.errorCount > 0 && summary.successCount === 0;
+  process.exit(sendFailed || emailFailures > 0 ? 1 : 0);
 }
 
 main().catch((e) => {
