@@ -14,6 +14,7 @@ import { getAppPrisma } from '../../lib/prisma.js';
 import { readCredentials } from '../../lib/credentials.js';
 import { WhiparoundClient, WhiparoundAuthError } from './client.js';
 import { syncWhiparoundDrivers, type DriverSyncStepResult } from './syncDrivers.js';
+import { defectRefFromRaw } from './fields.js';
 
 // ---------------------------------------------------------------------------
 // Raw API shapes (subset of fields we care about)
@@ -37,7 +38,8 @@ interface RawInspection {
 
 interface RawDefect {
   id: number;
-  reference?: string | null;           // FA-XXXX label
+  ui_number?: string | null;           // FA-XXXX label (v4)
+  reference?: string | null;           // older name for the same label
   inspection_id?: number | null;
   asset?: { id?: number; name?: string } | null;
   asset_id?: number | null;
@@ -250,7 +252,7 @@ async function syncDefects(
       const rawResponse = jsonSafeForDb(raw as object);
 
       const data = {
-        defectRef: textField(raw.reference),
+        defectRef: defectRefFromRaw(raw),
         inspectionId: safeInt(raw.inspection_id),
         assetId,
         assetName,

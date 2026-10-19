@@ -9,6 +9,7 @@
 import { Router } from 'express';
 import { clerkAuthMiddleware, requireOrg, AuthRequest } from '../middleware/auth.js';
 import { getAppPrisma } from '../lib/prisma.js';
+import { assetNameByAssetId } from '../integrations/whiparound/fields.js';
 
 const router = Router();
 
@@ -265,8 +266,22 @@ router.get('/inspections', async (req: AuthRequest, res) => {
       defectsByInspectionId.get(d.inspectionId)!.push(d);
     }
 
+    // Inspections only store asset_id. Resolve the unit name from defects so
+    // the page can show it and filter by unit type. Assets that never had a
+    // defect stay null.
+    const assetIds = [...new Set(inspectionRows.map((i) => i.assetId).filter((id): id is number => id != null))];
+    const assetNameRows = assetIds.length > 0
+      ? await appPrisma.whiparoundDefect.findMany({
+          where: { clerkOrgId, assetId: { in: assetIds }, assetName: { not: null } },
+          select: { assetId: true, assetName: true },
+          orderBy: { defectCreatedAt: { sort: 'desc', nulls: 'last' } },
+        })
+      : [];
+    const assetNames = assetNameByAssetId(assetNameRows);
+
     const inspections = inspectionRows.map((i) => ({
       ...i,
+      assetName: i.assetId != null ? assetNames.get(i.assetId) ?? null : null,
       defects: defectsByInspectionId.get(i.whiparoundId) ?? [],
     }));
 

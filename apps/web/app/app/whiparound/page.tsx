@@ -383,7 +383,7 @@ function InspectionsTable({
                   </td>
                   <td className="py-3 pr-6 font-mono text-xs text-primary">{ins.whiparoundId}</td>
                   <td className="py-3 pr-6">{ins.driverName ?? '—'}</td>
-                  <td className="py-3 pr-6 font-medium">{ins.assetId ?? '—'}</td>
+                  <td className="py-3 pr-6 font-medium">{ins.assetName ?? ins.assetId ?? '—'}</td>
                   <td className="py-3 pr-6 text-muted-foreground whitespace-nowrap">
                     {formatDateTime(ins.inspectedAt)}
                   </td>
@@ -535,7 +535,7 @@ export default function WhiparoundPage() {
   const inspections = useMemo(() => {
     if (selectedUnitTypes.length === 0) return allInspections;
     return allInspections.filter(i => {
-      const t = unitTypeByAssetName.get(((i as any).assetName ?? '').trim().toLowerCase());
+      const t = unitTypeByAssetName.get((i.assetName ?? '').trim().toLowerCase());
       return !!t && selectedUnitTypes.includes(t);
     });
   }, [allInspections, selectedUnitTypes, unitTypeByAssetName]);
