@@ -16,6 +16,7 @@ import {
 import { requireProvider } from '../middleware/providerValidation.js';
 import { getAppPrisma } from '../lib/prisma.js';
 import { getSamsaraIdleAggregatesByDate } from '../telematics/samsara/idleAggregates.js';
+import { motiveUtilizationRowToSeconds } from '../telematics/motive/utilizationUnits.js';
 import { TelematicsProvider, TelematicsProviderStatus } from '../telematics/types.js';
 import { TtlCache } from '../lib/ttlCache.js';
 import { syncMotiveOrgForDate } from '../telematics/motive/syncService.js';
@@ -478,7 +479,9 @@ router.post(
 );
 
 // GET /telematics/motive/vehicle-utilization
-// Returns raw Motive vehicle utilization data for the org (totalDistance from API)
+// Returns Motive vehicle utilization rows for the org (totalDistance from API).
+// idleTime and drivingTime are stored in minutes and returned in seconds, the
+// same contract as /telematics/samsara/vehicle-stats and the normalized routes.
 router.get(
   '/motive/vehicle-utilization',
   clerkAuthMiddleware,
@@ -497,10 +500,11 @@ router.get(
 
       const cacheKey = `telematics:motive:vehicle-utilization:${orgId}`;
       const { value: allRecords, hit } = await telematicsCache.getOrSet(cacheKey, async () => {
-        return await appClient.motiveVehicleUtilization.findMany({
+        const rows = await appClient.motiveVehicleUtilization.findMany({
           where: { clerkOrgId: orgId },
           orderBy: [{ date: 'desc' }, { vehicleId: 'asc' }],
         });
+        return rows.map(motiveUtilizationRowToSeconds);
       });
 
       const total = Array.isArray(allRecords) ? allRecords.length : 0;
@@ -531,7 +535,9 @@ router.get(
 );
 
 // GET /telematics/motive/driver-utilization
-// Returns Motive driver utilization with totalDistance (miles) from driving_periods
+// Returns Motive driver utilization with totalDistance (miles) from driving_periods.
+// idleTime and drivingTime are already seconds: syncDriverUtilization stores
+// Motive's values as-is, unlike motive_vehicle_utilization.
 router.get(
   '/motive/driver-utilization',
   clerkAuthMiddleware,

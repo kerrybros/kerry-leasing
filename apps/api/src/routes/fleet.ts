@@ -97,12 +97,14 @@ router.get('/units', clerkAuthMiddleware, requireOrg, async (req: AuthRequest, r
             utilizationPercentage: true,
             totalDistance: true,
             idleTime: true,
+            drivingTime: true,
             totalFuel: true,
             idleFuel: true,
           },
         });
+        // Stored in minutes; the list returns seconds, like the Samsara branch below.
         for (const rec of records) {
-          telematicsMap.set(rec.vin, rec);
+          telematicsMap.set(rec.vin, motiveUtilizationRowToSeconds(rec));
         }
       } else if (providerAccount?.provider === 'SAMSARA') {
         const records = await appPrisma.samsaraVehicleUtilization.findMany({
