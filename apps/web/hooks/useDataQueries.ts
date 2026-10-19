@@ -265,6 +265,8 @@ export type WhiparoundInspection = {
   driverId: number | null;
   driverName: string | null;
   assetId: number | null;
+  /** Unit name resolved from defects on the same asset; null if the asset never had one. */
+  assetName: string | null;
   teamId: number | null;
   formId: number | null;
   completion: string | null;

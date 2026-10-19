@@ -11,6 +11,7 @@ import { getAppPrisma, getRepairPrisma } from '../lib/prisma.js';
 import { REPAIR_SHOP_ORG_ID } from '../config/repairShop.js';
 import { getSamsaraIdleAggregatesByDate } from '../telematics/samsara/idleAggregates.js';
 import { SamsaraConversions } from '../telematics/samsara/endpoints/fuelEnergyReports.js';
+import { motiveUtilizationRowToSeconds } from '../telematics/motive/utilizationUnits.js';
 import { getDieselPricePerGallon } from '../lib/eiaFuelPrice.js';
 import { cacheGetOrSet, getRedis } from '../lib/redis.js';
 import { config } from '../config.js';
@@ -365,13 +366,15 @@ router.get('/units/:identifier', clerkAuthMiddleware, requireOrg, async (req: Au
     if (servicePlanUnit.telematicsVin) {
 
       if (providerAccount?.provider === 'MOTIVE') {
-        telematicsHistory = await appPrisma.motiveVehicleUtilization.findMany({
+        // Stored in minutes; this response is seconds for both providers.
+        const motiveRows = await appPrisma.motiveVehicleUtilization.findMany({
           where: {
             clerkOrgId,
             vin: servicePlanUnit.telematicsVin,
           },
           orderBy: { date: 'desc' },
         });
+        telematicsHistory = motiveRows.map(motiveUtilizationRowToSeconds);
 
         // Derive odometer from the latest driving period that has an odometer reading
         const latestPeriod = await appPrisma.motiveDrivingPeriod.findFirst({
