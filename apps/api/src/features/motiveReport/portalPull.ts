@@ -14,7 +14,9 @@
  * encrypted credentials blob as portalEmail / portalPassword). Since
  * 2026-09-30 that is an OAuth provider on auth.gomotive.com rather than a form
  * served directly, so the login follows redirects, reads the form it finds and
- * carries its hidden fields back untouched. The resulting `auth_token` cookie
+ * carries its hidden fields back untouched. Since 2026-10-23 Motive sometimes
+ * serves an email-first variant (/login/lookup) that asks for the password on
+ * a second page; the login submits the email step and reads the next form. The resulting `auth_token` cookie
  * is then sent as X-Web-User-Auth, exactly as the dashboard does. Nothing is
  * cached between runs.
  *
@@ -85,6 +87,7 @@ export interface LoginForm {
   /** Every other input on the form, carried through untouched (CSRF, OAuth client_id, return_url). */
   fields: Record<string, string>;
   emailField: string;
+  /** Empty on the email-first step, which asks for the password on the next page. */
   passwordField: string;
 }
 
@@ -98,28 +101,40 @@ export interface LoginForm {
  * input through untouched means the CSRF token, the OAuth client_id and the
  * return_url all come along without this code needing to know they exist.
  *
- * The form is identified by the password input, which is the one thing a
- * sign-in form cannot be without.
+ * The form is identified by the password input. Failing that, a form with an
+ * email field and no password is the email-first step Motive began serving on
+ * 2026-10-23 (/login/lookup), returned with an empty passwordField so the
+ * caller submits the email and reads the password form on the next page.
  */
 export function parseLoginForm(html: string): LoginForm | null {
-  for (const form of html.match(/<form[\s\S]*?<\/form>/gi) ?? []) {
+  const forms = html.match(/<form[\s\S]*?<\/form>/gi) ?? [];
+  for (const form of forms) {
     if (!/<input[^>]*type="password"/i.test(form)) continue;
-    const action = form.match(/<form[^>]*\saction="([^"]*)"/i)?.[1] ?? '';
-    const fields: Record<string, string> = {};
-    let emailField = '';
-    let passwordField = '';
-    for (const input of form.match(/<input[^>]*>/gi) ?? []) {
-      const name = input.match(/\sname="([^"]*)"/i)?.[1];
-      if (!name) continue;
-      const type = (input.match(/\stype="([^"]*)"/i)?.[1] ?? 'text').toLowerCase();
-      if (type === 'password') { passwordField = name; continue; }
-      if (type === 'submit' || type === 'button') continue;
-      if (!emailField && /e-?mail|username|login/i.test(name)) { emailField = name; continue; }
-      fields[name] = decodeEntities(input.match(/\svalue="([^"]*)"/i)?.[1] ?? '');
-    }
-    if (emailField && passwordField) return { action, fields, emailField, passwordField };
+    const parsed = readForm(form);
+    if (parsed.emailField && parsed.passwordField) return parsed;
+  }
+  for (const form of forms) {
+    const parsed = readForm(form);
+    if (parsed.emailField) return parsed;
   }
   return null;
+}
+
+function readForm(form: string): LoginForm {
+  const action = form.match(/<form[^>]*\saction="([^"]*)"/i)?.[1] ?? '';
+  const fields: Record<string, string> = {};
+  let emailField = '';
+  let passwordField = '';
+  for (const input of form.match(/<input[^>]*>/gi) ?? []) {
+    const name = input.match(/\sname="([^"]*)"/i)?.[1];
+    if (!name) continue;
+    const type = (input.match(/\stype="([^"]*)"/i)?.[1] ?? 'text').toLowerCase();
+    if (type === 'password') { passwordField = name; continue; }
+    if (type === 'submit' || type === 'button') continue;
+    if (!emailField && /e-?mail|username|login/i.test(name)) { emailField = name; continue; }
+    fields[name] = decodeEntities(input.match(/\svalue="([^"]*)"/i)?.[1] ?? '');
+  }
+  return { action, fields, emailField, passwordField };
 }
 
 /** Sign in and return the session token the dashboard sends as X-Web-User-Auth. */
@@ -128,37 +143,62 @@ export async function portalLogin(email: string, password: string): Promise<stri
   const signal = AbortSignal.timeout(LOGIN_TIMEOUT_MS);
   const headers = { 'User-Agent': BROWSER_UA };
 
+  /** Follow 3xx hops from resp, carrying cookies; returns the final response and its URL. */
+  async function follow(resp: Response, url: string, stopAtSession = false): Promise<[Response, string]> {
+    for (let hop = 0; hop < MAX_REDIRECTS && resp.status >= 300 && resp.status < 400; hop++) {
+      const location = resp.headers.get('location');
+      if (!location) break;
+      url = new URL(location, url).toString();
+      resp = await fetch(url, { redirect: 'manual', headers: { ...headers, Cookie: jar.header() }, signal });
+      jar.absorb(resp.headers);
+      if (stopAtSession && jar.get('auth_token')) break;
+    }
+    return [resp, url];
+  }
+
+  /** POST a form with every hidden field carried back untouched; returns the response and the URL posted to. */
+  async function submit(form: LoginForm, pageUrl: string, values: Record<string, string>): Promise<[Response, string]> {
+    const body = new URLSearchParams({ ...form.fields, ...values });
+    const postUrl = new URL(form.action || pageUrl, pageUrl).toString();
+    const r = await fetch(postUrl, {
+      method: 'POST',
+      redirect: 'manual',
+      headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded', Cookie: jar.header(), Referer: pageUrl },
+      body: body.toString(),
+      signal,
+    });
+    jar.absorb(r.headers);
+    return [r, postUrl];
+  }
+
   // 1. Walk from the entry URL to wherever sign-in actually lives. Motive
   //    redirects this to its OAuth provider; following it means a future move
   //    costs us nothing.
   let url = `${LOGIN_ENTRY}?return_url=${encodeURIComponent(RETURN_URL)}`;
   let resp = await fetch(url, { redirect: 'manual', headers, signal });
   jar.absorb(resp.headers);
-  for (let hop = 0; hop < MAX_REDIRECTS && resp.status >= 300 && resp.status < 400; hop++) {
-    const location = resp.headers.get('location');
-    if (!location) break;
-    url = new URL(location, url).toString();
-    resp = await fetch(url, { redirect: 'manual', headers: { ...headers, Cookie: jar.header() }, signal });
-    jar.absorb(resp.headers);
-  }
+  [resp, url] = await follow(resp, url);
   if (!resp.ok) throw new Error(`Motive sign-in page returned HTTP ${resp.status} (last URL ${url})`);
 
-  const form = parseLoginForm(await resp.text());
+  let form = parseLoginForm(await resp.text());
   if (!form) {
     throw new Error(`Motive sign-in page at ${url} carried no recognisable login form. The form has changed.`);
   }
 
-  // 2. Submit it, carrying every hidden field back untouched.
-  const body = new URLSearchParams({ ...form.fields, [form.emailField]: email, [form.passwordField]: password });
-  const postUrl = new URL(form.action || url, url).toString();
-  resp = await fetch(postUrl, {
-    method: 'POST',
-    redirect: 'manual',
-    headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded', Cookie: jar.header(), Referer: url },
-    body: body.toString(),
-    signal,
-  });
-  jar.absorb(resp.headers);
+  // 1b. The email-first variant asks for the email alone, then serves the
+  //     password form on the next page.
+  if (!form.passwordField) {
+    [resp, url] = await submit(form, url, { [form.emailField]: email });
+    [resp, url] = await follow(resp, url);
+    if (!resp.ok) throw new Error(`Motive email step returned HTTP ${resp.status} (last URL ${url})`);
+    form = parseLoginForm(await resp.text());
+    if (!form?.passwordField) {
+      throw new Error(`Motive email step at ${url} led to no password form. The flow has changed.`);
+    }
+  }
+
+  // 2. Submit the password form.
+  [resp, url] = await submit(form, url, { [form.emailField]: email, [form.passwordField]: password });
 
   // A rejected sign-in re-renders the form (200) instead of redirecting away.
   if (resp.status === 200) {
@@ -168,17 +208,9 @@ export async function portalLogin(email: string, password: string): Promise<stri
       : 'the form was re-rendered without redirecting';
     throw new Error(`Motive login failed: ${reason}.`);
   }
-  url = postUrl;
 
   // 3. Follow the OAuth hops until the dashboard session cookie is set.
-  for (let hop = 0; hop < MAX_REDIRECTS && resp.status >= 300 && resp.status < 400; hop++) {
-    const location = resp.headers.get('location');
-    if (!location) break;
-    url = new URL(location, url).toString();
-    resp = await fetch(url, { redirect: 'manual', headers: { ...headers, Cookie: jar.header() }, signal });
-    jar.absorb(resp.headers);
-    if (jar.get('auth_token')) break;
-  }
+  [resp, url] = await follow(resp, url, true);
 
   const token = jar.get('auth_token');
   if (!token) {

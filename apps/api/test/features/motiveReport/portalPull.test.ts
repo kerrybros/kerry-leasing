@@ -169,8 +169,35 @@ describe('parseLoginForm', () => {
     expect(parseLoginForm(page)!.action).toBe('/login');
   });
 
-  it('returns null when no password field exists, so the caller can fail loudly', () => {
-    expect(parseLoginForm('<form action="/x"><input type="text" name="email" /></form>')).toBeNull();
+  it('returns null when no sign-in form exists, so the caller can fail loudly', () => {
+    expect(parseLoginForm('<form action="/search"><input type="text" name="q" /></form>')).toBeNull();
     expect(parseLoginForm('<html><body>JavaScript challenge</body></html>')).toBeNull();
+  });
+
+  // The email-first variant served by auth.gomotive.com/login/lookup on
+  // 2026-10-23, trimmed. It asks for the email alone and shows the password on
+  // the next page; it failed the 06:00 ET pull that day.
+  const LOOKUP = `
+    <form id="sign-in-page-form" class="sign-in-v2-form" action="/login/authenticate" accept-charset="UTF-8" method="post">
+      <input type="hidden" name="authenticity_token" value="tok123" autocomplete="off" />
+      <input type="text" name="email" id="user_profile_email" required="required" autocomplete="username" class="form-control" />
+      <input type="hidden" name="client_id" id="client_id" value="8OlxtHqCxDMvMN7I" autocomplete="off" />
+      <input type="hidden" name="client_secret" id="client_secret" autocomplete="off" />
+      <input type="hidden" name="return_url" id="return_url" value="https://auth.gomotive.com/oauth/authorize?a=1&amp;b=2" autocomplete="off" />
+      <button class="btn" type="submit">Continue</button>
+    </form>`;
+
+  it('reads the email-first step as a form with no password field yet', () => {
+    const f = parseLoginForm(LOOKUP)!;
+    expect(f.action).toBe('/login/authenticate');
+    expect(f.emailField).toBe('email');
+    expect(f.passwordField).toBe('');
+    expect(f.fields.authenticity_token).toBe('tok123');
+    expect(f.fields.return_url).toBe('https://auth.gomotive.com/oauth/authorize?a=1&b=2');
+  });
+
+  it('prefers a full sign-in form over an email-only one on the same page', () => {
+    const page = `${LOOKUP}<form action="/login"><input type="text" name="email" /><input type="password" name="password" /></form>`;
+    expect(parseLoginForm(page)!.passwordField).toBe('password');
   });
 });
